@@ -1,0 +1,15 @@
+node_modules
+dist
+.env
+.DS_Store
+
+# ไฟล์ชั่วคราวที่ vite สร้างทุกครั้งที่ build (ตอนนี้มีค้างในโฟลเดอร์เป็นร้อยไฟล์)
+vite.config.js.timestamp-*
+
+# ไฟล์สำรองข้อมูล + ไฟล์ตั้งค่าที่มีรหัสผ่านฐานข้อมูล — ห้ามขึ้น git เด็ดขาด
+*.dump
+*.dump.suspect
+backup/projects.conf
+backup/*.local.*
+.vercel
+.env*

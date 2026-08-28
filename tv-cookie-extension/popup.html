@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body { width: 300px; font-family: system-ui, -apple-system, "Noto Sans Thai", sans-serif; padding: 12px; color: #1e293b; }
+    h1 { font-size: 14px; margin: 0 0 8px; }
+    label { font-size: 11px; color: #64748b; display: block; margin: 8px 0 2px; }
+    input { width: 100%; box-sizing: border-box; border: 1px solid #cbd5e1; border-radius: 6px; padding: 6px 8px; font-size: 12px; font-family: ui-monospace, monospace; }
+    button { margin-top: 10px; width: 100%; border: 0; border-radius: 6px; padding: 8px; font-size: 13px; font-weight: 600; cursor: pointer; }
+    .primary { background: #4f46e5; color: #fff; }
+    .ghost { background: #f1f5f9; color: #334155; }
+    #status { font-size: 11px; margin-top: 8px; min-height: 16px; }
+    .ok { color: #16a34a; } .err { color: #dc2626; }
+  </style>
+</head>
+<body>
+  <h1>TV Cookie Sync</h1>
+  <label>Endpoint URL</label>
+  <input id="url" placeholder="https://xxxx.supabase.co/functions/v1/tradingview" />
+  <label>Token (ของแบรนด์ — ก๊อปจากหน้าตั้งค่า TV)</label>
+  <input id="token" placeholder="ingest token" />
+  <button id="save" class="ghost">บันทึกการตั้งค่า</button>
+  <button id="send" class="primary">ส่งคุกกี้เดี๋ยวนี้</button>
+  <div id="status"></div>
+  <script src="popup.js"></script>
+</body>
+</html>

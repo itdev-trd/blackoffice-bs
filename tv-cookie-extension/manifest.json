@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "TV Cookie Sync",
+  "version": "1.0.0",
+  "description": "ส่งคุกกี้ TradingView (sessionid) เข้าระบบอัตโนมัติเมื่อล็อกอิน",
+  "permissions": ["cookies", "storage"],
+  "host_permissions": [
+    "https://*.tradingview.com/*",
+    "https://*.supabase.co/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_popup": "popup.html", "default_title": "TV Cookie Sync" }
+}

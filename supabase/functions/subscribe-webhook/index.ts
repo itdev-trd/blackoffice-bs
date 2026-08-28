@@ -1,0 +1,156 @@
+// supabase/functions/subscribe-webhook/index.ts
+// ผูกทุกเพจเข้ากับ webhook ของแอป (subscribed_apps) เพื่อให้ Meta ส่ง event มาหา meta-webhook
+//   action "subscribe" (ค่าเริ่มต้น) → POST /{page_id}/subscribed_apps ทุกเพจ
+//   action "status"                  → GET  /{page_id}/subscribed_apps ดูว่าผูกแล้วยัง
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getMetaToken } from "../_shared/meta.ts";
+import { getMetaPages } from "../_shared/meta-pages.ts";
+import { authorizeRequest } from "../_shared/permissions.ts";
+import { getOrRefreshCommentAdMap, getSelectedCommentPageIds } from "../_shared/comment-realtime.ts";
+import { getMetaBackgroundGuard, recordMetaUsage } from "../_shared/meta-rate.ts";
+
+const GRAPH_VERSION = "v22.0"; // v19 หมดอายุแล้ว (sunset ต้นปี 2026)
+// message_reads = ลูกค้าเปิดอ่านข้อความเราแล้ว (ใช้โชว์สถานะ "อ่านแล้ว" ในแอป)
+// feed = คอมเมนต์/โพสต์บนหน้าเพจ (ใช้รับคอมเมนต์ใต้โฆษณาแบบเรียลไทม์)
+const BASE_FIELDS = "messages,messaging_postbacks,messaging_referrals,message_echoes,message_reads";
+const INSTAGRAM_FIELDS = "messages,messaging_postbacks,messaging_seen,messaging_handover,message_reactions,messaging_referral,messaging_optins,message_edit,comments,live_comments,standby";
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+async function fetchJson(url: string, init?: RequestInit, admin?: any, source = "subscribe_webhook") {
+  const r = await fetch(url, init);
+  if (admin) {
+    const usage = await recordMetaUsage(admin, r, source);
+    if (usage.blocked) throw new Error("Meta usage reached the background safety threshold");
+  }
+  return await r.json().catch(() => ({}));
+}
+
+async function ensureAppPageWebhook(base: string, userToken: string, admin: any) {
+  const appSecret = Deno.env.get("META_APP_SECRET") || "";
+  const verifyToken = Deno.env.get("META_VERIFY_TOKEN") || "";
+  const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
+  if (!appSecret || !verifyToken || !supabaseUrl) {
+    return { success: false, error: "META_APP_SECRET / META_VERIFY_TOKEN / SUPABASE_URL ไม่ครบ" };
+  }
+  const debug = await fetchJson(`${base}/debug_token?input_token=${encodeURIComponent(userToken)}&access_token=${encodeURIComponent(userToken)}`, undefined, admin);
+  const appId = debug?.data?.app_id ? String(debug.data.app_id) : "";
+  if (!appId) return { success: false, error: debug?.error?.message || "หา Meta App ID ไม่สำเร็จ" };
+  const appToken = `${appId}|${appSecret}`;
+  const callbackUrl = `${supabaseUrl}/functions/v1/meta-webhook`;
+  const fields = `${BASE_FIELDS},feed`;
+  const subscribeObject = async (object: string, subscribedFields: string) => {
+    const form = new URLSearchParams({
+      object, callback_url: callbackUrl, fields: subscribedFields,
+      verify_token: verifyToken, include_values: "true",
+    });
+    const saved = await fetchJson(`${base}/${appId}/subscriptions?access_token=${encodeURIComponent(appToken)}`, {
+      method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: form.toString(),
+    }, admin, `subscribe_webhook_${object}`);
+    return saved?.error
+      ? { success: false, error: saved.error.error_user_msg || saved.error.message }
+      : { success: saved?.success === true };
+  };
+  const pageSaved = await subscribeObject("page", fields);
+  const instagramSaved = await subscribeObject("instagram", INSTAGRAM_FIELDS);
+  const status = await fetchJson(`${base}/${appId}/subscriptions?access_token=${encodeURIComponent(appToken)}`, undefined, admin);
+  const pageSub = (status?.data || []).find((x: any) => x.object === "page");
+  const instagramSub = (status?.data || []).find((x: any) => x.object === "instagram");
+  return {
+    success: pageSaved.success === true && instagramSaved.success === true,
+    app_id: appId,
+    page: { ...pageSaved, active: pageSub?.active !== false, fields: Array.isArray(pageSub?.fields) ? pageSub.fields : [] },
+    instagram: { ...instagramSaved, active: instagramSub?.active !== false, fields: Array.isArray(instagramSub?.fields) ? instagramSub.fields : [] },
+  };
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...corsHeaders, "content-type": "application/json" } });
+  try {
+    const body = await req.json().catch(() => ({}));
+    const action = body?.action === "status" ? "status" : body?.action === "sync_comments" ? "sync_comments" : "subscribe";
+    const auth = await authorizeRequest(req, action === "sync_comments" ? { tab: "inbox", allowService: true } : { admin: true, setting: "synccfg" });
+    if (!auth.ok) return json({ ok: false, error: auth.error }, auth.status);
+    const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    const selectedPageIds = action === "sync_comments" ? await getSelectedCommentPageIds(admin) : [];
+    if (action === "sync_comments" && body?.force !== true) {
+      const { data: cached } = await admin.from("settings").select("value").eq("key", "comment_webhook_sync_status").maybeSingle();
+      const value = cached?.value || {};
+      const age = Date.now() - new Date(value.at || 0).getTime();
+      const oldScope = Array.isArray(value.selected_page_ids) ? value.selected_page_ids.map(String).sort() : [];
+      const newScope = selectedPageIds.map(String).sort();
+      const igWebhookReady = value?.app_webhook?.instagram?.active !== false &&
+        Array.isArray(value?.app_webhook?.instagram?.fields) && value.app_webhook.instagram.fields.includes("messages");
+      if (Number.isFinite(age) && age >= 0 && age < 6 * 60 * 60 * 1000 && JSON.stringify(oldScope) === JSON.stringify(newScope) && igWebhookReady) {
+        return json({ ok: true, action, cached: true, ...value });
+      }
+    }
+    if (action === "sync_comments") {
+      const guard = await getMetaBackgroundGuard(admin);
+      if (guard.blocked) return json({ ok: true, action, cached: true, rate_guarded: true, selected_comment_pages: selectedPageIds });
+    }
+    const token = await getMetaToken();
+    if (!token) throw new Error("ยังไม่ได้ตั้งค่า Meta access token");
+    const base = `https://graph.facebook.com/${GRAPH_VERSION}`;
+
+    const pagesData = await getMetaPages(base, token, { forceRefresh: action === "subscribe" });
+    if (pagesData?.error) throw new Error(pagesData.error.message || "ดึงรายชื่อเพจไม่สำเร็จ (ต้องมีสิทธิ์ pages_show_list/pages_messaging)");
+    const pages = (pagesData?.data ?? []).filter((p: any) => p.access_token);
+    if (!pages.length) throw new Error("ไม่พบเพจ (เช็คสิทธิ์ token)");
+
+    // ลงทะเบียนเพจเข้า page_lead_config ด้วย — หน้า "ตอบแชท" กับตัวกรองเพจอ่านรายชื่อจากตารางนี้
+    // เดิมมีแต่ sync-conversations ที่เขียนตารางนี้ พอเพิ่มเพจใหม่แล้วกดซิงค์ webhook อย่างเดียว
+    // เพจจะโผล่แค่ในหน้านี้ แต่ไม่โผล่ในหน้าตอบแชทจนกว่าจะกดซิงก์แชท (งงมาก)
+    // ignoreDuplicates: true = ไม่ทับการตั้งค่าของเพจเดิม (required_fields / sync_enabled / use_ai)
+    let registered = 0;
+    try {
+      const rows = [...new Map(pages.map((p: any) => [String(p.id), p.name])).entries()]
+        .map(([page_id, page_name]) => ({ page_id, page_name }));
+      const { data, error } = await admin.from("page_lead_config")
+        .upsert(rows, { onConflict: "page_id", ignoreDuplicates: true })
+        .select("page_id");
+      if (error) console.warn("page_lead_config upsert failed:", error.message);
+      registered = data?.length ?? 0;
+    } catch (e) {
+      console.warn("page_lead_config upsert error:", e instanceof Error ? e.message : e);
+    }
+
+    let mappedPosts = 0;
+    let mapRefreshed = false;
+    let rateGuarded = false;
+    let appWebhook: any = null;
+    if (action === "sync_comments") {
+      appWebhook = await ensureAppPageWebhook(base, token, admin);
+      const mapResult = await getOrRefreshCommentAdMap(admin, base, token, selectedPageIds, { force: body?.force === true });
+      mappedPosts = Object.keys(mapResult.posts).length;
+      mapRefreshed = mapResult.refreshed;
+      rateGuarded = mapResult.rate_guarded;
+    }
+
+    const results: any[] = [];
+    for (const p of pages) {
+      if (action === "status") {
+        const r = await fetchJson(`${base}/${p.id}/subscribed_apps?access_token=${p.access_token}`, undefined, admin);
+        const app = (r?.data ?? [])[0];
+        results.push({ page: p.name, page_id: p.id, subscribed: !!app, fields: app?.subscribed_fields ?? [], error: r?.error?.message ?? null });
+      } else {
+        const commentsEnabled = action !== "sync_comments" || selectedPageIds.includes(String(p.id));
+        const fields = commentsEnabled ? `${BASE_FIELDS},feed` : BASE_FIELDS;
+        const r = await fetchJson(`${base}/${p.id}/subscribed_apps?subscribed_fields=${encodeURIComponent(fields)}&access_token=${p.access_token}`, { method: "POST" }, admin);
+        results.push({ page: p.name, page_id: p.id, comments_enabled: commentsEnabled, success: r?.success === true, error: r?.error?.error_user_msg || r?.error?.message || null });
+      }
+    }
+    if (action === "sync_comments") {
+      await admin.from("settings").upsert({
+        key: "comment_webhook_sync_status",
+        value: { at: new Date().toISOString(), selected_page_ids: selectedPageIds, mapped_ad_posts: mappedPosts, map_refreshed: mapRefreshed, rate_guarded: rateGuarded, app_webhook: appWebhook, results },
+        updated_at: new Date().toISOString(),
+      });
+    }
+    return json({ ok: true, action, count: results.length, registered_pages: registered, selected_comment_pages: selectedPageIds, mapped_ad_posts: mappedPosts, map_refreshed: mapRefreshed, rate_guarded: rateGuarded, app_webhook: appWebhook, results });
+  } catch (err) {
+    return json({ ok: false, error: String(err instanceof Error ? err.message : err) }, 200);
+  }
+});

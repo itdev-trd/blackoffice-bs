@@ -1,0 +1,129 @@
+{
+  "name": "TV Access Webhook (manual grant/revoke จากแอป)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "tv-access",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-tvaccess",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -640,
+        0
+      ],
+      "webhookId": "tv-access"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1",
+              "name": "sessionid",
+              "type": "string",
+              "value": "ใส่ sessionid ของ TradingView"
+            },
+            {
+              "id": "c2",
+              "name": "sessionid_sign",
+              "type": "string",
+              "value": "ใส่ sessionid_sign"
+            },
+            {
+              "id": "c5",
+              "name": "tv_base",
+              "type": "string",
+              "value": "https://th.tradingview.com"
+            },
+            {
+              "id": "c3",
+              "name": "secret",
+              "type": "string",
+              "value": "ตั้งรหัสลับสักชุด-เอาไปใส่ในแอปด้วย"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "config-tvaccess",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -420,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ===== TV Access: รับคำสั่ง grant/revoke จากแอป แล้วยิง TradingView =====\nconst H = this.helpers;\nconst cfg = $('Config').first().json;\nconst body = ($('Webhook').first().json.body) || {};\n\n// คุกกี้: ใช้จาก payload ที่แอปส่งมา (ต่อแบรนด์) ก่อน ถ้าไม่มีค่อย fallback ไป Config เดิม\nconst sessionid = ((body.sessionid || cfg.sessionid) || '').trim();\nconst sign = ((body.sessionid_sign || cfg.sessionid_sign) || '').trim();\nconst secret = (cfg.secret||'').trim();\nconst cookie = 'sessionid=' + sessionid + (sign ? '; sessionid_sign=' + sign : '');\n\nconst BASE = (((body.tv_base || cfg.tv_base || 'https://www.tradingview.com').trim().replace(/\\/$/,'')) || 'https://www.tradingview.com');\nconst TV = {\n  hint: BASE+'/username_hint/',\n  list: BASE+'/pine_perm/list_users/',\n  add:  BASE+'/pine_perm/add/',       // endpoint จริงจาก cURL (ไม่ใช่ add_access)\n  modify: BASE+'/pine_perm/modify/',\n  remove: BASE+'/pine_perm/remove/',\n};\n// เลียนแบบ header ที่ browser ของ TradingView ส่งเป๊ะ\nconst TVH = { cookie, accept:'application/json, text/javascript, */*; q=0.01', origin: BASE, referer: BASE+'/', 'x-requested-with':'XMLHttpRequest', 'x-language':'th_TH',\n  'user-agent':'Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Mobile Safari/537.36' };\nconst TVF = { ...TVH, 'content-type':'application/x-www-form-urlencoded; charset=UTF-8' };\n\nconst out = (o) => [{ json:o }];\nconst qs = (o) => Object.keys(o).map(k => encodeURIComponent(k)+'='+encodeURIComponent(o[k])).join('&');\n// สร้าง multipart/form-data เอง (add/remove ของ TradingView ใช้ multipart)\nfunction multipart(fields){\n  const b = '----n8nFB' + Math.random().toString(16).slice(2);\n  let s = '';\n  for (const k in fields){ s += '--'+b+'\\r\\nContent-Disposition: form-data; name=\"'+k+'\"\\r\\n\\r\\n'+fields[k]+'\\r\\n'; }\n  s += '--'+b+'--\\r\\n';\n  return { ct:'multipart/form-data; boundary='+b, body:s };\n}\nconst bodyText = (r) => typeof r.body==='string' ? r.body : JSON.stringify(r.body||'');\nconst authFail = (t) => /is-not-authenticated/i.test(t);\nasync function req(opts){ return H.httpRequest({ ...opts, returnFullResponse:true, ignoreHttpStatusErrors:true }); }\n\nif (secret && body.secret !== secret) return out({ ok:false, error:'unauthorized (secret ไม่ตรง)' });\n\nconst action = body.action;\nconst username = (body.username||'').trim();\nconst pineId = (body.pine_id||'').trim();\nconst expiration = body.expiration || null;\n\nasync function validate(u){\n  const r = await req({ method:'GET', url:TV.hint, qs:{s:u}, headers:TVH });\n  let arr=[]; try { arr = typeof r.body==='string'?JSON.parse(r.body):r.body; } catch(e){}\n  for (const x of (arr||[])) if ((x.username||'').toLowerCase()===u.toLowerCase()) return x.username;\n  return null;\n}\nasync function grant(user, pine, exp){\n  const fields = { pine_id: pine, username_recip: user };\n  if (exp) fields.expiration = exp;\n  const doAdd = async () => { const mp = multipart(fields); const r = await req({ method:'POST', url:TV.add, headers:{ ...TVH, 'content-type':mp.ct }, body:mp.body }); return { r, t: bodyText(r) }; };\n  let { r, t } = await doAdd();\n  // ถ้ามีสิทธิ์อยู่แล้ว (add ตอบ \"exists\") วันหมดอายุจะไม่อัปเดต → ลบก่อนแล้วเพิ่มใหม่ให้วันหมดอายุเปลี่ยนจริง\n  if (/exist/i.test(t)) {\n    const mpr = multipart({ pine_id: pine, username_recip: user });\n    await req({ method:'POST', url:TV.remove, headers:{ ...TVH, 'content-type':mpr.ct }, body:mpr.body });\n    ({ r, t } = await doAdd());\n  }\n  const ok = r.statusCode>=200 && r.statusCode<300 && !/is-not-authenticated|error/i.test(t);\n  return { ok, action:'add', status_code:r.statusCode, response:t.slice(0,220), error: ok?undefined:('add HTTP '+r.statusCode+': '+t.slice(0,200)) };\n}\nasync function revoke(user, pine){\n  const mp = multipart({ pine_id:pine, username_recip:user });\n  const r = await req({ method:'POST', url:TV.remove, headers:{ ...TVH, 'content-type':mp.ct }, body:mp.body });\n  const t = bodyText(r);\n  const ok = r.statusCode>=200 && r.statusCode<300;\n  return { ok, action:'remove', status_code:r.statusCode, response:t.slice(0,220), error: ok?undefined:('remove HTTP '+r.statusCode+': '+t.slice(0,200)) };\n}\n// อ่านรายการสิทธิ์จาก TradingView แล้วตรวจชื่อแบบตรงตัว (ไม่เดาจากสถานะในแอป)\nfunction collectUsers(value, out=[], depth=0){\n  if (depth > 6 || value == null) return out;\n  if (Array.isArray(value)) { for (const item of value) collectUsers(item, out, depth+1); return out; }\n  if (typeof value !== 'object') return out;\n  if (typeof value.username === 'string' || typeof value.user === 'string') out.push(value);\n  const keys = ['users','rows','data','results','items','entries','permissions','recipients'];\n  let traversed = false;\n  for (const key of keys) if (value[key] != null) { traversed = true; collectUsers(value[key], out, depth+1); }\n  // รองรับรูปแบบ response ที่ TradingView เปลี่ยนชื่อฟิลด์ โดยไม่ผูกกับ key เดียว\n  if (!traversed) for (const child of Object.values(value)) collectUsers(child, out, depth+1);\n  return out;\n}\nconst userName = (x) => String(x?.username || x?.user || x?.name || '').trim();\nconst userExpiration = (x) => x?.expiration ?? x?.expires_at ?? x?.expiresAt ?? null;\n// TradingView ส่งวันที่เพิ่มสิทธิ์ในฟิลด์ created (บางรุ่นใช้ชื่ออื่น)\n// เก็บค่าดิบไว้ให้ Supabase แปลงเป็น ISO และไม่เดาวันที่จากเวลาซิงก์\nconst userGrantedAt = (x) => x?.created ?? x?.created_at ?? x?.createdAt ?? x?.granted_at ?? x?.grantedAt ?? null;\nconst paginationTotal = (value) => {\n  const candidates = [value?.total, value?.count, value?.total_count, value?.totalCount,\n    value?.pagination?.total, value?.pagination?.count, value?.meta?.total, value?.data?.total];\n  for (const v of candidates) { const n = Number(v); if (Number.isFinite(n) && n >= 0) return n; }\n  return null;\n};\n// ดึงรายชื่อสิทธิ์ครบต่อ Pine Script สำหรับงานซิงก์กลางคืน\n// ถ้าปลายทางไม่รองรับ offset หรือข้อมูลเกินขนาดที่อ่านได้ จะคืน complete=false\n// เพื่อให้ฝั่ง Supabase ไม่เผลอสรุปว่าคนที่หายไปถูกถอนสิทธิ์\nasync function listAccess(pine){\n  let limit = 100;\n  let offset = 0;\n  let total = null;\n  let complete = false;\n  let pages = 0;\n  const all = [];\n  const seen = new Set();\n  while (pages < 100) {\n    let r;\n    for (const candidate of [limit, 50, 25, 10, 1]) {\n      r = await req({ method:'POST', url:TV.list, qs:{limit:candidate, offset, order_by:'-created'}, headers:TVF, body:qs({pine_id:pine}) });\n      const t = bodyText(r);\n      if (!(r.statusCode === 400 && /bad_pagination_request/i.test(t))) { limit = candidate; break; }\n    }\n    const t = bodyText(r);\n    const ok = r.statusCode>=200 && r.statusCode<300 && !authFail(t) && !/<!DOCTYPE/i.test(t);\n    if (!ok) return { ok:false, status_code:r.statusCode, error:'list_users HTTP '+r.statusCode+': '+t.slice(0,220) };\n    let parsed;\n    try { parsed = typeof r.body==='string' ? JSON.parse(r.body) : r.body; }\n    catch(e) { return { ok:false, error:'TradingView ตอบข้อมูลรายการสิทธิ์ไม่ใช่ JSON' }; }\n    const rows = collectUsers(parsed);\n    total = paginationTotal(parsed) ?? total;\n    let added = 0;\n    for (const row of rows) {\n      const key = userName(row).toLowerCase();\n      if (!key || seen.has(key)) continue;\n      seen.add(key); all.push(row); added++;\n    }\n    pages++;\n    if (total != null && all.length >= total) { complete = true; break; }\n    if (rows.length < limit || rows.length === 0) { complete = true; break; }\n    // บางรุ่นของ endpoint ไม่สนใจ offset: หยุดแบบปลอดภัยแทนการมาร์คผู้ใช้ที่เหลือว่าถูกถอน\n    if (added === 0) break;\n    offset += rows.length;\n  }\n  return { ok:true, users:all, complete, total, pages };\n}\nasync function checkAccess(user, pine){\n  // ใช้ pagination เดียวกับงานซิงก์ เพื่อให้ตรวจเจอสมาชิกเก่าที่ไม่อยู่หน้าแรกด้วย\n  const listed = await listAccess(pine);\n  if (!listed.ok) return { ...listed, action:'check_access' };\n  const rows = listed.users || [];\n  const wanted = user.toLowerCase();\n  const matched = rows.find((x) => userName(x).toLowerCase() === wanted) || null;\n  const found = !!matched;\n  if (!found && listed.complete !== true) return { ok:false, action:'check_access', error:'TradingView ส่งรายการมาไม่ครบ จึงยืนยันว่าไม่พบสิทธิ์ไม่ได้' };\n  return { ok:true, action:'check_access', found, username:user, pine_id:pine, matched_count:rows.length,\n    ...(matched && userGrantedAt(matched) != null ? { tv_granted_at:userGrantedAt(matched) } : {}) };\n}\n\ntry {\n  if (action==='ping') {\n    const dbg = { sid_len: sessionid.length, sign_len: sign.length };\n    if (pineId) {\n      const r = await req({ method:'POST', url:TV.list, qs:{limit:1,order_by:'-created'}, headers:TVF, body:qs({pine_id:pineId}) });\n      const t = bodyText(r);\n      const authed = r.statusCode>=200 && r.statusCode<300 && !authFail(t) && !/<!DOCTYPE/i.test(t);\n      return out({ ok:true, authed, status_code:r.statusCode, sample:t.slice(0,180), ...dbg });\n    }\n    const r = await req({ method:'GET', url:BASE+'/', headers:TVH });\n    return out({ ok:true, authed: !authFail(bodyText(r)), ...dbg });\n  }\n  if (action==='validate') { const v = await validate(username); return out({ ok:!!v, username:v }); }\n  if (action==='grant') {\n    if (!username || !pineId) return out({ ok:false, error:'ต้องมี username และ pine_id' });\n    const v = await validate(username);\n    if (!v) return out({ ok:false, error:'ไม่พบ username \"'+username+'\" บน TradingView' });\n    const res = await grant(v, pineId, expiration);\n    return out({ ...res, username:v, pine_id:pineId });\n  }\n  if (action==='check_access') {\n    if (!username || !pineId) return out({ ok:false, error:'ต้องมี username และ pine_id' });\n    return out(await checkAccess(username, pineId));\n  }\n  if (action==='list_users') {\n    if (!pineId) return out({ ok:false, action:'list_users', error:'ต้องมี pine_id' });\n    const res = await listAccess(pineId);\n    if (!res.ok) return out({ ...res, action:'list_users', pine_id:pineId });\n    return out({ ok:true, action:'list_users', pine_id:pineId, complete:res.complete, total:res.total,\n      pages:res.pages, users:res.users.map((x) => ({ username:userName(x), expiration:userExpiration(x), tv_granted_at:userGrantedAt(x) })).filter((x) => x.username) });\n  }\n  if (action==='revoke') {\n    if (!username || !pineId) return out({ ok:false, error:'ต้องมี username และ pine_id' });\n    const v = (await validate(username)) || username;\n    const res = await revoke(v, pineId);\n    return out({ ...res, username:v, pine_id:pineId });\n  }\n  return out({ ok:false, error:'unknown action' });\n} catch(e) {\n  return out({ ok:false, error:'exception: '+e.message });\n}"
+      },
+      "id": "code-tvaccess",
+      "name": "TV Access",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -200,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "firstIncomingItem",
+        "options": {}
+      },
+      "id": "respond-tvaccess",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        20,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "TV Access",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TV Access": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "manual-tv-access"
+  }
+}

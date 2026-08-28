@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ตั้งเวลาสำรองข้อมูลอัตโนมัติทุกวัน ตี 3 (macOS launchd)
+
+  ติดตั้ง:
+    1) แก้ path ในไฟล์นี้ให้ตรงกับเครื่องคุณ (บรรทัด ProgramArguments และ HOME)
+    2) cp com.aphiwat.supabase-backup.plist ~/Library/LaunchAgents/
+    3) launchctl load ~/Library/LaunchAgents/com.aphiwat.supabase-backup.plist
+    4) ทดสอบสั่งรันทันที: launchctl start com.aphiwat.supabase-backup
+
+  เช็คสถานะ : launchctl list | grep supabase-backup
+  ปิดชั่วคราว: launchctl unload ~/Library/LaunchAgents/com.aphiwat.supabase-backup.plist
+
+  หมายเหตุ: ถ้าเครื่องปิด/หลับตอนตี 3 launchd จะรันให้ทันทีที่เปิดเครื่องครั้งถัดไป
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.aphiwat.supabase-backup</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <!-- ⚠️ แก้ path นี้ให้ตรงกับที่เก็บสคริปต์จริง -->
+        <string>/Applications/ai-ads-automation-app/backup/backup-supabase.sh</string>
+    </array>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <!-- ต้องมี path ของ libpq (pg_dump) ด้วย — Apple Silicon ใช้ /opt/homebrew, Intel ใช้ /usr/local -->
+        <string>/opt/homebrew/opt/libpq/bin:/usr/local/opt/libpq/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <!-- ⚠️ แก้เป็น home ของคุณ -->
+        <string>/Users/erniesball</string>
+    </dict>
+
+    <!-- ทุกวัน ตี 3 -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>3</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <!-- ถ้าเครื่องหลับตอนถึงเวลา ให้รันเมื่อตื่น -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/erniesball/Backups/supabase/logs/launchd.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/erniesball/Backups/supabase/logs/launchd.err.log</string>
+</dict>
+</plist>
