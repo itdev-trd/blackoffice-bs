@@ -1,10 +1,11 @@
 node_modules
 dist
+.next
 .env
 .DS_Store
 
-# ไฟล์ชั่วคราวที่ vite สร้างทุกครั้งที่ build (ตอนนี้มีค้างในโฟลเดอร์เป็นร้อยไฟล์)
-vite.config.js.timestamp-*
+# เขียนใหม่ทุกครั้งที่ next dev/build เริ่มทำงาน (ดู next.config.js) — ใช้เทียบเวอร์ชันเช็คว่ามี deploy ใหม่
+public/version.json
 
 # ไฟล์สำรองข้อมูล + ไฟล์ตั้งค่าที่มีรหัสผ่านฐานข้อมูล — ห้ามขึ้น git เด็ดขาด
 *.dump

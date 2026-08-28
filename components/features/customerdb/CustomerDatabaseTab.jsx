@@ -1,0 +1,1034 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import {
+  CheckCircle2,
+  AlertTriangle,
+  Loader2,
+  Tv,
+  RefreshCw,
+  Upload,
+  FileDown,
+  Search,
+  ChevronUp,
+  ChevronDown,
+  ArrowUpDown,
+  X,
+} from "lucide-react";
+import { supabase } from "@/lib/supabase/client";
+import { beToCe, bangkokDate } from "@/lib/utils/date";
+import { logActivity } from "@/lib/utils/activity";
+import { readFunctionErrorMessage } from "@/lib/utils/errors";
+import { getCustomerDateRange } from "@/lib/customer-date-filter";
+import Spinner from "@/components/shared/Spinner";
+import { EditableCell } from "@/components/features/settings/SettingsTab";
+import { CHAT_STAGES } from "@/lib/constants/settings";
+import {
+  customerDatabaseReportCache,
+  getCustomerDatabaseViewCache,
+  setCustomerDatabaseViewCache,
+} from "@/lib/customerdb-cache";
+
+export function TradeIdChecker() {
+  const [tid, setTid] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [res, setRes] = useState(null);
+  async function check() {
+    const id = tid.trim();
+    if (!id || busy) return;
+    setBusy(true); setRes(null);
+    const { data, error } = await supabase.functions.invoke("verify-trade-id", { body: { trade_id: id } });
+    setBusy(false);
+    if (error || !data?.ok) { setRes({ error: data?.error || error?.message || "เช็คไม่สำเร็จ — อาจยังไม่ได้ deploy ฟังก์ชัน verify-trade-id" }); return; }
+    setRes(data);
+    logActivity("check_trade_id", { trade_id: id, pass: !!data.pass, via: data.via });
+  }
+  return (
+    <div className="border-t border-slate-200 pt-3 mt-1 space-y-1.5">
+      <label className="text-xs text-slate-400 flex items-center gap-1"><CheckCircle2 size={13} /> เช็คไอดีเทรด (XM)</label>
+      <div className="flex gap-1.5">
+        <input
+          value={tid}
+          onChange={(e) => { setTid(e.target.value); if (res) setRes(null); }}
+          onKeyDown={(e) => { if (e.key === "Enter") check(); }}
+          inputMode="numeric" placeholder="วางเลขไอดีเทรด"
+          className="flex-1 min-w-0 rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+        <button onClick={check} disabled={busy || !tid.trim()}
+          className="shrink-0 bg-slate-900 text-white rounded-lg px-3 py-1.5 text-sm font-medium disabled:opacity-50 flex items-center gap-1.5">
+          {busy ? <Loader2 className="animate-spin" size={14} /> : null} เช็ค
+        </button>
+      </div>
+      {res && (res.error
+        ? <div className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2">{res.error}</div>
+        : res.pass
+          ? <div className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+              <div className="font-semibold flex items-center gap-1"><CheckCircle2 size={14} /> ไอดีผ่าน (เช็คจาก{res.via === "email" ? "อีเมล" : " API"})</div>
+              {res.via === "email" && (res.platform || res.insertdate) && (
+                <div className="text-[11px] text-emerald-600 mt-0.5">{[res.platform, res.insertdate].filter(Boolean).join(" · ")}</div>
+              )}
+            </div>
+          : <div className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 font-medium flex items-center gap-1">
+              <AlertTriangle size={14} /> เช็คทั้งสองช่องทางแล้วไม่ผ่าน
+            </div>
+      )}
+    </div>
+  );
+}
+
+// แอดมินป้อนข้อมูลลูกค้าเอง (ไอดีเทรด/TradingView/เบอร์/อีเมล) จากหน้าตอบแชท
+// บันทึกผ่าน save-lead-fields → มาร์ค manual_data + ผู้ป้อน · AI/sync/webhook จะไม่แก้ทับ
+export function CustomerDataForm({ row, onSaved }) {
+  const [f, setF] = useState({ trade_id: "", username: "", phone: "", email: "" });
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);   // {ok, text}
+  // ฟีเจอร์ TV ในหน้าแชท — เห็นเฉพาะแอดมินจนกว่าจะกดปล่อย (settings.tv_features.released)
+  const [tvOn, setTvOn] = useState(false);
+  const [scripts, setScripts] = useState([]);
+  const [pineIds, setPineIds] = useState([]);   // เลือก Indicator ได้หลายอัน
+  // วันหมดอายุแยกต่อสคริปต์ — { [pine_id]: { mode, days, expDate } }
+  const [dur, setDur] = useState({});
+  const getDur = (pid) => dur[pid] || { mode: "days", days: 30, expDate: "" };
+  const setDurFor = (pid, patch) => setDur((d) => ({ ...d, [pid]: { ...getDur(pid), ...patch } }));
+  const toggleScript = (pid, on) => {
+    setPineIds((cur) => on ? cur.filter((p) => p !== pid) : [...cur, pid]);
+    if (!on) setDur((d) => (d[pid] ? d : { ...d, [pid]: { mode: "days", days: 30, expDate: "" } }));
+  };
+  const durLabel = (d) => d.mode === "lifetime" ? "ตลอดชีพ" : d.mode === "date" ? `ถึง ${d.expDate ? new Date(`${d.expDate}T00:00:00+07:00`).toLocaleDateString("th-TH", { day: "2-digit", month: "short", year: "2-digit" }) : "—"}` : `${Number(d.days) || 30} วัน`;
+  const todayTH = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
+  const daysFromDate = (d) => { if (!d) return 0; const t = new Date(`${d}T23:59:59+07:00`).getTime(); return Math.max(1, Math.ceil((t - Date.now()) / 86400000)); };
+
+  useEffect(() => {
+    setF({ trade_id: row?.trade_id || "", username: row?.username || "", phone: row?.phone || "", email: row?.email || "" });
+    setMsg(null);
+  }, [row?.id, row?.trade_id, row?.username, row?.phone, row?.email]);
+
+  // โหลด role + flag ปล่อยอัปเดต + สคริปต์ ครั้งเดียว
+  // โหลด role + สถานะปล่อยอัปเดต (ครั้งเดียว)
+  useEffect(() => {
+    let stop = false;
+    (async () => {
+      const { data: u } = await supabase.auth.getUser();
+      let admin = false;
+      const email = u?.user?.email;
+      if (email) { const { data: p } = await supabase.from("user_permissions").select("role").eq("email", email).maybeSingle(); admin = p?.role === "admin"; }
+      const { data: tf } = await supabase.from("settings").select("value").eq("key", "tv_features").maybeSingle();
+      if (stop) return;
+      setTvOn(admin || tf?.value?.released === true);
+    })();
+    return () => { stop = true; };
+  }, []);
+  // โหลดสคริปต์ที่โชว์ได้ในเพจนี้ (ตามแบรนด์ที่ผูกเพจของแชท) — รีเฟรชเมื่อเปลี่ยนแชท/เพจ
+  useEffect(() => {
+    if (!tvOn) { setScripts([]); return; }
+    let stop = false;
+    (async () => {
+      const [{ data: sc }, { data: br }] = await Promise.all([
+        supabase.from("tv_scripts").select("*").order("created_at"),
+        supabase.from("tv_brands").select("id, pages").eq("active", true),
+      ]);
+      if (stop) return;
+      const pageId = String(row?.page_id || "");
+      const allowed = new Set((br || []).filter((b) => Array.isArray(b.pages) && b.pages.map(String).includes(pageId)).map((b) => b.id));
+      const list = (sc || []).filter((s) => allowed.has(s.brand_id));
+      setScripts(list);
+      setPineIds((cur) => cur.filter((p) => list.some((s) => s.pine_id === p)));
+    })();
+    return () => { stop = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tvOn, row?.page_id]);
+
+  // บันทึกลงฐานข้อมูลลูกค้า (save-lead-fields) — ใช้ซ้ำหลายเส้นทาง
+  async function saveLeadFields(extraMsg) {
+    const { data, error } = await supabase.functions.invoke("save-lead-fields", { body: { id: row.id, ...f } });
+    if (error || !data?.ok) return { ok: false, error: data?.error || error?.message || "อาจยังไม่ได้ deploy save-lead-fields" };
+    logActivity("save_lead_fields", { id: row.id, customer_name: row?.customer_name });
+    onSaved?.({ trade_id: data.trade_id, username: data.username, phone: data.phone, email: data.email, manual_data: true, classified_by: "manual", needs_ai: false, needs_verify: false, manual_data_by: data.manual_data_by, manual_data_at: data.manual_data_at });
+    return { ok: true };
+  }
+
+  async function save() {
+    if (busy) return;
+    const tradeId = f.trade_id.trim();
+    const userTv = f.username.trim();
+    setBusy(true); setMsg(null);
+
+    // เส้นทางฟีเจอร์ TV (แอดมิน/ปล่อยแล้ว) และมีการป้อนไอดีเทรด/user TV
+    if (tvOn && (tradeId || userTv)) {
+      if (userTv && !tradeId) { setBusy(false); setMsg({ ok: false, text: "ต้องใส่ไอดีเทรดด้วยเมื่อจะเพิ่ม user TV" }); return; }
+      if (userTv && !pineIds.length) { setBusy(false); setMsg({ ok: false, text: "เลือก Indicator (สคริปต์) อย่างน้อย 1 อัน" }); return; }
+      if (userTv) { for (const pid of pineIds) { const d = getDur(pid); if (d.mode === "date" && (!d.expDate || d.expDate < todayTH)) { setBusy(false); setMsg({ ok: false, text: `เลือกวันหมดอายุของ "${scripts.find((s) => s.pine_id === pid)?.name || pid}" ให้ถูกต้องก่อน` }); return; } } }
+
+      // 1) เช็คไอดีเทรด — ไม่ผ่าน = ไม่บันทึกอะไรเลย
+      setMsg({ ok: true, text: "กำลังเช็คไอดีเทรด..." });
+      const { data: vt, error: ve } = await supabase.functions.invoke("verify-trade-id", { body: { trade_id: tradeId } });
+      if (ve || !vt?.ok) { setBusy(false); setMsg({ ok: false, text: "เช็คไอดีเทรดไม่สำเร็จ: " + (vt?.error || "ลองใหม่") }); return; }
+      if (!vt.pass) { setBusy(false); setMsg({ ok: false, text: `ไอดีเทรด "${tradeId}" ไม่ผ่าน — ยังไม่บันทึก` }); return; }
+
+      // 2) ป้อนแค่ไอดีเทรด (ไม่มี user TV) → บันทึกลงฐานข้อมูลอย่างเดียว ไม่แตะหน้าจัดการ TV
+      if (!userTv) {
+        const r = await saveLeadFields();
+        setBusy(false);
+        setMsg(r.ok ? { ok: true, text: "✓ ไอดีเทรดผ่าน + บันทึกลงฐานข้อมูลแล้ว (ไม่ได้เพิ่ม TV — ไม่ได้ใส่ user TV)" } : { ok: false, text: "ไอดีเทรดผ่าน แต่บันทึกไม่สำเร็จ: " + r.error });
+        return;
+      }
+
+      // 3) มี user TV → เช็ค user TV ต้องผ่าน
+      setMsg({ ok: true, text: "ไอดีเทรดผ่าน — กำลังเช็ค user TV..." });
+      const vBrandId = scripts.find((s) => s.pine_id === pineIds[0])?.brand_id || null;
+      const { data: vu, error: vue } = await supabase.functions.invoke("tradingview", { body: { action: "validate_user", username: userTv, brand_id: vBrandId } });
+      if (vue || !vu?.ok) { setBusy(false); setMsg({ ok: false, text: "เช็ค user TV ไม่สำเร็จ: " + (vu?.error || "ลองใหม่") }); return; }
+      if (!vu.exists) { setBusy(false); setMsg({ ok: false, text: `user TV "${userTv}" ไม่ผ่าน (ไม่พบผู้ใช้นี้) — ยังไม่บันทึก` }); return; }
+
+      // 4) ผ่านทั้งคู่ → ให้สิทธิ์ทีละสคริปต์ (แต่ละตัวใช้วันหมดอายุของตัวเอง)
+      const summ = []; const fails = [];
+      for (const pid of pineIds) {
+        const d = getDur(pid);
+        const expIso = d.mode === "date" && d.expDate ? new Date(`${beToCe(d.expDate)}T23:59:59+07:00`).toISOString() : null;
+        const effDays = d.mode === "days" ? (Number(d.days) || 30) : 0;
+        const name = scripts.find((s) => s.pine_id === pid)?.name || pid;
+        setMsg({ ok: true, text: `ผ่านทั้งคู่ — กำลังเพิ่ม "${name}"...` });
+        const { data: g, error: ge } = await supabase.functions.invoke("tradingview", { body: {
+          action: "grant", username: userTv, display_name: row?.customer_name || null, email: f.email.trim() || null,
+          pine_ids: [pid], lifetime: d.mode === "lifetime", days: effDays, expiration: expIso, trade_id: tradeId,
+        } });
+        if (ge || !g?.ok) fails.push(`${name}: ${g?.error || g?.results?.[0]?.error || "ลองใหม่"}`);
+        else summ.push(`${name} (${durLabel(d)})`);
+      }
+      if (!summ.length) { setBusy(false); setMsg({ ok: false, text: "เพิ่มสิทธิ์ TV ไม่สำเร็จ: " + (fails.join(" · ") || "ลองใหม่") }); return; }
+      logActivity("tv_grant_from_chat", { id: row.id, username: userTv });
+
+      // 5) บันทึกลงฐานข้อมูลลูกค้าด้วย (เก็บแยกกัน)
+      const r = await saveLeadFields();
+      setBusy(false);
+      setMsg(r.ok
+        ? { ok: true, text: `✓ เพิ่ม user TV: ${summ.join(", ")}${fails.length ? ` · ไม่สำเร็จ: ${fails.join(" · ")}` : ""} + บันทึกฐานข้อมูลแล้ว` }
+        : { ok: false, text: "เพิ่มสิทธิ์ TV แล้ว แต่บันทึกฐานข้อมูลไม่สำเร็จ: " + r.error });
+      return;
+    }
+
+    // เส้นทางเดิม — บันทึกฐานข้อมูลตรงๆ
+    const r = await saveLeadFields();
+    setBusy(false);
+    setMsg(r.ok ? { ok: true, text: "บันทึกแล้ว ✓ (ป้อนโดยแอดมิน — AI จะไม่แก้)" } : { ok: false, text: "บันทึกไม่สำเร็จ: " + r.error });
+  }
+
+  const inp = (k, label, ph) => (
+    <div className="min-w-0">
+      <label className="text-[11px] text-slate-400">{label}</label>
+      <input value={f[k]} onChange={(e) => setF((s) => ({ ...s, [k]: e.target.value }))} placeholder={ph}
+        className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+    </div>
+  );
+  return (
+    <div className="border-t border-slate-200 pt-3 mt-1 space-y-2">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <label className="text-xs font-medium text-slate-500 flex items-center gap-1"><CheckCircle2 size={13} /> ข้อมูลลูกค้า (แอดมินป้อนเอง)</label>
+        {row?.manual_data && row?.manual_data_by && (
+          <span className="text-[10px] text-emerald-600 font-medium">✓ ป้อนโดย {String(row.manual_data_by).split("@")[0]}</span>
+        )}
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        {inp("trade_id", "ไอดีเทรด", "เลขบัญชีเทรด")}
+        {inp("username", "User TradingView", "username TV")}
+        {inp("phone", "เบอร์โทร", "เบอร์โทร")}
+        {inp("email", "อีเมล", "อีเมล")}
+      </div>
+
+      {/* ตัวเลือก TV (เหมือนหน้าจัดการสมาชิก TV) — เห็นเฉพาะแอดมินจนกว่าจะปล่อย */}
+      {tvOn && (
+        <div className="rounded-lg border border-slate-300 p-2.5 space-y-2">
+          <div className="text-[11px] font-semibold text-slate-600 flex items-center gap-1"><Tv size={12} /> เพิ่มสิทธิ์ TradingView (ถ้าใส่ user TV จะเช็คไอดีเทรด+user TV แล้วเพิ่มให้)</div>
+          <div>
+            <label className="text-[11px] text-slate-400">Indicator (สคริปต์) — เลือกได้หลายอัน · กำหนดวันหมดอายุแยกแต่ละตัว</label>
+            <div className="mt-0.5 rounded-lg border border-slate-300 divide-y divide-slate-100 max-h-60 overflow-y-auto bg-white">
+              {scripts.length === 0 && <div className="px-2 py-1.5 text-sm text-slate-400">ยังไม่มีสคริปต์</div>}
+              {scripts.map((s) => {
+                const on = pineIds.includes(s.pine_id);
+                const d = getDur(s.pine_id);
+                return (
+                  <div key={s.pine_id} className={on ? "bg-indigo-50/40" : ""}>
+                    <label className="flex items-center gap-2 px-2 py-1.5 text-sm cursor-pointer hover:bg-slate-50">
+                      <input type="checkbox" checked={on} onChange={() => toggleScript(s.pine_id, on)} />
+                      <span className="truncate flex-1">{s.name}</span>
+                      {on && <span className="text-[10px] text-slate-400 shrink-0">{durLabel(d)}</span>}
+                    </label>
+                    {on && (
+                      <div className="px-2 pb-2 pl-7 space-y-1">
+                        <div className="flex flex-wrap gap-x-2.5 gap-y-1 text-[12px]">
+                          <label className="flex items-center gap-1"><input type="radio" checked={d.mode === "lifetime"} onChange={() => setDurFor(s.pine_id, { mode: "lifetime" })} /> ตลอดชีพ</label>
+                          <label className="flex items-center gap-1"><input type="radio" checked={d.mode === "days"} onChange={() => setDurFor(s.pine_id, { mode: "days" })} /> จำกัดวัน</label>
+                          <label className="flex items-center gap-1"><input type="radio" checked={d.mode === "date"} onChange={() => setDurFor(s.pine_id, { mode: "date" })} /> เลือกวัน</label>
+                        </div>
+                        {d.mode === "days" && <input type="number" min={1} value={d.days} onChange={(e) => setDurFor(s.pine_id, { days: e.target.value })} className="w-full rounded-lg border border-slate-300 px-2 py-1 text-sm" />}
+                        {d.mode === "date" && <input type="date" value={d.expDate} min={todayTH} onChange={(e) => setDurFor(s.pine_id, { expDate: beToCe(e.target.value) })} className="w-full rounded-lg border border-slate-300 px-2 py-1 text-sm" />}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            {pineIds.length > 0 && <div className="text-[11px] text-slate-400 mt-0.5">เลือกแล้ว {pineIds.length} สคริปต์</div>}
+          </div>
+        </div>
+      )}
+
+      <button onClick={save} disabled={busy} className="w-full rounded-lg bg-emerald-600 text-white px-3 py-2 text-sm font-semibold hover:bg-emerald-700 disabled:opacity-50 flex items-center justify-center gap-1.5">
+        {busy ? <Loader2 className="animate-spin" size={14} /> : <CheckCircle2 size={14} />} บันทึกข้อมูล
+      </button>
+      {msg && <div className={`text-[11px] whitespace-pre-line ${msg.ok ? "text-emerald-600" : "text-rose-600"}`}>{msg.text}</div>}
+    </div>
+  );
+}
+
+
+// ---------------------------------------------------------------
+// ฐานข้อมูลลูกค้า — ตารางข้อมูลที่ซิงก์มา (ค้นหา + filter + เรียงลำดับ + export)
+// ---------------------------------------------------------------
+const SOURCE_LABELS = { ad: "โฆษณา", organic: "ออร์แกนิก", unknown: "ไม่ทราบ" };
+
+export default function CustomerDatabaseTab({ onOpenChat }) {
+  const initialViewRef = useRef(getCustomerDatabaseViewCache());
+  const initialView = initialViewRef.current;
+  const [rows, setRows] = useState(() => initialView?.rows ?? null);   // เฉพาะแถวของหน้าปัจจุบัน (server-side)
+  const [total, setTotal] = useState(() => initialView?.total ?? 0);    // จำนวนทั้งหมดที่ตรงเงื่อนไข (นับจาก DB จริง)
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [q, setQ] = useState(() => initialView?.q ?? "");
+  const [qDeb, setQDeb] = useState(() => initialView?.qDeb ?? "");     // ค่าค้นหาแบบหน่วงเวลา (กันยิง query ทุกคีย์)
+  const [pageFilter, setPageFilter] = useState(() => initialView?.pageFilter ?? "");      // ต้องเลือกเพจก่อน จึงจะอนุญาตให้ดึงรายงาน
+  const [reportPageId, setReportPageId] = useState(() => initialView?.reportPageId ?? "");  // เพจที่ผู้ใช้กด "ดึงรายงาน" แล้ว
+  const [stageFilter, setStageFilter] = useState(() => initialView?.stageFilter ?? "all");
+  const [dataFilter, setDataFilter] = useState(() => initialView?.dataFilter ?? "all");   // all | has | none
+  const [sourceFilter, setSourceFilter] = useState(() => initialView?.sourceFilter ?? "all"); // all | ad | organic | unknown
+  const [dateFilter, setDateFilter] = useState(() => initialView?.dateFilter ?? "");      // ต้องเลือกก่อนดึงรายงาน
+  const [dateFrom, setDateFrom] = useState(() => initialView?.dateFrom ?? "");          // กำหนดเอง (YYYY-MM-DD)
+  const [dateTo, setDateTo] = useState(() => initialView?.dateTo ?? "");
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [exportDateFilter, setExportDateFilter] = useState("");
+  const [exportDateFrom, setExportDateFrom] = useState("");
+  const [exportDateTo, setExportDateTo] = useState("");
+  const [reportRefreshedAt, setReportRefreshedAt] = useState(() => initialView?.reportRefreshedAt ?? null);
+  const [reportRefreshedBy, setReportRefreshedBy] = useState(() => initialView?.reportRefreshedBy ?? null);
+  const [sortKey, setSortKey] = useState(() => initialView?.sortKey === "last_message_at" ? "first_customer_message_at" : (initialView?.sortKey ?? "first_customer_message_at"));
+  const [sortDir, setSortDir] = useState(() => initialView?.sortDir ?? "desc");
+  const [page, setPage] = useState(() => initialView?.page ?? 1);
+  const [pageOpts, setPageOpts] = useState([]);         // รายชื่อเพจสำหรับ dropdown
+  const [importState, setImportState] = useState(null); // { fileName, sheetName, columns, records, preview, applying, result }
+  const importInputRef = useRef(null);
+  const reportRequestRef = useRef(0);                   // กันรายงานเพจเดิมที่กำลังโหลดกลับมาทับหลังเปลี่ยนเพจ
+  const previousPageFilterRef = useRef(pageFilter);     // กัน effect รอบแรกไปล้าง cache ที่เพิ่ง restore
+  const previousDateSelectionRef = useRef(`${dateFilter}|${dateFrom}|${dateTo}`);
+  const PAGE_SIZE = 50;
+
+  const reportCacheKey = (selectedPageId = reportPageId) => JSON.stringify({
+    version: 2, pageId: selectedPageId, page, q: qDeb, stageFilter, dataFilter, sourceFilter,
+    dateFilter, dateFrom, dateTo, sortKey, sortDir,
+  });
+
+  // map ปุ่มเรียง → คอลัมน์จริงใน DB
+  const SORT_COL = { customer_name: "customer_name", page_name: "page_name", trade_id: "trade_id", phone: "phone", email: "email", username: "username", psid: "psid", source: "source", messages: "user_message_count", stage: "stage", first_customer_message_at: "first_customer_message_at", last_message_at: "first_customer_message_at", synced_at: "first_customer_message_at" };
+  const EXPORT_DB_COLS = ["customer_name", "page_name", "trade_id", "phone", "email", "username", "psid", "source", "entry_ad_id", "first_customer_message_at"];
+  const EXPORT_COLUMNS = [
+    ["ชื่อเฟสบุค", (row) => row.customer_name || ""],
+    ["เพจ", (row) => row.page_name || ""],
+    ["ไอดีเทรด", (row) => row.trade_id || ""],
+    ["เบอร์โทร", (row) => row.phone || ""],
+    ["อีเมล", (row) => row.email || ""],
+    ["user tradingview", (row) => row.username || ""],
+    ["เฟสบุคไอดี", (row) => row.psid || ""],
+    ["แหล่งที่มา", (row) => sourceText(row)],
+    ["วันที่", (row) => fmtTime(row.first_customer_message_at)],
+  ];
+
+  // รายชื่อเพจจาก page_lead_config (คงอยู่แม้ตารางลูกค้าจะแบ่งหน้า)
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.from("page_lead_config").select("page_id, page_name").order("page_name");
+      setPageOpts((data || []).map((p) => ({ id: p.page_id, name: p.page_name || p.page_id })));
+    })();
+  }, []);
+
+  // หน่วงช่องค้นหา
+  useEffect(() => { const t = setTimeout(() => setQDeb(q), 350); return () => clearTimeout(t); }, [q]);
+
+  // ใส่เงื่อนไขฟิลเตอร์ทั้งหมดลงใน query (ใช้ร่วมทั้งโหลดหน้า + export)
+  function hasCompleteDateRange(preset, from = "", to = "") {
+    if (!preset) return false;
+    if (preset !== "custom") return true;
+    return !!from && !!to && from <= to;
+  }
+
+  function applyFilters(query, options = {}) {
+    const selectedPageId = options.pageId ?? reportPageId;
+    const selectedDateFilter = options.dateFilter ?? dateFilter;
+    const selectedDateFrom = options.dateFrom ?? dateFrom;
+    const selectedDateTo = options.dateTo ?? dateTo;
+    query = query.eq("page_id", selectedPageId);
+    if (stageFilter !== "all") query = query.eq("stage", stageFilter);
+    if (dataFilter === "has") query = query.or("phone.not.is.null,trade_id.not.is.null,username.not.is.null");
+    if (dataFilter === "none") query = query.is("phone", null).is("trade_id", null).is("username", null);
+    if (sourceFilter === "ad") query = query.or("source.eq.ad,entry_ad_id.not.is.null");
+    else if (sourceFilter === "organic") query = query.eq("source", "organic");
+    else if (sourceFilter === "unknown") query = query.is("entry_ad_id", null).or("source.is.null,source.not.in.(ad,organic)");
+    if (selectedDateFilter === "custom") {
+      if (selectedDateFrom) query = query.gte("first_customer_message_at", new Date(selectedDateFrom + "T00:00:00+07:00").toISOString());
+      if (selectedDateTo) {
+        const endExclusive = new Date(new Date(selectedDateTo + "T00:00:00+07:00").getTime() + 864e5).toISOString();
+        query = query.lt("first_customer_message_at", endExclusive);
+      }
+    } else if (selectedDateFilter !== "all") {
+      const range = getCustomerDateRange(selectedDateFilter);
+      if (range?.from) query = query.gte("first_customer_message_at", range.from);
+      if (range?.toExclusive) query = query.lt("first_customer_message_at", range.toExclusive);
+    }
+    const s = qDeb.trim().replace(/[%,()]/g, " ").trim();
+    if (s) {
+      const like = `%${s}%`;
+      query = query.or(["customer_name", "phone", "trade_id", "username", "email", "psid", "last_user_text", "page_name", "entry_ad_id"].map((c) => `${c}.ilike.${like}`).join(","));
+    }
+    return query;
+  }
+
+  async function load(force = true) {
+    if (!reportPageId || reportPageId !== pageFilter) return;
+    const selectedPageId = reportPageId;
+    const cacheKey = reportCacheKey(selectedPageId);
+    if (!force) {
+      const cached = customerDatabaseReportCache.get(cacheKey);
+      if (cached) {
+        setRows(cached.rows);
+        setTotal(cached.total);
+        setReportRefreshedAt(cached.refreshedAt || null);
+        setReportRefreshedBy(cached.refreshedBy || null);
+        setError("");
+        setLoading(false);
+        return;
+      }
+    }
+    const requestId = ++reportRequestRef.current;
+    setLoading(true); setError("");
+    const { data, error: e } = await supabase.functions.invoke("customer-report", { body: {
+      page_id: selectedPageId, date_filter: dateFilter, date_from: dateFrom, date_to: dateTo,
+      page, q: qDeb, stage_filter: stageFilter, data_filter: dataFilter, source_filter: sourceFilter,
+      sort_key: sortKey, sort_dir: sortDir, force,
+    } });
+    if (requestId !== reportRequestRef.current || selectedPageId !== pageFilter) return;
+    if (e || !data?.ok) { setError(data?.error || (e ? await readFunctionErrorMessage(e) : "ดึงรายงานไม่สำเร็จ")); if (rows === null) setRows([]); }
+    else {
+      const nextRows = data.rows || [];
+      const nextTotal = data.total || 0;
+      const refreshedAt = data.refreshed_at || null;
+      const refreshedBy = data.refreshed_by || null;
+      setRows(nextRows); setTotal(nextTotal);
+      setReportRefreshedAt(refreshedAt); setReportRefreshedBy(refreshedBy);
+      customerDatabaseReportCache.set(cacheKey, { rows: nextRows, total: nextTotal, refreshedAt, refreshedBy });
+    }
+    setLoading(false);
+  }
+  async function invalidateSharedReportCache() {
+    if (!reportPageId) return;
+    await supabase.functions.invoke("customer-report", { body: {
+      action: "invalidate", page_id: reportPageId, date_filter: dateFilter, date_from: dateFrom, date_to: dateTo,
+    } });
+  }
+  // reset ไปหน้า 1 เมื่อเปลี่ยนฟิลเตอร์/การเรียง
+  useEffect(() => { setPage(1); }, [qDeb, stageFilter, dataFilter, sourceFilter, dateFilter, dateFrom, dateTo, sortKey, sortDir]);
+  // เปลี่ยนเพจ = ล้างรายงานเดิมทันที และรอให้กดดึงรายงานใหม่ ห้าม query ข้อมูลลูกค้าอัตโนมัติ
+  useEffect(() => {
+    if (previousPageFilterRef.current === pageFilter) return;
+    previousPageFilterRef.current = pageFilter;
+    setReportPageId("");
+    setRows(null);
+    setTotal(0);
+    setReportRefreshedAt(null);
+    setReportRefreshedBy(null);
+    setError("");
+    setPage(1);
+    reportRequestRef.current += 1;
+    setLoading(false);
+  }, [pageFilter]);
+  // เปลี่ยนช่วงเวลา = ต้องกดดึงรายงานใหม่ ห้ามโหลด snapshot คนละช่วงให้อัตโนมัติ
+  useEffect(() => {
+    const next = `${dateFilter}|${dateFrom}|${dateTo}`;
+    if (previousDateSelectionRef.current === next) return;
+    previousDateSelectionRef.current = next;
+    setReportPageId(""); setRows(null); setTotal(0);
+    setReportRefreshedAt(null); setReportRefreshedBy(null);
+    setPage(1); setError(""); reportRequestRef.current += 1; setLoading(false);
+  }, [dateFilter, dateFrom, dateTo]);
+  // โหลดจาก cache ก่อนเมื่อกลับเข้าเมนู/ย้อนมาฟิลเตอร์เดิม เพื่อลด API
+  useEffect(() => { if (reportPageId && reportPageId === pageFilter) load(false); }, [reportPageId, page, qDeb, stageFilter, dataFilter, sourceFilter, dateFilter, dateFrom, dateTo, sortKey, sortDir]);
+
+  // จำหน้ารายงานล่าสุดในหน่วยความจำของแอป เผื่อคอมโพเนนต์ถูก remount ระหว่างสลับเมนู
+  useEffect(() => {
+    if (!reportPageId || reportPageId !== pageFilter || rows === null) return;
+    const snapshot = {
+      rows, total, q, qDeb, pageFilter, reportPageId, stageFilter, dataFilter,
+      sourceFilter, dateFilter, dateFrom, dateTo, sortKey, sortDir, page, reportRefreshedAt, reportRefreshedBy,
+    };
+    setCustomerDatabaseViewCache(snapshot);
+    customerDatabaseReportCache.set(reportCacheKey(), { rows, total, refreshedAt: reportRefreshedAt, refreshedBy: reportRefreshedBy });
+  }, [rows, total, q, qDeb, pageFilter, reportPageId, stageFilter, dataFilter, sourceFilter, dateFilter, dateFrom, dateTo, sortKey, sortDir, page, reportRefreshedAt, reportRefreshedBy]);
+
+  function pullReport() {
+    if (!pageFilter) { setError("กรุณาเลือกเพจก่อนดึงรายงาน"); return; }
+    if (!dateFilter) { setError("กรุณาเลือกช่วงเวลาก่อนดึงรายงาน"); return; }
+    if (dateFilter === "custom" && (!dateFrom || !dateTo)) { setError("กรุณาเลือกวันที่เริ่มต้นและวันที่สิ้นสุดให้ครบ"); return; }
+    if (dateFilter === "custom" && dateFrom > dateTo) { setError("วันที่เริ่มต้นต้องไม่อยู่หลังวันที่สิ้นสุด"); return; }
+    setError("");
+    setRows(null);
+    setTotal(0);
+    customerDatabaseReportCache.clear();
+    // ถ้ากดซ้ำบนเพจเดิม reportPageId จะไม่เปลี่ยนและ effect จะไม่ทำงาน
+    // จึงสั่งโหลดเองเมื่ออยู่หน้า 1; ถ้าอยู่หน้าอื่น การเปลี่ยน page เป็น 1 จะเป็นตัวเริ่มโหลด
+    if (reportPageId === pageFilter) {
+      if (page === 1) load(false);
+      else setPage(1);
+      return;
+    }
+    setPage(1);
+    setReportPageId(pageFilter);
+  }
+
+  async function setStage(id, stage) {
+    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, stage, stage_manual: stage } : r)));
+    await supabase.from("chat_customers").update({ stage, stage_manual: stage, updated_at: new Date().toISOString() }).eq("id", id);
+    await invalidateSharedReportCache();
+  }
+
+  const pages = pageOpts;
+  const srcOf = (r) => (r.source === "ad" || r.entry_ad_id ? "ad" : r.source === "organic" ? "organic" : "unknown");
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const curPage = Math.min(page, totalPages);
+  const pageRows = rows || [];   // แถวของหน้าปัจจุบัน (กรอง/เรียง/แบ่งหน้าที่ DB แล้ว)
+
+  function toggleSort(key) {
+    if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortKey(key); setSortDir(key === "customer_name" || key === "page_name" ? "asc" : "desc"); }
+  }
+
+  // Export = ดึงทุกแถวที่ตรงเงื่อนไข (ทีละ 1,000 วนจนครบ) ไม่ใช่แค่หน้าปัจจุบัน
+  function openExportDialog() {
+    if (!pageFilter) { setError("กรุณาเลือกเพจก่อน Export CSV"); return; }
+    setError("");
+    setExportDateFilter("");
+    setExportDateFrom("");
+    setExportDateTo("");
+    setExportDialogOpen(true);
+  }
+
+  async function exportCsv() {
+    if (!pageFilter || !hasCompleteDateRange(exportDateFilter, exportDateFrom, exportDateTo)) return;
+    if (exportDateFilter === "custom" && exportDateFrom > exportDateTo) return;
+    setExporting(true);
+    try {
+      const B = 1000;
+      let all = [], from = 0;
+      for (let guard = 0; guard < 200; guard++) {
+        let query = supabase.from("chat_customers").select(EXPORT_DB_COLS.join(","));
+        query = applyFilters(query, { pageId: pageFilter, dateFilter: exportDateFilter, dateFrom: exportDateFrom, dateTo: exportDateTo })
+          .order(SORT_COL[sortKey] || "first_customer_message_at", { ascending: sortDir === "asc", nullsFirst: false }).range(from, from + B - 1);
+        const { data, error: e } = await query;
+        if (e) { setError("Export ล้มเหลว: " + e.message); return; }
+        all = all.concat(data || []);
+        if (!data || data.length < B) break;
+        from += B;
+      }
+      const esc = (v) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+      const csv = [EXPORT_COLUMNS.map(([header]) => esc(header)).join(","), ...all.map((row) => EXPORT_COLUMNS.map(([, getValue]) => esc(getValue(row))).join(","))].join("\n");
+      const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `customers_${bangkokDate()}.csv`;
+      a.click(); URL.revokeObjectURL(url);
+      setExportDialogOpen(false);
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  async function chooseImportFile(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    if (!pageFilter) { setError("กรุณาเลือกเพจก่อน Import Excel"); return; }
+    setError("");
+    setImportState({ fileName: file.name, loading: true });
+    try {
+      const { parseCustomerImportExcel } = await import("@/tooling/customer-import.js");
+      const parsed = await parseCustomerImportExcel(file);
+      const { data, error: invokeError } = await supabase.functions.invoke("import-chat-customers", {
+        body: { mode: "preview", page_id: pageFilter, records: parsed.records },
+      });
+      if (invokeError) throw new Error(await readFunctionErrorMessage(invokeError));
+      if (!data?.ok) throw new Error(data?.error || "ตรวจสอบไฟล์ไม่สำเร็จ");
+      setImportState({ fileName: file.name, ...parsed, preview: data, loading: false, applying: false, result: null });
+    } catch (err) {
+      setImportState(null);
+      setError(`Import Excel ไม่สำเร็จ: ${err?.message || err}`);
+    }
+  }
+
+  async function applyImport() {
+    if (!importState?.records?.length || importState.applying) return;
+    setImportState((state) => ({ ...state, applying: true, result: null }));
+    const { data, error: invokeError } = await supabase.functions.invoke("import-chat-customers", {
+      body: { mode: "apply", page_id: pageFilter, records: importState.records },
+    });
+    if (invokeError || !data) {
+      const message = invokeError ? await readFunctionErrorMessage(invokeError) : "ระบบไม่ตอบกลับ";
+      setImportState((state) => ({ ...state, applying: false, result: { ok: false, error: message } }));
+      return;
+    }
+    setImportState((state) => ({ ...state, applying: false, result: data }));
+    if (data.updated > 0) {
+      customerDatabaseReportCache.clear();
+      setCustomerDatabaseViewCache(null);
+      if (reportPageId === pageFilter) load(true);
+    }
+  }
+
+  const fmtTime = (t) => { try { return new Date(t).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" }); } catch { return t || "-"; } };
+  // ชื่อ ADS + ad id (สำหรับคอลัมน์แหล่งที่มา 2 บรรทัด)
+  const adNameOf = (r) => r.entry_ad_name || (r.comment_ad_names?.length ? r.comment_ad_names.filter(Boolean).join(", ") : r.comment_ad_name) || "";
+  const adIdOf = (r) => r.entry_ad_id || (r.comment_ad_ids?.length ? r.comment_ad_ids.filter(Boolean).join(", ") : "");
+  const sourceText = (r) => srcOf(r) === "ad"
+    ? `Ads ${adNameOf(r) || "โฆษณา"}${adIdOf(r) ? ` (ads id: ${adIdOf(r)})` : ""}`
+    : SOURCE_LABELS[srcOf(r)];
+  const patchRow = (id, patch) => { setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r))); invalidateSharedReportCache(); };
+  const selCls = "rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white";
+
+  const SortHead = ({ k, children, className = "" }) => (
+    <th className={`px-3 py-2 font-medium ${className}`}>
+      <button onClick={() => toggleSort(k)} className="inline-flex items-center gap-1 hover:text-slate-800">
+        {children}
+        {sortKey === k ? (sortDir === "asc" ? <ChevronUp size={13} /> : <ChevronDown size={13} />) : <ArrowUpDown size={13} className="text-slate-300" />}
+      </button>
+    </th>
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <h3 className="font-semibold text-slate-800">รีพอร์ตลูกค้าทักแชท</h3>
+            <p className="text-xs text-slate-500 mt-0.5">ข้อมูลลูกค้าทั้งหมดที่ซิงก์มาจาก Supabase — ค้นหา กรอง เรียงลำดับ และดาวน์โหลดได้</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <input ref={importInputRef} type="file" accept=".xlsx,.xlsm" onChange={chooseImportFile} className="hidden" />
+            <button onClick={() => pageFilter ? importInputRef.current?.click() : setError("กรุณาเลือกเพจก่อน Import Excel")} disabled={!!importState?.loading} title="จับคู่ด้วยชื่อลูกค้าในเพจที่เลือก และเขียนทับเฉพาะช่องที่มีข้อมูลในไฟล์" className="border border-emerald-300 text-emerald-700 rounded-lg px-3 py-2 text-sm font-medium hover:bg-emerald-50 disabled:opacity-50 flex items-center gap-1.5">
+              {importState?.loading ? <Loader2 className="animate-spin" size={15} /> : <Upload size={15} />} Import Excel
+            </button>
+            <button onClick={() => { customerDatabaseReportCache.clear(); load(true); }} disabled={loading || !reportPageId} title="คลิกเพื่อดึงข้อมูลปัจจุบันจากฐานข้อมูลและอัปเดตให้ทุก user" className="bg-cyan-500 text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-cyan-400 shadow-sm shadow-cyan-500/30 disabled:opacity-50 flex items-center gap-1.5">
+              {loading ? <Loader2 className="animate-spin" size={15} /> : <RefreshCw size={15} />} รีเฟรชข้อมูลล่าสุด
+            </button>
+            <button onClick={openExportDialog} disabled={!pageFilter || exporting} className="bg-slate-900 text-white rounded-lg px-3 py-2 text-sm font-medium hover:bg-slate-800 disabled:opacity-50 flex items-center gap-1.5">
+              {exporting ? <Loader2 className="animate-spin" size={15} /> : <FileDown size={15} />} Export CSV
+            </button>
+          </div>
+        </div>
+
+        <div className="relative">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหา ชื่อ / เบอร์ / ไอดีเทรด / username / ข้อความ" className="w-full rounded-lg border border-slate-300 pl-9 pr-3 py-2 text-sm" />
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <select value={pageFilter} onChange={(e) => setPageFilter(e.target.value)} className={selCls} title="เพจ">
+            <option value="">— เลือกเพจ —</option>
+            {pages.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+          <select value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} className={selCls} title="ช่วงวันที่">
+            <option value="">— เลือกช่วงเวลา —</option>
+            <option value="all">ทุกช่วงเวลา</option>
+            <option value="today">วันนี้</option>
+            <option value="yesterday">เมื่อวาน</option>
+            <option value="last3">3 วันล่าสุด</option>
+            <option value="this_week">สัปดาห์นี้</option>
+            <option value="last_week">สัปดาห์ที่แล้ว</option>
+            <option value="this_month">เดือนนี้</option>
+            <option value="last_month">เดือนที่แล้ว</option>
+            <option value="this_year">ปีนี้</option>
+            <option value="last_year">ปีที่แล้ว</option>
+            <option value="7">7 วันล่าสุด</option>
+            <option value="30">30 วันล่าสุด</option>
+            <option value="90">90 วันล่าสุด</option>
+            <option value="custom">กำหนดเอง…</option>
+          </select>
+          {dateFilter === "custom" && (
+            <div className="flex items-center gap-1.5">
+              <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className={selCls} title="ตั้งแต่วันที่" />
+              <span className="text-slate-400 text-sm">–</span>
+              <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className={selCls} title="ถึงวันที่" />
+            </div>
+          )}
+          <button onClick={pullReport} disabled={!pageFilter || !hasCompleteDateRange(dateFilter, dateFrom, dateTo) || loading} className="bg-amber-400 text-slate-950 rounded-lg px-4 py-2 text-sm font-semibold hover:bg-amber-300 disabled:opacity-50 flex items-center gap-1.5">
+            {loading ? <Loader2 className="animate-spin" size={15} /> : <FileDown size={15} />} ดึงรายงาน
+          </button>
+          <select value={dataFilter} onChange={(e) => setDataFilter(e.target.value)} className={selCls} title="ข้อมูลติดต่อ">
+            <option value="all">ข้อมูลติดต่อ: ทั้งหมด</option>
+            <option value="has">มีข้อมูลติดต่อ</option>
+            <option value="none">ยังไม่มีข้อมูล</option>
+          </select>
+          <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} className={selCls} title="ที่มา">
+            <option value="all">ที่มา: ทั้งหมด</option>
+            <option value="ad">โฆษณา</option>
+            <option value="organic">ออร์แกนิก</option>
+            <option value="unknown">ไม่ทราบ</option>
+          </select>
+        </div>
+
+        {error && <div className="text-sm text-rose-600 bg-rose-50 rounded-lg px-3 py-2">{error}</div>}
+        {!reportPageId && !error && <div className="text-sm text-slate-500 bg-slate-50 rounded-lg px-3 py-3">เลือกเพจและช่วงเวลา แล้วกด “ดึงรายงาน” ระบบจึงจะเริ่มโหลดข้อมูลลูกค้า</div>}
+        {reportPageId && reportRefreshedAt && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-cyan-200 bg-cyan-50 px-3 py-2.5">
+            <div className="text-sm font-medium text-cyan-900">ข้อมูลชุดนี้ดึงล่าสุด: {new Date(reportRefreshedAt).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "medium" })}{reportRefreshedBy ? <span className="ml-1 text-xs font-normal text-cyan-700">โดย {reportRefreshedBy}</span> : null}</div>
+            <div className="text-xs text-cyan-800">หากต้องการข้อมูลปัจจุบัน ให้คลิกปุ่ม “รีเฟรชข้อมูลล่าสุด” ด้านบน</div>
+          </div>
+        )}
+        {reportPageId && <div className="text-xs text-slate-500">พบ {total.toLocaleString()} รายการ{total > PAGE_SIZE ? ` — แสดงหน้า ${curPage}/${totalPages}` : ""}</div>}
+      </div>
+
+      {exportDialogOpen && (
+        <div className="customer-export-modal-backdrop fixed inset-0 z-[120] flex items-end sm:items-center justify-center sm:p-4" onMouseDown={(e) => { if (e.target === e.currentTarget && !exporting) setExportDialogOpen(false); }}>
+          <div className="customer-export-modal-panel relative w-full sm:max-w-lg rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden">
+            <div className="customer-export-modal-header flex items-start justify-between gap-4 px-5 pt-6 pb-5 sm:px-6">
+              <div className="min-w-0">
+                <div className="customer-export-modal-kicker"><FileDown size={14} /> EXPORT CSV</div>
+                <h3 className="customer-export-modal-title mt-2 text-xl font-semibold">เลือกช่วงเวลาที่ต้องการ</h3>
+                <p className="customer-export-modal-page mt-2"><span>เพจ</span>{pages.find((p) => p.id === pageFilter)?.name || pageFilter}</p>
+              </div>
+              <button type="button" onClick={() => !exporting && setExportDialogOpen(false)} className="customer-export-modal-close" aria-label="ปิด"><X size={20} /></button>
+            </div>
+            <div className="customer-export-modal-body px-5 py-5 sm:px-6 space-y-4">
+              <label className="customer-export-modal-label" htmlFor="customer-export-date-range">ช่วงเวลาของข้อมูล</label>
+              <select id="customer-export-date-range" value={exportDateFilter} onChange={(e) => setExportDateFilter(e.target.value)} className="customer-export-modal-select w-full rounded-xl px-4 py-3.5 text-sm">
+                <option value="">— เลือกช่วงเวลา —</option>
+                <option value="all">ทุกช่วงเวลา</option>
+                <option value="today">วันนี้</option><option value="yesterday">เมื่อวาน</option><option value="last3">3 วันล่าสุด</option>
+                <option value="this_week">สัปดาห์นี้</option><option value="last_week">สัปดาห์ที่แล้ว</option>
+                <option value="this_month">เดือนนี้</option><option value="last_month">เดือนที่แล้ว</option>
+                <option value="this_year">ปีนี้</option><option value="last_year">ปีที่แล้ว</option>
+                <option value="7">7 วันล่าสุด</option><option value="30">30 วันล่าสุด</option><option value="90">90 วันล่าสุด</option>
+                <option value="custom">กำหนดเอง…</option>
+              </select>
+              {exportDateFilter === "custom" && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <label className="customer-export-modal-label">ตั้งแต่วันที่<input type="date" value={exportDateFrom} onChange={(e) => setExportDateFrom(e.target.value)} className="customer-export-modal-input mt-1.5 w-full rounded-xl px-3 py-2.5 text-sm" /></label>
+                  <label className="customer-export-modal-label">ถึงวันที่<input type="date" value={exportDateTo} onChange={(e) => setExportDateTo(e.target.value)} className="customer-export-modal-input mt-1.5 w-full rounded-xl px-3 py-2.5 text-sm" /></label>
+                </div>
+              )}
+              {exportDateFilter === "custom" && exportDateFrom && exportDateTo && exportDateFrom > exportDateTo && <p className="text-sm text-rose-400">วันที่เริ่มต้นต้องไม่อยู่หลังวันที่สิ้นสุด</p>}
+              {!exportDateFilter && <p className="customer-export-modal-hint">เลือกช่วงเวลาที่ต้องการก่อน จึงจะดาวน์โหลดรายงานได้</p>}
+            </div>
+            <div className="customer-export-modal-footer flex flex-col-reverse sm:flex-row sm:justify-end gap-2 px-5 py-4 sm:px-6">
+              <button type="button" onClick={() => setExportDialogOpen(false)} disabled={exporting} className="customer-export-modal-cancel rounded-xl px-4 py-2.5 text-sm font-medium">ยกเลิก</button>
+              <button type="button" onClick={exportCsv} disabled={exporting || !hasCompleteDateRange(exportDateFilter, exportDateFrom, exportDateTo) || (exportDateFilter === "custom" && exportDateFrom > exportDateTo)} className="customer-export-modal-download inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold">
+                {exporting ? <Loader2 className="animate-spin" size={16} /> : <FileDown size={16} />} ดาวน์โหลด CSV
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        {!reportPageId ? (
+          <div className="text-sm text-slate-400 py-14 text-center">ยังไม่ได้ดึงรายงาน</div>
+        ) : rows === null ? (
+          <div className="p-6"><Spinner label="กำลังโหลดรายงาน..." /></div>
+        ) : total === 0 ? (
+          <div className="text-sm text-slate-400 py-10 text-center">ไม่พบข้อมูลตามเงื่อนไข</div>
+        ) : (
+          <>
+            <div className="w-full overflow-hidden">
+              <table className="w-full table-fixed text-xs">
+                <colgroup>
+                  <col className="w-[16%]" /><col className="w-[8%]" /><col className="w-[9%]" /><col className="w-[9%]" />
+                  <col className="w-[11%]" /><col className="w-[10%]" /><col className="w-[11%]" /><col className="w-[9%]" />
+                  <col className="w-[6%]" /><col className="w-[7%]" /><col className="w-[4%]" />
+                </colgroup>
+                <thead>
+                  <tr className="text-left text-xs text-slate-500 border-b border-slate-200 bg-slate-50">
+                    <SortHead k="customer_name">ลูกค้า</SortHead>
+                    <SortHead k="page_name">เพจ</SortHead>
+                    <SortHead k="trade_id" className="whitespace-nowrap">ไอดีเทรด</SortHead>
+                    <SortHead k="phone" className="whitespace-nowrap">เบอร์โทร</SortHead>
+                    <SortHead k="email" className="whitespace-nowrap">อีเมล</SortHead>
+                    <SortHead k="username" className="whitespace-nowrap">TradingView</SortHead>
+                    <SortHead k="psid" className="whitespace-nowrap">เฟสบุคไอดี</SortHead>
+                    <SortHead k="source" className="whitespace-nowrap">แหล่งที่มา</SortHead>
+                    <SortHead k="messages" className="text-center">ข้อความ</SortHead>
+                    <SortHead k="first_customer_message_at" className="whitespace-nowrap">แชทแรกของวัน</SortHead>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {pageRows.map((r) => (
+                    <tr key={r.id} className="hover:bg-slate-50 align-top">
+                      <td className="px-2 py-2 min-w-0">
+                        <button onClick={() => onOpenChat?.(r.id, r.last_message_at)} title={`เปิดแชทของ ${r.customer_name || "ลูกค้า"}`} className="block w-full truncate text-left text-slate-800 hover:text-indigo-600 font-medium underline-offset-2 hover:underline">
+                          {r.customer_name || "(ไม่มีชื่อ)"}
+                        </button>
+                        {r.last_user_text && <div title={r.last_user_text} className="text-[10px] text-slate-400 truncate">{r.last_user_text}</div>}
+                      </td>
+                      <td title={r.page_name || r.page_id || ""} className="px-1.5 py-2 text-slate-600 truncate">{r.page_name || r.page_id || "-"}</td>
+                      <td className="px-1 py-1.5 min-w-0"><EditableCell row={r} field="trade_id" numeric onSaved={patchRow} /></td>
+                      <td className="px-1 py-1.5 min-w-0"><EditableCell row={r} field="phone" numeric onSaved={patchRow} /></td>
+                      <td className="px-1 py-1.5 min-w-0"><EditableCell row={r} field="email" onSaved={patchRow} /></td>
+                      <td className="px-1 py-1.5 min-w-0"><EditableCell row={r} field="username" onSaved={patchRow} /></td>
+                      <td title={r.psid || ""} className="px-1.5 py-2 text-slate-500 truncate">{r.psid || <span className="text-slate-300">—</span>}</td>
+                      <td className="px-1.5 py-2 min-w-0">
+                        {srcOf(r) === "ad" ? (
+                          <div className="min-w-0">
+                            <div className="text-slate-600 truncate" title={`Ads ${adNameOf(r) || "โฆษณา"}`}>Ads {adNameOf(r) || "โฆษณา"}</div>
+                            {adIdOf(r) && <div className="text-[10px] text-slate-400 truncate" title={adIdOf(r)}>ads id: {adIdOf(r)}</div>}
+                          </div>
+                        ) : (
+                          <span className="text-slate-500 truncate block" title={SOURCE_LABELS[srcOf(r)]}>{SOURCE_LABELS[srcOf(r)]}</span>
+                        )}
+                      </td>
+                      <td className="px-1 py-2 text-center text-slate-600">{r.user_message_count}/{r.message_count}</td>
+                      <td title={fmtTime(r.first_customer_message_at)} className="px-1.5 py-2 text-slate-500 truncate">{fmtTime(r.first_customer_message_at)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between gap-3 px-3 py-2.5 border-t border-slate-200 text-sm">
+                <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={curPage <= 1} className="px-3 py-1.5 rounded-lg border border-slate-300 text-slate-600 disabled:opacity-40 hover:bg-slate-50">ก่อนหน้า</button>
+                <span className="text-xs text-slate-500">หน้า {curPage} / {totalPages}</span>
+                <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={curPage >= totalPages} className="px-3 py-1.5 rounded-lg border border-slate-300 text-slate-600 disabled:opacity-40 hover:bg-slate-50">ถัดไป</button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {importState && !importState.loading && (
+        <CustomerImportModal
+          state={importState}
+          pageName={pages.find((item) => item.id === pageFilter)?.name || pageFilter}
+          onClose={() => setImportState(null)}
+          onApply={applyImport}
+        />
+      )}
+
+    </div>
+  );
+}
+
+function CustomerImportModal({ state, pageName, onClose, onApply }) {
+  const summary = state.preview?.summary || {};
+  const matched = summary.matched || 0;
+  const matchedRecords = summary.matched_records || 0;
+  const fieldLabels = { trade_id: "ไอดีเทรด", phone: "เบอร์โทร", email: "อีเมล", username: "TradingView", stage: "สถานะ" };
+  const statusView = {
+    matched: ["พร้อมนำเข้า", "bg-emerald-100 text-emerald-700"],
+    not_found: ["ไม่พบในแอป", "bg-amber-100 text-amber-700"],
+    invalid: ["ข้อมูลไม่ครบ", "bg-slate-100 text-slate-600"],
+  };
+  const result = state.result;
+  return (
+    <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-black/50 sm:p-4" onMouseDown={(event) => { if (event.target === event.currentTarget && !state.applying) onClose(); }}>
+      <div className="bg-white w-full sm:max-w-4xl rounded-t-2xl sm:rounded-2xl max-h-[92vh] overflow-hidden shadow-2xl flex flex-col">
+        <div className="border-b border-slate-200 px-4 py-3 flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="font-semibold text-slate-800">ตรวจสอบก่อน Import Excel</h3>
+            <p className="text-xs text-slate-500 truncate">{state.fileName} · ชีต {state.sheetName} · เพจ {pageName}</p>
+          </div>
+          <button onClick={onClose} disabled={state.applying} className="p-1 text-slate-400 hover:text-slate-700 disabled:opacity-40" aria-label="ปิด"><X size={20} /></button>
+        </div>
+        <div className="p-4 overflow-y-auto space-y-4">
+          <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+            จับคู่ด้วยชื่อ Facebook เท่านั้น โดยตัดช่องว่างส่วนเกินและไม่สนตัวพิมพ์เล็กใหญ่ · ชื่อเดียวกันหลายแถวใน Excel จะถูกรวมเป็นลูกค้าคนเดียวและรวมไอดีเทรดทุกบัญชี · หากในแอปมีชื่อเดียวกันหลายแถว ระบบจะอัปเดตทุกแถว · ช่องว่างในไฟล์จะไม่ลบข้อมูลเดิม
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center">
+            {[["แถว Excel", summary.total || 0, "bg-slate-50 border-slate-200", "text-slate-700"], ["ชื่อไม่ซ้ำ", summary.names || 0, "bg-blue-50 border-blue-200", "text-blue-700"], ["ชื่อที่พร้อม", matched, "bg-emerald-50 border-emerald-200", "text-emerald-700"], ["แถวในแอปที่จะอัปเดต", matchedRecords, "bg-violet-50 border-violet-200", "text-violet-700"], ["ไม่พบ/ไม่สมบูรณ์", (summary.not_found || 0) + (summary.invalid || 0), "bg-amber-50 border-amber-200", "text-amber-700"]].map(([label, value, cardClass, valueClass]) => (
+              <div key={label} className={`rounded-xl border p-2 ${cardClass}`}><div className={`text-xl font-bold ${valueClass}`}>{value}</div><div className="text-[11px] text-slate-500">{label}</div></div>
+            ))}
+          </div>
+          <div className="border border-slate-200 rounded-xl overflow-hidden">
+            <div className="overflow-x-auto max-h-[45vh] overflow-y-auto">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-slate-50 text-slate-500"><tr><th className="px-3 py-2 text-left">แถว Excel</th><th className="px-3 py-2 text-left">ชื่อ Facebook</th><th className="px-3 py-2 text-left">บัญชีเทรด</th><th className="px-3 py-2 text-left">ช่องที่จะเขียนทับ</th><th className="px-3 py-2 text-left">แถวในแอป</th><th className="px-3 py-2 text-left">ผลจับคู่</th></tr></thead>
+                <tbody className="divide-y divide-slate-100">
+                  {(state.preview?.results || []).map((row, index) => {
+                    const view = statusView[row.status] || [row.status, "bg-slate-100 text-slate-600"];
+                    return <tr key={`${row.row_number}-${index}`}><td className="px-3 py-2 text-slate-400 whitespace-nowrap">{(row.row_numbers || [row.row_number]).filter(Boolean).join(", ") || "-"}</td><td className="px-3 py-2 text-slate-800 font-medium">{row.customer_name || "(ไม่มีชื่อ)"}</td><td className="px-3 py-2 text-slate-600 max-w-[220px] break-words">{(row.trade_ids || []).join(", ") || "—"}</td><td className="px-3 py-2 text-slate-600">{(row.fields || []).map((field) => fieldLabels[field] || field).join(", ") || "—"}</td><td className="px-3 py-2 text-slate-600 text-center">{row.matched_count || "—"}</td><td className="px-3 py-2"><span className={`inline-flex rounded-full px-2 py-0.5 whitespace-nowrap ${view[1]}`} title={row.reason}>{view[0]}</span></td></tr>;
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          {result && <div className={`rounded-xl px-3 py-2 text-sm ${result.updated > 0 ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>{result.updated > 0 ? `นำเข้าสำเร็จ ${result.matched_names || matched} ชื่อ · อัปเดต ${result.updated} แถวในแอป · ข้าม ${result.skipped || 0} ชื่อ${result.errors?.length ? ` · ล้มเหลว ${result.errors.length} รายการ` : ""}` : `นำเข้าไม่สำเร็จ: ${result.error || result.errors?.[0]?.error || "ไม่มีรายการที่อัปเดต"}`}</div>}
+        </div>
+        <div className="border-t border-slate-200 p-4 flex items-center justify-end gap-2">
+          <button onClick={onClose} disabled={state.applying} className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-600 disabled:opacity-40">{result?.updated > 0 ? "ปิด" : "ยกเลิก"}</button>
+          {!result?.updated && <button onClick={onApply} disabled={!matched || state.applying} className="rounded-lg bg-emerald-600 text-white px-4 py-2 text-sm font-semibold hover:bg-emerald-500 disabled:opacity-40 flex items-center gap-2">{state.applying && <Loader2 size={15} className="animate-spin" />}ยืนยันอัปเดต {matchedRecords} แถว</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// รายละเอียดลูกค้า 1 คน — ดูบทสนทนาที่ดึงมา + แก้สถานะ/ข้อมูลติดต่อได้
+function CustomerDetailModal({ row, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    stage: row.stage || "new",
+    trade_id: row.trade_id || "",
+    phone: row.phone || "",
+    email: row.email || "",
+    username: row.username || "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [pushing, setPushing] = useState(false);
+  const [pushResult, setPushResult] = useState(null);   // ผลส่งสถานะไป Meta (ทดสอบ)
+  const fmt = (t) => { try { return new Date(t).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" }); } catch { return t || "-"; } };
+  const transcript = Array.isArray(row.transcript) ? row.transcript : [];
+  const srcLabel = (row.source === "ad" ? "โฆษณา" : row.source === "organic" ? "ออร์แกนิก" : "ไม่ทราบ") + (row.entry_ad_id ? ` #${row.entry_ad_id}` : "");
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  async function save() {
+    setSaving(true);
+    const patch = {
+      stage: form.stage, stage_manual: form.stage,
+      trade_id: form.trade_id.trim() || null,
+      phone: form.phone.trim() || null,
+      email: form.email.trim() || null,
+      username: form.username.trim() || null,
+      updated_at: new Date().toISOString(),
+    };
+    const { error } = await supabase.from("chat_customers").update(patch).eq("id", row.id);
+    setSaving(false);
+    if (error) { alert("บันทึกไม่สำเร็จ: " + error.message); return; }
+    setSaved(true); setTimeout(() => setSaved(false), 1500);
+    onSaved?.(row.id, patch);
+  }
+
+  // ทดสอบส่งสถานะปัจจุบันไปติดเป็น Custom Label บน Meta (ราย 1 คน)
+  async function pushToMeta() {
+    setPushing(true); setPushResult(null);
+    const { data, error } = await supabase.functions.invoke("meta-push-labels", { body: { id: row.id } });
+    setPushing(false);
+    if (error) { setPushResult({ ok: false, msg: await readFunctionErrorMessage(error) }); return; }
+    if (!data?.ok) { setPushResult({ ok: false, msg: data?.error || "ส่งไม่สำเร็จ" }); return; }
+    const r0 = data.results?.[0];
+    if (r0?.skipped) {
+      setPushResult({ ok: true, msg: `ข้าม — ลูกค้ามีป้าย "สร้างคอนเวอร์ชั่นแล้ว" อยู่แล้ว ไม่ดาวน์เกรดเป็น "${r0.label}"` });
+    } else if (r0?.assigned) {
+      setPushResult({ ok: true, msg: `ติดป้าย "${r0.label}" ให้ลูกค้าบน Meta สำเร็จ${r0.removed_others ? ` (แทนที่ป้ายสถานะเดิม ${r0.removed_others})` : ""}` });
+    } else {
+      const detail = r0?.error || (data.label_errors?.length ? data.label_errors.join(" · ") : "") || "ติดป้ายไม่สำเร็จ — เช็คสิทธิ์ token (pages_messaging)";
+      setPushResult({ ok: false, msg: detail });
+    }
+  }
+
+  const fieldCls = "mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm";
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 sm:p-4"
+      onMouseDown={(e) => {
+        // ปิดเฉพาะเมื่อเริ่มกดบนฉากหลังจริง ๆ การลากเลือกข้อความใน input
+        // อาจปล่อยเมาส์นอกช่องและเกิด click ที่ ancestor ได้ จึงห้ามใช้ onClick ปิด modal
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="bg-white w-full sm:max-w-2xl rounded-t-2xl sm:rounded-2xl max-h-[92vh] overflow-y-auto shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="sticky top-0 bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="font-semibold text-slate-800 truncate">{row.customer_name || "(ไม่มีชื่อ)"}</h3>
+            <p className="text-xs text-slate-500 truncate">{row.page_name || row.page_id} · เฟสบุคไอดี {row.psid || "-"}</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700 p-1 shrink-0" aria-label="ปิด"><X size={20} /></button>
+        </div>
+
+        <div className="p-4 space-y-5">
+          {/* สรุปข้อมูลที่มา */}
+          <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+            <div className="text-[11px] text-slate-400">แหล่งที่มา: {srcLabel} · ข้อความลูกค้า/รวม: {row.user_message_count}/{row.message_count} · ล่าสุด: {fmt(row.last_message_at)}</div>
+          </div>
+
+          {/* ทดสอบส่งสถานะไป Meta (ติดเป็น Custom Label บนบทสนทนาของเพจ) */}
+          <div className="rounded-xl border border-slate-200 p-3 space-y-2">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <div className="text-sm font-medium text-slate-700">ส่งสถานะไป Meta (ทดสอบ)</div>
+                <p className="text-[11px] text-slate-500">ติดป้าย "{CHAT_STAGES.find((s) => s.key === row.stage)?.label || row.stage}" ให้ลูกค้าคนนี้บนกล่องข้อความของเพจ · แทนที่เฉพาะป้ายสถานะระบบเดิม (ป้ายอื่นที่แอดมินติดเอง เช่น "ชำระเงินแล้ว" ไม่ถูกแตะ)</p>
+              </div>
+              <button onClick={pushToMeta} disabled={pushing || !row.psid} className="bg-slate-900 text-white rounded-lg px-3 py-2 text-sm font-medium hover:bg-slate-800 disabled:opacity-60 flex items-center gap-1.5 shrink-0">
+                {pushing ? <Loader2 className="animate-spin" size={14} /> : <RefreshCw size={14} />} ทดสอบส่งป้าย
+              </button>
+            </div>
+            {!row.psid && <div className="text-[11px] text-rose-500">ลูกค้าคนนี้ไม่มี PSID จึงส่งไม่ได้</div>}
+            {pushResult && (
+              <div className={`text-xs rounded-lg px-3 py-2 ${pushResult.ok ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-600"}`}>
+                {pushResult.ok ? "✓ " : "✗ "}{pushResult.msg}
+              </div>
+            )}
+          </div>
+
+          {/* แก้ไขข้อมูล */}
+          <div>
+            <div className="text-sm font-medium text-slate-700 mb-2">แก้ไขข้อมูล</div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-slate-500">สถานะ</label>
+                <select value={form.stage} onChange={(e) => set("stage", e.target.value)} className={fieldCls}>
+                  {CHAT_STAGES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">ไอดีเทรด</label>
+                <input value={form.trade_id} onChange={(e) => set("trade_id", e.target.value)} className={fieldCls} />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">เบอร์โทร</label>
+                <input value={form.phone} onChange={(e) => set("phone", e.target.value)} className={fieldCls} />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">อีเมล</label>
+                <input value={form.email} onChange={(e) => set("email", e.target.value)} className={fieldCls} />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500">Username (TradingView)</label>
+                <input value={form.username} onChange={(e) => set("username", e.target.value)} className={fieldCls} />
+              </div>
+            </div>
+            <div className="flex items-center gap-3 mt-3">
+              <button onClick={save} disabled={saving} className="bg-slate-900 text-white rounded-lg px-5 py-2 text-sm font-medium hover:bg-slate-800 disabled:opacity-60 flex items-center gap-2">
+                {saving ? <Loader2 className="animate-spin" size={15} /> : null} บันทึก
+              </button>
+              {saved && <span className="text-sm text-emerald-700">บันทึกแล้ว</span>}
+            </div>
+          </div>
+
+          {/* บทสนทนาที่ดึงมา */}
+          <div>
+            <div className="text-sm font-medium text-slate-700 mb-1">บทสนทนาที่ดึงมา ({transcript.length} ข้อความ)</div>
+            {transcript.length === 0 ? (
+              <div className="text-xs text-slate-400 bg-slate-50 rounded-lg px-3 py-4 text-center">
+                ยังไม่มีบทสนทนาเก็บไว้ — ต้อง deploy ฟังก์ชันซิงก์เวอร์ชันใหม่ + รัน migration แล้วซิงก์ใหม่ ระบบจึงจะเก็บบทสนทนาให้
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-[40vh] overflow-y-auto pr-1">
+                {transcript.map((m, i) => (
+                  <div key={i} className={`flex ${m.w === "u" ? "justify-start" : "justify-end"}`}>
+                    <div className={`max-w-[80%] rounded-2xl px-3 py-1.5 text-sm ${m.w === "u" ? "bg-slate-100 text-slate-800" : "bg-indigo-500 text-white"}`}>
+                      <div className="text-[10px] opacity-70 mb-0.5">{m.w === "u" ? "ลูกค้า" : "เพจ"}{m.at ? ` · ${fmt(m.at)}` : ""}</div>
+                      <div className="whitespace-pre-wrap break-words">{m.t}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+

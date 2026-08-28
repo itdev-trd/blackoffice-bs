@@ -1,6 +1,6 @@
 # วิธีเอา AI Ads Automation ขึ้นใช้งานจริง
 
-โค้ดชุดนี้ใช้ stack เดียวกับ AlphardVIP: React + Vite + Supabase (ฐานข้อมูล + auth + edge functions) + Vercel (hosting)
+โค้ดชุดนี้ใช้ stack เดียวกับ AlphardVIP: React + Next.js + Supabase (ฐานข้อมูล + auth + edge functions) + Vercel (hosting)
 เหลือแค่คุณสมัครบัญชี ใส่ค่าที่ได้ลงไฟล์ `.env` และตั้งค่า Meta Marketing API
 
 ---
@@ -23,8 +23,8 @@ security-hardening ท้ายสุด) แต่ละส่วนมีค�
 2. คัดลอก `Project URL` และ `anon public` key
 3. สร้างไฟล์ชื่อ `.env` ในโฟลเดอร์นี้ (คัดลอกจาก `.env.example`) แล้ววางค่า:
    ```
-   VITE_SUPABASE_URL=...
-   VITE_SUPABASE_ANON_KEY=...
+   NEXT_PUBLIC_SUPABASE_URL=...
+   NEXT_PUBLIC_SUPABASE_ANON_KEY=...
    ```
 
 ## 4. สร้างบัญชีผู้ใช้ (แอดมิน)
@@ -82,7 +82,7 @@ npm ci
 npm run check
 npm run dev
 ```
-เปิดเบราว์เซอร์ตาม URL ที่ขึ้น (ปกติ http://localhost:5173) แล้วลองล็อกอิน
+เปิดเบราว์เซอร์ตาม URL ที่ขึ้น (ปกติ http://localhost:3000) แล้วลองล็อกอิน
 
 ## 9. Deploy ขึ้นให้มี URL จริง (Vercel — ฟรี)
 
@@ -96,10 +96,10 @@ npm run dev
 ### 9.2 Deploy บน Vercel
 1. ไปที่ https://vercel.com → **Sign Up** → **Continue with GitHub**
 2. Dashboard → **Add New → Project** → หา repo ที่สร้าง → **Import**
-3. Vercel ตรวจพบว่าเป็นโปรเจกต์ Vite เองอัตโนมัติ ไม่ต้องแก้อะไร
+3. Vercel ตรวจพบว่าเป็นโปรเจกต์ Next.js เองอัตโนมัติ ไม่ต้องแก้อะไร
 4. เปิด **Environment Variables** → เพิ่ม:
-   - `VITE_SUPABASE_URL` = Project URL จาก Supabase
-   - `VITE_SUPABASE_ANON_KEY` = anon public key จาก Supabase
+   - `NEXT_PUBLIC_SUPABASE_URL` = Project URL จาก Supabase
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY` = anon public key จาก Supabase
 5. กด **Deploy** รอประมาณ 1 นาที
 6. กด **Visit** เปิดเว็บที่ deploy เสร็จแล้ว เช่น `https://ai-ads-automation.vercel.app`
 

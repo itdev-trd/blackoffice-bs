@@ -1,0 +1,289 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { supabase } from "@/lib/supabase/client";
+import { useTheme } from "@/lib/hooks/useTheme";
+import { Loader2, RefreshCw, Crown, Trophy } from "lucide-react";
+
+export default function LeaderboardTab({ active = true }) {
+  const { theme } = useTheme();
+  const isLight = theme === "light";
+  const thDay = (o = 0) => { const d = new Date(Date.now() + 7 * 3600 * 1000); d.setUTCDate(d.getUTCDate() + o); return d.toISOString().slice(0, 10); };
+  const thMonth = (mo, which) => { const d = new Date(Date.now() + 7 * 3600 * 1000); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() + mo + (which === "end" ? 1 : 0)); if (which === "end") d.setUTCDate(0); return d.toISOString().slice(0, 10); };
+  const PRESETS = [
+    ["วันนี้", () => [thDay(0), thDay(0)]],
+    ["เมื่อวาน", () => [thDay(-1), thDay(-1)]],
+    ["3 วันล่าสุด", () => [thDay(-2), thDay(0)]],
+    ["7 วันล่าสุด", () => [thDay(-6), thDay(0)]],
+    ["14 วันล่าสุด", () => [thDay(-13), thDay(0)]],
+    ["30 วันล่าสุด", () => [thDay(-29), thDay(0)]],
+    ["เดือนนี้", () => [thMonth(0, "start"), thDay(0)]],
+    ["เดือนที่แล้ว", () => [thMonth(-1, "start"), thMonth(-1, "end")]],
+    ["3 เดือนล่าสุด", () => [thMonth(-2, "start"), thDay(0)]],
+    ["6 เดือนล่าสุด", () => [thMonth(-5, "start"), thDay(0)]],
+    ["ปีนี้", () => { const d = new Date(Date.now() + 7 * 3600 * 1000); return [`${d.getUTCFullYear()}-01-01`, thDay(0)]; }],
+  ];
+  const [since, setSince] = useState(() => thDay(-6));
+  const [until, setUntil] = useState(() => thDay(0));
+  const [presetIdx, setPresetIdx] = useState(3);   // 7 วันล่าสุด
+  const [res, setRes] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [flash, setFlash] = useState(false);       // ไฮไลต์ตอนอัปเดตสด
+  const reloadRef = useRef(null);
+  const fmtDMY = (iso) => { const [y, m, d] = String(iso).split("-"); return `${Number(d)}/${Number(m)}/${y}`; };
+  const nameOf = (e) => { const s = String(e || ""); if (s.startsWith("(")) return s; const at = s.indexOf("@"); return at > 0 ? s.slice(0, at) : s; };
+
+  const load = useCallback(async (flashOnDone = false) => {
+    setBusy(true); setErr("");
+    const { data, error } = await supabase.functions.invoke("leaderboard", { body: { since, until } });
+    setBusy(false);
+    if (error || !data?.ok) { setErr(error?.message || data?.error || "โหลดไม่สำเร็จ"); return; }
+    setRes(data);
+    if (flashOnDone) { setFlash(true); setTimeout(() => setFlash(false), 900); }
+  }, [since, until]);
+  reloadRef.current = load;
+
+  useEffect(() => { if (active) load(); }, [since, until, active, load]);
+
+  // อัปเดตเรียลไทม์ — reply_stats เปลี่ยน (ส่ง/ตอบ) → รีโหลดแบบหน่วง (debounce) กัน spam
+  useEffect(() => {
+    if (!active) return;
+    let t = null;
+    const ch = supabase.channel("lb-rt")
+      .on("postgres_changes", { event: "*", schema: "public", table: "reply_stats" }, () => {
+        clearTimeout(t); t = setTimeout(() => reloadRef.current && reloadRef.current(true), 2500);
+      }).subscribe();
+    return () => { clearTimeout(t); supabase.removeChannel(ch); };
+  }, [active]);
+
+  // พาเลตต์ luxury ที่รักษาบุคลิกทองไว้ทั้งโหมดมืดและสว่าง
+  const C = isLight ? {
+    bg: "#F7F9FC", ink: "#FFFFFF", border: "rgba(15,23,42,.12)", hair: "rgba(15,23,42,.09)",
+    gold: "#B98500", silver: "#64748B", bronze: "#A96022",
+    purple: "#6D4AFF", green: "#059669", red: "#DC2626",
+    t1: "#0F172A", t2: "#0F172A", t3: "#0F172A",
+  } : {
+    bg: "#07090D", ink: "#0A0D12", border: "rgba(255,255,255,0.07)", hair: "rgba(255,255,255,0.06)",
+    gold: "#F7C948", silver: "#C9D3E2", bronze: "#C8894B",
+    purple: "#9D6BFF", green: "#1ED760", red: "#FF5C5C",
+    t1: "#FFFFFF", t2: "rgba(255,255,255,.62)", t3: "rgba(255,255,255,.38)",
+  };
+  const FONT = "'Noto Sans Thai','IBM Plex Sans Thai',system-ui,-apple-system,sans-serif";
+  const NUM = "'IBM Plex Sans Thai',system-ui,sans-serif";
+  const board = res?.board || [];
+  const top3 = board.slice(0, 3);
+  const rest = board.slice(3);
+  // จัดเรียงแท่น: [ที่2, ที่1, ที่3] เพื่อให้ที่1 อยู่กลาง+สูงสุด
+  const podiumOrder = [top3[1], top3[0], top3[2]];
+  // วัสดุโลหะ + สัดส่วนแบบ cinematic (ที่1 เด่นสุด, ข้าง ๆ ถอยลึก)
+  const META = {
+    1: { name: "gold", color: C.gold, hi: "#FFF3C4", mid: "#F3C233", lo: "#8A6410", edge: "#FFE9A0",
+         ring: "rgba(247,201,72,.95)", glow: "rgba(247,201,72,.55)", medal: "🥇", h: 196, av: 108, depth: 1, z: 5, spot: "rgba(247,201,72,.55)" },
+    2: { name: "silver", color: C.silver, hi: "#FBFDFF", mid: "#B7C2D3", lo: "#727E92", edge: "#EDF2FA",
+         ring: "rgba(201,211,226,.9)", glow: "rgba(201,211,226,.30)", medal: "🥈", h: 134, av: 84, depth: .96, z: 3, spot: "rgba(220,230,245,.34)" },
+    3: { name: "bronze", color: C.bronze, hi: "#F1C494", mid: "#C1834A", lo: "#6F4420", edge: "#EAB07A",
+         ring: "rgba(200,137,75,.9)", glow: "rgba(200,137,75,.30)", medal: "🥉", h: 104, av: 84, depth: .96, z: 3, spot: "rgba(210,160,110,.30)" },
+  };
+  const order = [2, 1, 3];
+  const PAD = "clamp(20px,4.5vw,60px)";
+
+  return (
+    <div style={{ fontFamily: FONT, background: C.bg, color: C.t1, borderRadius: 26, border: `1px solid ${C.border}`, boxShadow: isLight ? "0 24px 70px -42px rgba(15,23,42,.35)" : "0 40px 120px -50px rgba(0,0,0,.95)", overflow: "hidden" }}>
+      <style>{`
+        @keyframes lbPulse{0%,100%{opacity:.9;transform:scale(1)}50%{opacity:0;transform:scale(2.2)}}
+        @keyframes lbFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-7px)}}
+        @keyframes lbBreathe{0%,100%{opacity:.55}50%{opacity:.9}}
+        @keyframes lbRise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+        .lb-row{transition:background .18s ease}
+        .lb-row:hover{background:${isLight ? "rgba(15,23,42,.035)" : "rgba(255,255,255,.028)"}}
+        .lb-tab{transition:color .2s ease}
+        .lb-tab:hover{color:${isLight ? "rgba(15,23,42,.9)" : "rgba(255,255,255,.9)"}}
+        .lb-ico{transition:all .2s ease}
+        .lb-ico:hover{color:${C.t1};border-color:${isLight ? "rgba(15,23,42,.24)" : "rgba(255,255,255,.24)"}!important;background:${isLight ? "rgba(15,23,42,.05)" : "rgba(255,255,255,.05)"}!important}
+        .lb-date{color-scheme:${isLight ? "light" : "dark"}}
+        .lb-date::-webkit-calendar-picker-indicator{filter:${isLight ? "none" : "invert(.6)"};cursor:pointer}
+        .lb-podium{animation:lbRise .6s cubic-bezier(.2,.8,.2,1) both}
+        @media(max-width:640px){
+          .lb-hide-sm{display:none!important}
+          .lb-grid{grid-template-columns:38px 1fr 92px!important}
+        }
+      `}</style>
+
+      {/* ═══ Editorial masthead ═══ */}
+      <div style={{ padding: `36px ${PAD} 0` }}>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 28 }}>
+          <div style={{ minWidth: 240 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+              <span style={{ width: 22, height: 1, background: `linear-gradient(90deg,transparent,${C.gold})` }} />
+              <span style={{ fontSize: 11, letterSpacing: ".42em", textTransform: "uppercase", color: C.gold, fontWeight: 600, fontFamily: NUM }}>Leaderboard</span>
+            </div>
+            <h2 style={{ fontSize: "clamp(30px,4.6vw,52px)", fontWeight: 800, lineHeight: .98, letterSpacing: "-.025em", margin: 0 }}>กระดานแต้ม</h2>
+            <p style={{ fontSize: 14, color: C.t2, margin: "14px 0 0", lineHeight: 1.5, maxWidth: 420 }}>
+              จัดอันดับแต้มพิเศษจากการตอบแชท<span style={{ color: C.t1 }}>นอกเวลาทำการ</span> — ยิ่งตอบดึก ยิ่งเป็นวันหยุด และยิ่งตอบไว ยิ่งได้แต้มมาก
+            </p>
+          </div>
+          {/* Total score — editorial figure, not a boxed card */}
+          <div style={{ textAlign: "right", position: "relative", paddingLeft: 30 }}>
+            <div style={{ position: "absolute", right: -8, top: -18, width: 200, height: 120, background: `radial-gradient(60% 60% at 70% 40%, ${C.purple}44, transparent 72%)`, filter: "blur(14px)", pointerEvents: "none", animation: "lbBreathe 4s ease-in-out infinite" }} />
+            <div style={{ position: "relative", fontSize: 11, letterSpacing: ".34em", textTransform: "uppercase", color: C.t3, fontWeight: 600, fontFamily: NUM }}>แต้มรวมทั้งหมด</div>
+            <div style={{ position: "relative", fontFamily: NUM, fontVariantNumeric: "tabular-nums", fontSize: "clamp(46px,7vw,84px)", fontWeight: 800, lineHeight: .92, letterSpacing: "-.03em", marginTop: 6, transition: "transform .35s cubic-bezier(.2,.8,.2,1)", transform: flash ? "scale(1.04)" : "scale(1)", color: isLight ? "#0F172A" : "transparent", background: isLight ? "none" : "linear-gradient(176deg,#FFFFFF 30%,#C9B6FF 100%)", WebkitBackgroundClip: isLight ? "border-box" : "text", WebkitTextFillColor: isLight ? "#0F172A" : "transparent", filter: isLight ? "none" : `drop-shadow(0 6px 30px ${C.purple}55)` }}>
+              {res ? (res.total ?? 0).toLocaleString() : "—"}
+            </div>
+            <div style={{ position: "relative", marginTop: 8, fontSize: 13, color: C.t2 }}>
+              <span style={{ color: C.gold, fontWeight: 600, fontFamily: NUM }}>{fmtDMY(since)}{since !== until ? `  –  ${fmtDMY(until)}` : ""}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Toolbar: editorial tabs + date + live — separated by hairlines */}
+        <div style={{ marginTop: 30, borderTop: `1px solid ${C.hair}`, borderBottom: `1px solid ${C.hair}`, padding: "14px 0", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 16 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "clamp(10px,1.6vw,22px)" }}>
+            {PRESETS.map(([label, fn], i) => {
+              const on = presetIdx === i;
+              return (
+                <button key={label} className="lb-tab" onClick={() => { const [s, u] = fn(); setSince(s); setUntil(u); setPresetIdx(i); }}
+                  style={{ position: "relative", background: "none", border: "none", cursor: "pointer", padding: "2px 0", fontSize: 13.5, fontWeight: on ? 700 : 500, color: on ? C.t1 : C.t3, fontFamily: FONT }}>
+                  {label}
+                  {on && <span style={{ position: "absolute", left: 0, right: 0, bottom: -15, height: 2, borderRadius: 2, background: `linear-gradient(90deg,${C.gold},#E9B923)`, boxShadow: `0 0 12px ${C.gold}` }} />}
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <input type="date" className="lb-date" value={since} onChange={(e) => { setSince(e.target.value); setPresetIdx(-1); }}
+              style={{ background: "transparent", color: C.t2, border: `1px solid ${C.border}`, borderRadius: 999, padding: "6px 12px", fontSize: 12.5, fontFamily: NUM }} />
+            <span style={{ color: C.t3, fontSize: 12 }}>→</span>
+            <input type="date" className="lb-date" value={until} onChange={(e) => { setUntil(e.target.value); setPresetIdx(-1); }}
+              style={{ background: "transparent", color: C.t2, border: `1px solid ${C.border}`, borderRadius: 999, padding: "6px 12px", fontSize: 12.5, fontFamily: NUM }} />
+            <button onClick={() => load()} disabled={busy} className="lb-ico" title="รีเฟรช"
+              style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 34, height: 34, borderRadius: "50%", background: "transparent", color: C.t2, border: `1px solid ${C.border}`, cursor: "pointer", opacity: busy ? .5 : 1 }}>
+              {busy ? <Loader2 className="animate-spin" size={15} /> : <RefreshCw size={15} />}
+            </button>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, color: C.green, fontWeight: 600, letterSpacing: ".02em" }}>
+              <span style={{ position: "relative", width: 7, height: 7 }}>
+                <span style={{ position: "absolute", inset: 0, borderRadius: "50%", background: C.green, animation: "lbPulse 2s ease-out infinite" }} />
+                <span style={{ position: "absolute", inset: 0, borderRadius: "50%", background: C.green }} />
+              </span>
+              LIVE
+            </span>
+          </div>
+        </div>
+        {err && <div style={{ marginTop: 16, fontSize: 13, color: C.red, background: "rgba(255,92,92,.07)", border: `1px solid rgba(255,92,92,.22)`, borderRadius: 12, padding: "10px 14px" }}>{err}</div>}
+      </div>
+
+      {/* ═══ CINEMATIC PODIUM STAGE (hero) ═══ */}
+      {board.length > 0 ? (
+        <div style={{ position: "relative", overflow: "hidden", marginTop: 8, minHeight: 480,
+          background: isLight ? "radial-gradient(130% 90% at 50% -10%, #FFFFFF 0%, #EEF3FA 48%, #E5EBF4 100%)" : "radial-gradient(130% 90% at 50% -10%, #1A2130 0%, #0C1017 42%, #06080C 100%)" }}>
+          {/* atmospheric top haze */}
+          <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 240, background: "radial-gradient(70% 100% at 50% 0%, rgba(255,255,255,.05), transparent 70%)", pointerEvents: "none" }} />
+          {/* faint ticker line horizon */}
+          <svg viewBox="0 0 1200 300" preserveAspectRatio="none" style={{ position: "absolute", left: 0, right: 0, bottom: 96, width: "100%", height: 150, opacity: .18, pointerEvents: "none" }}>
+            <defs><linearGradient id="lbLine" x1="0" x2="1"><stop offset="0" stopColor="transparent" /><stop offset=".5" stopColor={C.gold} /><stop offset="1" stopColor="transparent" /></linearGradient></defs>
+            <polyline fill="none" stroke="url(#lbLine)" strokeWidth="1.5"
+              points={Array.from({ length: 60 }).map((_, i) => `${i * 20},${150 - ((Math.sin(i * .6) * 40) + ((i * 53) % 60))}`).join(" ")} />
+          </svg>
+          {/* reflective floor */}
+          <div style={{ position: "absolute", left: 0, right: 0, bottom: 88, height: 1, background: `linear-gradient(90deg,transparent, ${C.gold}88, rgba(255,255,255,.35), ${C.gold}88, transparent)`, opacity: .5 }} />
+          <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 96, background: isLight ? "linear-gradient(180deg, rgba(229,235,244,0), #E5EBF4 70%)" : "linear-gradient(180deg, rgba(6,8,12,0), #06080C 70%)", pointerEvents: "none" }} />
+
+          <div className="lb-podium" style={{ position: "relative", display: "flex", alignItems: "flex-end", justifyContent: "center", gap: "clamp(14px,4vw,64px)", padding: `70px ${PAD} 96px`, zIndex: 2 }}>
+            {order.map((rank, i) => {
+              const u = podiumOrder[i]; const m = META[rank];
+              const colW = rank === 1 ? "clamp(160px,20vw,236px)" : "clamp(128px,15vw,190px)";
+              if (!u) return <div key={rank} style={{ width: colW }} />;
+              const faceGrad = `linear-gradient(180deg, ${m.hi} 0%, ${m.mid} 30%, ${m.color} 46%, ${m.lo} 100%)`;
+              return (
+                <div key={rank} style={{ width: colW, display: "flex", flexDirection: "column", alignItems: "center", zIndex: m.z, transform: `scale(${m.depth})`, opacity: m.depth, filter: rank === 1 ? "none" : "saturate(.95)" }}>
+                  {/* volumetric spotlight cone */}
+                  <div style={{ position: "absolute", top: -30, width: "150%", height: 430, clipPath: "polygon(40% 0,60% 0,100% 100%,0 100%)", background: `linear-gradient(180deg, ${m.spot} 0%, transparent 78%)`, filter: "blur(20px)", mixBlendMode: "screen", opacity: rank === 1 ? .95 : .6, pointerEvents: "none" }} />
+
+                  {rank === 1 && <Crown size={30} fill={C.gold} style={{ color: C.gold, marginBottom: 6, filter: `drop-shadow(0 0 12px ${C.gold})`, animation: "lbFloat 3.2s ease-in-out infinite", zIndex: 3 }} />}
+
+                  {/* avatar — floating, volumetric ring */}
+                  <div style={{ position: "relative", zIndex: 3, width: m.av, height: m.av, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: NUM, fontWeight: 800, fontSize: m.av * 0.3, color: "#F8FAFC",
+                    background: "radial-gradient(circle at 34% 28%, #313a4b, #10141d 78%)",
+                    border: `2px solid ${m.ring}`,
+                    boxShadow: `0 0 0 6px rgba(0,0,0,.4), 0 22px 44px -16px ${m.glow}, 0 0 46px -6px ${m.glow}, inset 0 2px 6px rgba(255,255,255,.12)` }}>
+                    {nameOf(u.email).slice(0, 2).toUpperCase()}
+                    <span style={{ position: "absolute", bottom: -8, right: -8, width: 30, height: 30, borderRadius: "50%", background: C.ink, border: `1px solid ${m.ring}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, boxShadow: `0 6px 14px rgba(0,0,0,.6)` }}>{m.medal}</span>
+                  </div>
+
+                  {/* name + score — editorial */}
+                  <div style={{ textAlign: "center", marginTop: 16, width: "100%", zIndex: 3 }}>
+                    <div title={u.email} style={{ fontSize: 13.5, fontWeight: 600, color: C.t2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>{nameOf(u.email)}</div>
+                    <div style={{ fontFamily: NUM, fontVariantNumeric: "tabular-nums", fontSize: rank === 1 ? "clamp(34px,4.2vw,50px)" : "clamp(26px,3vw,34px)", fontWeight: 800, lineHeight: 1.02, letterSpacing: "-.02em", marginTop: 6, color: m.color, textShadow: `0 0 30px ${m.glow}` }}>{u.points.toLocaleString()}</div>
+                    <div style={{ fontSize: 11.5, color: C.t3, marginTop: 3, fontFamily: NUM }}>{u.count} ครั้ง · ทัน {u.in_time}</div>
+                  </div>
+
+                  {/* pedestal — 3D metal with foreshortened top + specular */}
+                  <div style={{ position: "relative", width: "100%", marginTop: 18, perspective: 900 }}>
+                    {/* top surface */}
+                    <div style={{ height: 34, borderRadius: 5, transform: "rotateX(56deg)", transformOrigin: "bottom", marginBottom: -3,
+                      background: `linear-gradient(180deg, ${m.edge}, ${m.mid})`,
+                      boxShadow: `inset 0 0 14px rgba(0,0,0,.25), 0 -2px 8px ${m.glow}` }} />
+                    {/* front face */}
+                    <div style={{ position: "relative", height: m.h, borderRadius: "3px 3px 7px 7px", overflow: "hidden",
+                      background: faceGrad,
+                      boxShadow: `inset 0 2px 0 rgba(255,255,255,.55), inset 0 -22px 34px rgba(0,0,0,.4), inset -14px 0 22px rgba(0,0,0,.28), inset 14px 0 22px rgba(255,255,255,.12), 0 26px 50px -20px ${m.glow}`,
+                      display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      {/* specular sweep */}
+                      <div style={{ position: "absolute", top: 0, bottom: 0, left: "18%", width: 26, background: "linear-gradient(90deg,transparent,rgba(255,255,255,.6),transparent)", transform: "skewX(-12deg)", opacity: .5 }} />
+                      <div style={{ position: "absolute", top: 0, bottom: 0, right: "26%", width: 12, background: "linear-gradient(90deg,transparent,rgba(255,255,255,.4),transparent)", transform: "skewX(-12deg)", opacity: .35 }} />
+                      <span style={{ fontFamily: NUM, fontSize: rank === 1 ? "clamp(46px,6vw,72px)" : "clamp(34px,4vw,52px)", fontWeight: 900, color: "rgba(30,20,0,.30)", textShadow: "0 2px 1px rgba(255,255,255,.4), 0 -1px 1px rgba(0,0,0,.3)" }}>{rank}</span>
+                    </div>
+                    {/* floor reflection */}
+                    <div style={{ height: Math.round(m.h * 0.5), borderRadius: "0 0 7px 7px", transform: "scaleY(-1)", background: faceGrad, opacity: .14, filter: "blur(1.5px)",
+                      WebkitMaskImage: "linear-gradient(180deg, rgba(0,0,0,.75), transparent 82%)", maskImage: "linear-gradient(180deg, rgba(0,0,0,.75), transparent 82%)" }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : (!busy && res) ? (
+        <div style={{ margin: `20px ${PAD} 40px`, textAlign: "center", padding: "72px 20px", borderRadius: 22, border: `1px solid ${C.hair}`, background: isLight ? "radial-gradient(100% 100% at 50% 0%, #FFFFFF, #EEF2F7)" : "radial-gradient(100% 100% at 50% 0%, #10141d, #0A0D12)" }}>
+          <Trophy size={44} style={{ color: C.t3, margin: "0 auto 14px" }} />
+          <div style={{ fontSize: 16, fontWeight: 700, color: C.t2 }}>ยังไม่มีแต้มในช่วงนี้</div>
+          <div style={{ fontSize: 13.5, color: C.t3, marginTop: 6 }}>แต้มจะปรากฏเมื่อมีการตอบแชทนอกเวลาทำการ</div>
+        </div>
+      ) : null}
+
+      {/* ═══ Editorial ranking list ═══ */}
+      {rest.length > 0 && (
+        <div style={{ padding: `8px ${PAD} 12px` }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "8px 0 4px" }}>
+            <span style={{ fontSize: 11, letterSpacing: ".32em", textTransform: "uppercase", color: C.t3, fontWeight: 600, fontFamily: NUM }}>อันดับ 4 เป็นต้นไป</span>
+            <span style={{ flex: 1, height: 1, background: C.hair }} />
+          </div>
+          {/* column labels */}
+          <div style={{ display: "grid", gridTemplateColumns: "44px 1fr 96px 96px 80px", alignItems: "center", padding: "10px 0", fontSize: 11, letterSpacing: ".04em", color: C.t3, fontFamily: NUM }}>
+            <span>#</span><span>ผู้ตอบ</span>
+            <span style={{ textAlign: "right" }}>แต้ม</span>
+            <span style={{ textAlign: "right" }} className="lb-hide-sm">ทันเวลา</span>
+            <span style={{ textAlign: "right" }} className="lb-hide-sm">ช้ากว่า</span>
+          </div>
+          {rest.map((u, i) => (
+            <div key={u.email} className="lb-row" style={{ display: "grid", gridTemplateColumns: "44px 1fr 96px 96px 80px", alignItems: "center", padding: "16px 0", borderTop: `1px solid ${C.hair}`, borderRadius: 8 }}>
+              <span style={{ fontFamily: NUM, fontVariantNumeric: "tabular-nums", fontSize: 15, color: C.t3, fontWeight: 300 }}>{String(i + 4).padStart(2, "0")}</span>
+              <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
+                <span style={{ width: 38, height: 38, borderRadius: "50%", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, fontFamily: NUM, color: C.t2, background: "radial-gradient(circle at 34% 28%, #2a3242, #12161f)", border: `1px solid ${C.border}` }}>{nameOf(u.email).slice(0, 2).toUpperCase()}</span>
+                <span title={u.email} style={{ color: C.t1, fontWeight: 500, fontSize: 15, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{nameOf(u.email)}</span>
+              </div>
+              <span style={{ textAlign: "right", fontFamily: NUM, fontVariantNumeric: "tabular-nums", fontWeight: 800, fontSize: 19, color: C.purple, textShadow: `0 0 18px ${C.purple}44` }}>{u.points.toLocaleString()}</span>
+              <span style={{ textAlign: "right", fontFamily: NUM, fontVariantNumeric: "tabular-nums", color: C.green, fontWeight: 600, fontSize: 15 }} className="lb-hide-sm">{u.in_time}</span>
+              <span style={{ textAlign: "right", fontFamily: NUM, fontVariantNumeric: "tabular-nums", color: u.slow > 0 ? C.red : C.t3, fontWeight: u.slow > 0 ? 600 : 400, fontSize: 15 }} className="lb-hide-sm">{u.slow}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ padding: `10px ${PAD} 32px` }}>
+        <p style={{ fontSize: 12, color: C.t3, display: "flex", alignItems: "center", gap: 8, margin: 0, lineHeight: 1.6 }}>
+          <span style={{ color: C.gold }}>◆</span> ยิ่งตอบดึก / วันหยุด / ตอบไว = ยิ่งได้แต้มมาก · ทันเวลา = แต้มเต็ม, ช้ากว่า = ครึ่งเดียว · นับเฉพาะการตอบนอกเวลาทำการ
+        </p>
+      </div>
+    </div>
+  );
+}
