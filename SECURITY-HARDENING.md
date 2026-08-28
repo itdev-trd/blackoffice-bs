@@ -26,9 +26,9 @@ The application now has a shared Edge Function guard in
 ## Required Supabase steps (run once)
 
 1. Apply `supabase/migrations/20260825120000_security_hardening_v2.sql` in the
-   Supabase migration pipeline. Also verify that the existing
-   `supabase-migration-security-hardening.sql` has already been applied; the v2
-   migration does not replace its scoped RLS policies.
+   Supabase migration pipeline. Also verify that the security-hardening section
+   of `supabase-all.sql` (search for `-- FILE: supabase-migration-security-hardening.sql`)
+   has already been applied; the v2 migration does not replace its scoped RLS policies.
 2. Keep `SUPABASE_SERVICE_ROLE_KEY`, Meta tokens, and AI provider keys only in
    Edge Function secrets/Vault. Never put them in `VITE_*` variables or browser
    code. Rotate any key that has ever been committed or pasted into a public log.

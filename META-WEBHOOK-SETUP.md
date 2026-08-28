@@ -3,10 +3,10 @@
 Webhook ปลดล็อก 3 อย่าง: ข้อความเด้งเข้า inbox ทันที, รู้ว่าลูกค้ามาจากแอดไหน (ad_id), และเป็นฐานให้ CAPI
 
 ## 1) รัน migration
-รันใน Supabase → SQL Editor:
-- `supabase-migration-chat-referrals.sql`
-- `supabase-migration-chat-inbox.sql` (ถ้ายังไม่ได้รัน)
-- `supabase-migration-chat-ai-jobs.sql` (ถ้ายังไม่ได้รัน)
+ไฟล์ migration ทั้งหมดรวมอยู่ใน `supabase-all.sql` แล้ว (แต่ละส่วนมีคอมเมนต์ `-- FILE: ชื่อไฟล์เดิม` กำกับ) รันใน Supabase → SQL Editor ส่วนที่เกี่ยวข้อง:
+- `-- FILE: supabase-migration-chat-referrals.sql`
+- `-- FILE: supabase-migration-chat-inbox.sql` (ถ้ายังไม่ได้รัน)
+- `-- FILE: supabase-migration-chat-ai-jobs.sql` (ถ้ายังไม่ได้รัน)
 
 ## 2) ตั้ง secret ของ Edge Function
 ใน Supabase → Edge Functions → Secrets (หรือ `supabase secrets set`):

@@ -10,9 +10,13 @@
 2. ตั้งชื่อโปรเจกต์ ตั้งรหัสผ่านฐานข้อมูล เลือก region ใกล้ไทย (Singapore) → Create
 
 ## 2. สร้างตารางข้อมูล
+ไฟล์ SQL ทั้งหมด (schema + migration ทุกไฟล์ที่เคยแยกกันอยู่) รวมไว้ในไฟล์เดียวแล้วที่
+**`supabase-all.sql`** เรียงตามลำดับที่ต้องรัน (schema ก่อน → migration ตามตัวอักษร →
+security-hardening ท้ายสุด) แต่ละส่วนมีคอมเมนต์ `-- FILE: ชื่อไฟล์เดิม` กำกับไว้ ค้นหาชื่อไฟล์เดิม
+ในเอกสารนี้ได้จากคอมเมนต์นั้น
+
 1. ในโปรเจกต์ Supabase ไปที่เมนู **SQL Editor** → New query
-2. รัน `supabase-schema.sql` ก่อน แล้วรันไฟล์ `supabase-migration-*.sql` ที่เกี่ยวข้อง
-3. รัน `supabase-migration-security-hardening.sql` **เป็นไฟล์สุดท้ายเสมอ** เพื่อเปิด RLS แบบจำกัด role/page/account
+2. รัน `supabase-all.sql` ทั้งไฟล์ตามลำดับที่จัดไว้ (schema → migrations → security-hardening ท้ายสุด)
 
 ## 3. คัดลอกกุญแจเชื่อมต่อ
 1. ไปที่ **Project Settings → API**
@@ -65,7 +69,7 @@ done
 
 ## 6. ตั้งเวลาให้ระบบมอนิเตอร์ทำงานอัตโนมัติ (pg_cron)
 1. ไปที่ **Database → Extensions** เปิดใช้งาน `pg_cron` และ `pg_net`
-2. เปิดไฟล์ `supabase-migration-cron.sql` อ่านคำแนะนำด้านบนไฟล์ (มี 2 วิธีให้เลือกตามที่โปรเจกต์คุณรองรับ)
+2. เปิด `supabase-all.sql` หาส่วน `-- FILE: supabase-migration-cron.sql` อ่านคำแนะนำด้านบน (มี 2 วิธีให้เลือกตามที่โปรเจกต์คุณรองรับ)
 3. คัดลอกไปวางใน **SQL Editor → New query** แล้วกด **Run**
 4. เช็คว่าตั้งสำเร็จ: รัน `select * from cron.job;` ควรเห็น job ชื่อ `ai-ads-monitor-every-15min`
 
