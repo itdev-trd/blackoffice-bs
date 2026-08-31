@@ -12,6 +12,7 @@ import {
   Search,
   ChevronUp,
   ChevronDown,
+  ChevronRight,
   ArrowUpDown,
   X,
 } from "lucide-react";
@@ -21,6 +22,7 @@ import { logActivity } from "@/lib/utils/activity";
 import { readFunctionErrorMessage } from "@/lib/utils/errors";
 import { getCustomerDateRange } from "@/lib/customer-date-filter";
 import Spinner from "@/components/shared/Spinner";
+import { EmptyState, SearchInput, FilterPill } from "@/components/ui";
 import { EditableCell } from "@/components/features/settings/SettingsTab";
 import { CHAT_STAGES } from "@/lib/constants/settings";
 import {
@@ -29,7 +31,7 @@ import {
   setCustomerDatabaseViewCache,
 } from "@/lib/customerdb-cache";
 
-export function TradeIdChecker() {
+export function TradeIdChecker({ darkMode = false }) {
   const [tid, setTid] = useState("");
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState(null);
@@ -44,7 +46,7 @@ export function TradeIdChecker() {
     logActivity("check_trade_id", { trade_id: id, pass: !!data.pass, via: data.via });
   }
   return (
-    <div className="border-t border-slate-200 pt-3 mt-1 space-y-1.5">
+    <div className={`${darkMode ? "chat-trade-checker" : ""} border-t border-slate-200 pt-3 mt-1 space-y-1.5`}>
       <label className="text-xs text-slate-400 flex items-center gap-1"><CheckCircle2 size={13} /> เช็คไอดีเทรด (XM)</label>
       <div className="flex gap-1.5">
         <input
@@ -54,7 +56,7 @@ export function TradeIdChecker() {
           inputMode="numeric" placeholder="วางเลขไอดีเทรด"
           className="flex-1 min-w-0 rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
         <button onClick={check} disabled={busy || !tid.trim()}
-          className="shrink-0 bg-slate-900 text-white rounded-lg px-3 py-1.5 text-sm font-medium disabled:opacity-50 flex items-center gap-1.5">
+          className="shrink-0 bg-brand-600 text-white rounded-lg px-3 py-1.5 text-sm font-medium disabled:opacity-50 flex items-center gap-1.5">
           {busy ? <Loader2 className="animate-spin" size={14} /> : null} เช็ค
         </button>
       </div>
@@ -77,7 +79,7 @@ export function TradeIdChecker() {
 
 // แอดมินป้อนข้อมูลลูกค้าเอง (ไอดีเทรด/TradingView/เบอร์/อีเมล) จากหน้าตอบแชท
 // บันทึกผ่าน save-lead-fields → มาร์ค manual_data + ผู้ป้อน · AI/sync/webhook จะไม่แก้ทับ
-export function CustomerDataForm({ row, onSaved }) {
+export function CustomerDataForm({ row, onSaved, darkMode = false }) {
   const [f, setF] = useState({ trade_id: "", username: "", phone: "", email: "" });
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);   // {ok, text}
@@ -220,7 +222,7 @@ export function CustomerDataForm({ row, onSaved }) {
     </div>
   );
   return (
-    <div className="border-t border-slate-200 pt-3 mt-1 space-y-2">
+    <div className={`${darkMode ? "chat-customer-form" : ""} border-t border-slate-200 pt-3 mt-1 space-y-2`}>
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <label className="text-xs font-medium text-slate-500 flex items-center gap-1"><CheckCircle2 size={13} /> ข้อมูลลูกค้า (แอดมินป้อนเอง)</label>
         {row?.manual_data && row?.manual_data_by && (
@@ -246,7 +248,7 @@ export function CustomerDataForm({ row, onSaved }) {
                 const on = pineIds.includes(s.pine_id);
                 const d = getDur(s.pine_id);
                 return (
-                  <div key={s.pine_id} className={on ? "bg-indigo-50/40" : ""}>
+                  <div key={s.pine_id} className={on ? "bg-brand-50/40" : ""}>
                     <label className="flex items-center gap-2 px-2 py-1.5 text-sm cursor-pointer hover:bg-slate-50">
                       <input type="checkbox" checked={on} onChange={() => toggleScript(s.pine_id, on)} />
                       <span className="truncate flex-1">{s.name}</span>
@@ -299,6 +301,7 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
   const [pageFilter, setPageFilter] = useState(() => initialView?.pageFilter ?? "");      // ต้องเลือกเพจก่อน จึงจะอนุญาตให้ดึงรายงาน
   const [reportPageId, setReportPageId] = useState(() => initialView?.reportPageId ?? "");  // เพจที่ผู้ใช้กด "ดึงรายงาน" แล้ว
   const [stageFilter, setStageFilter] = useState(() => initialView?.stageFilter ?? "all");
+  const [detailRow, setDetailRow] = useState(null);   // แถวที่กำลังเปิดโปรไฟล์ (การ์ดมือถือ)
   const [dataFilter, setDataFilter] = useState(() => initialView?.dataFilter ?? "all");   // all | has | none
   const [sourceFilter, setSourceFilter] = useState(() => initialView?.sourceFilter ?? "all"); // all | ad | organic | unknown
   const [dateFilter, setDateFilter] = useState(() => initialView?.dateFilter ?? "");      // ต้องเลือกก่อนดึงรายงาน
@@ -621,18 +624,23 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
             <button onClick={() => pageFilter ? importInputRef.current?.click() : setError("กรุณาเลือกเพจก่อน Import Excel")} disabled={!!importState?.loading} title="จับคู่ด้วยชื่อลูกค้าในเพจที่เลือก และเขียนทับเฉพาะช่องที่มีข้อมูลในไฟล์" className="border border-emerald-300 text-emerald-700 rounded-lg px-3 py-2 text-sm font-medium hover:bg-emerald-50 disabled:opacity-50 flex items-center gap-1.5">
               {importState?.loading ? <Loader2 className="animate-spin" size={15} /> : <Upload size={15} />} Import Excel
             </button>
-            <button onClick={() => { customerDatabaseReportCache.clear(); load(true); }} disabled={loading || !reportPageId} title="คลิกเพื่อดึงข้อมูลปัจจุบันจากฐานข้อมูลและอัปเดตให้ทุก user" className="bg-cyan-500 text-white rounded-lg px-4 py-2 text-sm font-semibold hover:bg-cyan-400 shadow-sm shadow-cyan-500/30 disabled:opacity-50 flex items-center gap-1.5">
+            <button onClick={() => { customerDatabaseReportCache.clear(); load(true); }} disabled={loading || !reportPageId} title="คลิกเพื่อดึงข้อมูลปัจจุบันจากฐานข้อมูลและอัปเดตให้ทุก user" className="bg-white text-slate-700 border border-slate-300 rounded-control hover:bg-slate-50 px-4 py-2 text-sm font-semibold   disabled:opacity-50 flex items-center gap-1.5">
               {loading ? <Loader2 className="animate-spin" size={15} /> : <RefreshCw size={15} />} รีเฟรชข้อมูลล่าสุด
             </button>
-            <button onClick={openExportDialog} disabled={!pageFilter || exporting} className="bg-slate-900 text-white rounded-lg px-3 py-2 text-sm font-medium hover:bg-slate-800 disabled:opacity-50 flex items-center gap-1.5">
+            <button onClick={openExportDialog} disabled={!pageFilter || exporting} className="bg-white text-slate-700 border border-slate-300 rounded-control px-3 py-2 text-sm font-medium hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1.5">
               {exporting ? <Loader2 className="animate-spin" size={15} /> : <FileDown size={15} />} Export CSV
             </button>
           </div>
         </div>
 
-        <div className="relative">
-          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหา ชื่อ / เบอร์ / ไอดีเทรด / username / ข้อความ" className="w-full rounded-lg border border-slate-300 pl-9 pr-3 py-2 text-sm" />
+        <SearchInput value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหา ชื่อ / เบอร์ / ไอดีเทรด / username / ข้อความ" />
+
+        {/* ตัวกรองสถานะแบบแคปซูล — เลื่อนซ้ายขวาได้บนมือถือ ใช้ stageFilter เดิมที่มีอยู่แล้วแต่ยังไม่เคยมี UI ให้กด */}
+        <div className="flex gap-1.5 overflow-x-auto -mx-0.5 px-0.5 pb-0.5">
+          <FilterPill active={stageFilter === "all"} onClick={() => setStageFilter("all")}>ทั้งหมด</FilterPill>
+          {CHAT_STAGES.map((s) => (
+            <FilterPill key={s.key} active={stageFilter === s.key} onClick={() => setStageFilter(s.key)}>{s.label}</FilterPill>
+          ))}
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -664,7 +672,7 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
               <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className={selCls} title="ถึงวันที่" />
             </div>
           )}
-          <button onClick={pullReport} disabled={!pageFilter || !hasCompleteDateRange(dateFilter, dateFrom, dateTo) || loading} className="bg-amber-400 text-slate-950 rounded-lg px-4 py-2 text-sm font-semibold hover:bg-amber-300 disabled:opacity-50 flex items-center gap-1.5">
+          <button onClick={pullReport} disabled={!pageFilter || !hasCompleteDateRange(dateFilter, dateFrom, dateTo) || loading} className="bg-brand-600 text-white rounded-control hover:bg-brand-700 px-4 py-2 text-sm font-semibold hover:bg-amber-300 disabled:opacity-50 flex items-center gap-1.5">
             {loading ? <Loader2 className="animate-spin" size={15} /> : <FileDown size={15} />} ดึงรายงาน
           </button>
           <select value={dataFilter} onChange={(e) => setDataFilter(e.target.value)} className={selCls} title="ข้อมูลติดต่อ">
@@ -683,9 +691,9 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
         {error && <div className="text-sm text-rose-600 bg-rose-50 rounded-lg px-3 py-2">{error}</div>}
         {!reportPageId && !error && <div className="text-sm text-slate-500 bg-slate-50 rounded-lg px-3 py-3">เลือกเพจและช่วงเวลา แล้วกด “ดึงรายงาน” ระบบจึงจะเริ่มโหลดข้อมูลลูกค้า</div>}
         {reportPageId && reportRefreshedAt && (
-          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-cyan-200 bg-cyan-50 px-3 py-2.5">
-            <div className="text-sm font-medium text-cyan-900">ข้อมูลชุดนี้ดึงล่าสุด: {new Date(reportRefreshedAt).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "medium" })}{reportRefreshedBy ? <span className="ml-1 text-xs font-normal text-cyan-700">โดย {reportRefreshedBy}</span> : null}</div>
-            <div className="text-xs text-cyan-800">หากต้องการข้อมูลปัจจุบัน ให้คลิกปุ่ม “รีเฟรชข้อมูลล่าสุด” ด้านบน</div>
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-brand-200 bg-brand-50 px-3 py-2.5">
+            <div className="text-sm font-medium text-brand-900">ข้อมูลชุดนี้ดึงล่าสุด: {new Date(reportRefreshedAt).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "medium" })}{reportRefreshedBy ? <span className="ml-1 text-xs font-normal text-brand-700">โดย {reportRefreshedBy}</span> : null}</div>
+            <div className="text-xs text-brand-700">หากต้องการข้อมูลปัจจุบัน ให้คลิกปุ่ม “รีเฟรชข้อมูลล่าสุด” ด้านบน</div>
           </div>
         )}
         {reportPageId && <div className="text-xs text-slate-500">พบ {total.toLocaleString()} รายการ{total > PAGE_SIZE ? ` — แสดงหน้า ${curPage}/${totalPages}` : ""}</div>}
@@ -735,14 +743,43 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
 
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         {!reportPageId ? (
-          <div className="text-sm text-slate-400 py-14 text-center">ยังไม่ได้ดึงรายงาน</div>
+          <EmptyState
+            icon={FileDown}
+            title="ยังไม่ได้ดึงรายงาน"
+            hint="เลือกเพจและช่วงเวลาด้านบน แล้วกด “ดึงรายงาน” เพื่อโหลดข้อมูลลูกค้า"
+          />
         ) : rows === null ? (
           <div className="p-6"><Spinner label="กำลังโหลดรายงาน..." /></div>
         ) : total === 0 ? (
-          <div className="text-sm text-slate-400 py-10 text-center">ไม่พบข้อมูลตามเงื่อนไข</div>
+          <EmptyState
+            icon={Search}
+            title="ไม่พบข้อมูลตามเงื่อนไข"
+            hint="ลองล้างคำค้น หรือขยายช่วงวันที่/ตัวกรองข้อมูลติดต่อให้กว้างขึ้น"
+          />
         ) : (
           <>
-            <div className="w-full overflow-hidden">
+            {/* มือถือ/แท็บเล็ต: การ์ดลิสต์ (แตะแถวเพื่อเปิดโปรไฟล์) — เดสก์ท็อปใช้ตารางด้านล่างแทน */}
+            <div className="md:hidden divide-y divide-slate-100">
+              {pageRows.map((r) => {
+                const st = CHAT_STAGES.find((s) => s.key === (r.stage_manual || r.stage || "new")) || CHAT_STAGES[0];
+                const initial = (r.customer_name || "?").trim().slice(0, 1).toUpperCase();
+                return (
+                  <button key={r.id} onClick={() => setDetailRow(r)} className="w-full text-left p-3.5 hover:bg-slate-50 flex items-center gap-3">
+                    <div className="w-11 h-11 rounded-full bg-slate-100 text-slate-600 flex items-center justify-center text-sm font-semibold shrink-0">{initial}</div>
+                    <div className="min-w-0 flex-1">
+                      <div className="font-semibold text-slate-900 text-[15px] truncate">{r.customer_name || "(ไม่มีชื่อ)"}</div>
+                      <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                        <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${st.cls}`}>{st.label}</span>
+                        <span className="text-xs text-slate-400 truncate">{SOURCE_LABELS[srcOf(r)] || r.page_name || "-"} · {r.trade_id || "ไม่มีไอดีเทรด"}</span>
+                      </div>
+                    </div>
+                    <ChevronRight size={18} className="text-slate-300 shrink-0" />
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="hidden md:block w-full overflow-hidden">
               <table className="w-full table-fixed text-xs">
                 <colgroup>
                   <col className="w-[16%]" /><col className="w-[8%]" /><col className="w-[9%]" /><col className="w-[9%]" />
@@ -767,7 +804,7 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
                   {pageRows.map((r) => (
                     <tr key={r.id} className="hover:bg-slate-50 align-top">
                       <td className="px-2 py-2 min-w-0">
-                        <button onClick={() => onOpenChat?.(r.id, r.last_message_at)} title={`เปิดแชทของ ${r.customer_name || "ลูกค้า"}`} className="block w-full truncate text-left text-slate-800 hover:text-indigo-600 font-medium underline-offset-2 hover:underline">
+                        <button onClick={() => onOpenChat?.(r.id, r.last_message_at)} title={`เปิดแชทของ ${r.customer_name || "ลูกค้า"}`} className="block w-full truncate text-left text-slate-800 hover:text-brand-600 font-medium underline-offset-2 hover:underline">
                           {r.customer_name || "(ไม่มีชื่อ)"}
                         </button>
                         {r.last_user_text && <div title={r.last_user_text} className="text-[10px] text-slate-400 truncate">{r.last_user_text}</div>}
@@ -777,7 +814,7 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
                       <td className="px-1 py-1.5 min-w-0"><EditableCell row={r} field="phone" numeric onSaved={patchRow} /></td>
                       <td className="px-1 py-1.5 min-w-0"><EditableCell row={r} field="email" onSaved={patchRow} /></td>
                       <td className="px-1 py-1.5 min-w-0"><EditableCell row={r} field="username" onSaved={patchRow} /></td>
-                      <td title={r.psid || ""} className="px-1.5 py-2 text-slate-500 truncate">{r.psid || <span className="text-slate-300">—</span>}</td>
+                      <td title={r.psid || ""} className="px-1.5 py-2 text-slate-500 truncate">{r.psid || <span className="text-slate-400">—</span>}</td>
                       <td className="px-1.5 py-2 min-w-0">
                         {srcOf(r) === "ad" ? (
                           <div className="min-w-0">
@@ -812,6 +849,14 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
           pageName={pages.find((item) => item.id === pageFilter)?.name || pageFilter}
           onClose={() => setImportState(null)}
           onApply={applyImport}
+        />
+      )}
+
+      {detailRow && (
+        <CustomerDetailModal
+          row={detailRow}
+          onClose={() => setDetailRow(null)}
+          onSaved={(id, patch) => { patchRow(id, patch); setDetailRow((r) => (r?.id === id ? { ...r, ...patch } : r)); }}
         />
       )}
 
@@ -959,7 +1004,7 @@ function CustomerDetailModal({ row, onClose, onSaved }) {
                 <div className="text-sm font-medium text-slate-700">ส่งสถานะไป Meta (ทดสอบ)</div>
                 <p className="text-[11px] text-slate-500">ติดป้าย "{CHAT_STAGES.find((s) => s.key === row.stage)?.label || row.stage}" ให้ลูกค้าคนนี้บนกล่องข้อความของเพจ · แทนที่เฉพาะป้ายสถานะระบบเดิม (ป้ายอื่นที่แอดมินติดเอง เช่น "ชำระเงินแล้ว" ไม่ถูกแตะ)</p>
               </div>
-              <button onClick={pushToMeta} disabled={pushing || !row.psid} className="bg-slate-900 text-white rounded-lg px-3 py-2 text-sm font-medium hover:bg-slate-800 disabled:opacity-60 flex items-center gap-1.5 shrink-0">
+              <button onClick={pushToMeta} disabled={pushing || !row.psid} className="bg-brand-600 text-white rounded-lg px-3 py-2 text-sm font-medium hover:bg-brand-700 disabled:opacity-60 flex items-center gap-1.5 shrink-0">
                 {pushing ? <Loader2 className="animate-spin" size={14} /> : <RefreshCw size={14} />} ทดสอบส่งป้าย
               </button>
             </div>
@@ -999,7 +1044,7 @@ function CustomerDetailModal({ row, onClose, onSaved }) {
               </div>
             </div>
             <div className="flex items-center gap-3 mt-3">
-              <button onClick={save} disabled={saving} className="bg-slate-900 text-white rounded-lg px-5 py-2 text-sm font-medium hover:bg-slate-800 disabled:opacity-60 flex items-center gap-2">
+              <button onClick={save} disabled={saving} className="bg-brand-600 text-white rounded-lg px-5 py-2 text-sm font-medium hover:bg-brand-700 disabled:opacity-60 flex items-center gap-2">
                 {saving ? <Loader2 className="animate-spin" size={15} /> : null} บันทึก
               </button>
               {saved && <span className="text-sm text-emerald-700">บันทึกแล้ว</span>}
@@ -1017,7 +1062,7 @@ function CustomerDetailModal({ row, onClose, onSaved }) {
               <div className="space-y-2 max-h-[40vh] overflow-y-auto pr-1">
                 {transcript.map((m, i) => (
                   <div key={i} className={`flex ${m.w === "u" ? "justify-start" : "justify-end"}`}>
-                    <div className={`max-w-[80%] rounded-2xl px-3 py-1.5 text-sm ${m.w === "u" ? "bg-slate-100 text-slate-800" : "bg-indigo-500 text-white"}`}>
+                    <div className={`max-w-[80%] rounded-2xl px-3 py-1.5 text-sm ${m.w === "u" ? "bg-slate-100 text-slate-800" : "bg-brand-500 text-white"}`}>
                       <div className="text-[10px] opacity-70 mb-0.5">{m.w === "u" ? "ลูกค้า" : "เพจ"}{m.at ? ` · ${fmt(m.at)}` : ""}</div>
                       <div className="whitespace-pre-wrap break-words">{m.t}</div>
                     </div>
@@ -1031,4 +1076,3 @@ function CustomerDetailModal({ row, onClose, onSaved }) {
     </div>
   );
 }
-

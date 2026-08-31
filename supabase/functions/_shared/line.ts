@@ -19,6 +19,6 @@ export async function lineApi(path: string, accessToken: string, init: RequestIn
     headers: { Authorization: `Bearer ${accessToken}`, ...(init.headers || {}) },
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data?.message || `LINE API ${response.status}`);
+  if (!response.ok) throw new Error(`LINE API ${response.status} ${path}: ${data?.message || JSON.stringify(data)}`);
   return data;
 }

@@ -2,12 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
-import { useTheme } from "@/lib/hooks/useTheme";
 import { Loader2, RefreshCw, Crown, Trophy } from "lucide-react";
 
 export default function LeaderboardTab({ active = true }) {
-  const { theme } = useTheme();
-  const isLight = theme === "light";
   const thDay = (o = 0) => { const d = new Date(Date.now() + 7 * 3600 * 1000); d.setUTCDate(d.getUTCDate() + o); return d.toISOString().slice(0, 10); };
   const thMonth = (mo, which) => { const d = new Date(Date.now() + 7 * 3600 * 1000); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() + mo + (which === "end" ? 1 : 0)); if (which === "end") d.setUTCDate(0); return d.toISOString().slice(0, 10); };
   const PRESETS = [
@@ -38,7 +35,14 @@ export default function LeaderboardTab({ active = true }) {
     setBusy(true); setErr("");
     const { data, error } = await supabase.functions.invoke("leaderboard", { body: { since, until } });
     setBusy(false);
-    if (error || !data?.ok) { setErr(error?.message || data?.error || "โหลดไม่สำเร็จ"); return; }
+    if (error || !data?.ok) {
+      // error ที่ Supabase ส่งกลับเป็นภาษาอังกฤษเชิงเทคนิค ("Edge Function returned a non-2xx status code")
+      // ผู้ใช้อ่านแล้วไม่รู้ว่าต้องทำอะไร — แปลงเป็นข้อความที่บอกสาเหตุที่เป็นไปได้จริง
+      const raw = data?.error || error?.message || "";
+      const technical = /non-2xx|Failed to fetch|FunctionsHttpError|NetworkError/i.test(raw);
+      setErr(technical || !raw ? "โหลดกระดานแต้มไม่สำเร็จ — ตรวจว่าตั้งค่า API key ของ AI ในหน้าตั้งค่าแล้ว และมีข้อมูลการตอบแชทในช่วงเวลาที่เลือก" : raw);
+      return;
+    }
     setRes(data);
     if (flashOnDone) { setFlash(true); setTimeout(() => setFlash(false), 900); }
   }, [since, until]);
@@ -57,20 +61,17 @@ export default function LeaderboardTab({ active = true }) {
     return () => { clearTimeout(t); supabase.removeChannel(ch); };
   }, [active]);
 
-  // พาเลตต์ luxury ที่รักษาบุคลิกทองไว้ทั้งโหมดมืดและสว่าง
-  const C = isLight ? {
+  // พาเลตต์เฉพาะหน้ากระดานแต้ม — ทอง/เงิน/ทองแดงตรงกับเหรียญรางวัล
+  // เป็นข้อยกเว้นที่มีเหตุผลจากพาเลตต์หลัก (accent น้ำเงิน) เพราะสีสื่ออันดับโดยตรง
+  // ส่วนสีเน้นอื่นใช้ brand/สถานะชุดเดียวกับทั้งแอป
+  const C = {
     bg: "#F7F9FC", ink: "#FFFFFF", border: "rgba(15,23,42,.12)", hair: "rgba(15,23,42,.09)",
     gold: "#B98500", silver: "#64748B", bronze: "#A96022",
-    purple: "#6D4AFF", green: "#059669", red: "#DC2626",
-    t1: "#0F172A", t2: "#0F172A", t3: "#0F172A",
-  } : {
-    bg: "#07090D", ink: "#0A0D12", border: "rgba(255,255,255,0.07)", hair: "rgba(255,255,255,0.06)",
-    gold: "#F7C948", silver: "#C9D3E2", bronze: "#C8894B",
-    purple: "#9D6BFF", green: "#1ED760", red: "#FF5C5C",
-    t1: "#FFFFFF", t2: "rgba(255,255,255,.62)", t3: "rgba(255,255,255,.38)",
+    purple: "#3452E0", green: "#059669", red: "#DC2626",
+    t1: "#0F172A", t2: "#475467", t3: "#667085",
   };
-  const FONT = "'Noto Sans Thai','IBM Plex Sans Thai',system-ui,-apple-system,sans-serif";
-  const NUM = "'IBM Plex Sans Thai',system-ui,sans-serif";
+  const FONT = "'IBM Plex Sans Thai','Noto Sans Thai',system-ui,-apple-system,sans-serif";
+  const NUM = "'IBM Plex Mono',ui-monospace,monospace";
   const board = res?.board || [];
   const top3 = board.slice(0, 3);
   const rest = board.slice(3);
@@ -89,20 +90,20 @@ export default function LeaderboardTab({ active = true }) {
   const PAD = "clamp(20px,4.5vw,60px)";
 
   return (
-    <div style={{ fontFamily: FONT, background: C.bg, color: C.t1, borderRadius: 26, border: `1px solid ${C.border}`, boxShadow: isLight ? "0 24px 70px -42px rgba(15,23,42,.35)" : "0 40px 120px -50px rgba(0,0,0,.95)", overflow: "hidden" }}>
+    <div style={{ fontFamily: FONT, background: C.bg, color: C.t1, borderRadius: 26, border: `1px solid ${C.border}`, boxShadow: "0 24px 70px -42px rgba(15,23,42,.35)", overflow: "hidden" }}>
       <style>{`
         @keyframes lbPulse{0%,100%{opacity:.9;transform:scale(1)}50%{opacity:0;transform:scale(2.2)}}
         @keyframes lbFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-7px)}}
         @keyframes lbBreathe{0%,100%{opacity:.55}50%{opacity:.9}}
         @keyframes lbRise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
         .lb-row{transition:background .18s ease}
-        .lb-row:hover{background:${isLight ? "rgba(15,23,42,.035)" : "rgba(255,255,255,.028)"}}
+        .lb-row:hover{background:rgba(15,23,42,.035)}
         .lb-tab{transition:color .2s ease}
-        .lb-tab:hover{color:${isLight ? "rgba(15,23,42,.9)" : "rgba(255,255,255,.9)"}}
+        .lb-tab:hover{color:rgba(15,23,42,.9)}
         .lb-ico{transition:all .2s ease}
-        .lb-ico:hover{color:${C.t1};border-color:${isLight ? "rgba(15,23,42,.24)" : "rgba(255,255,255,.24)"}!important;background:${isLight ? "rgba(15,23,42,.05)" : "rgba(255,255,255,.05)"}!important}
-        .lb-date{color-scheme:${isLight ? "light" : "dark"}}
-        .lb-date::-webkit-calendar-picker-indicator{filter:${isLight ? "none" : "invert(.6)"};cursor:pointer}
+        .lb-ico:hover{color:${C.t1};border-color:rgba(15,23,42,.24)!important;background:rgba(15,23,42,.05)!important}
+        .lb-date{color-scheme:light}
+        .lb-date::-webkit-calendar-picker-indicator{filter:none;cursor:pointer}
         .lb-podium{animation:lbRise .6s cubic-bezier(.2,.8,.2,1) both}
         @media(max-width:640px){
           .lb-hide-sm{display:none!important}
@@ -114,10 +115,8 @@ export default function LeaderboardTab({ active = true }) {
       <div style={{ padding: `36px ${PAD} 0` }}>
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 28 }}>
           <div style={{ minWidth: 240 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-              <span style={{ width: 22, height: 1, background: `linear-gradient(90deg,transparent,${C.gold})` }} />
-              <span style={{ fontSize: 11, letterSpacing: ".42em", textTransform: "uppercase", color: C.gold, fontWeight: 600, fontFamily: NUM }}>Leaderboard</span>
-            </div>
+            {/* ถอดป้าย "LEADERBOARD" ออก — เป็นภาษาอังกฤษที่แปลตรงกับหัวข้อ "กระดานแต้ม" ที่อยู่ใต้มันพอดี
+                (letterSpacing .42em ยังทำให้อ่านเป็นคำไม่ได้อีก) เมนูซ้ายบอกอยู่แล้วว่าอยู่หน้าไหน */}
             <h2 style={{ fontSize: "clamp(30px,4.6vw,52px)", fontWeight: 800, lineHeight: .98, letterSpacing: "-.025em", margin: 0 }}>กระดานแต้ม</h2>
             <p style={{ fontSize: 14, color: C.t2, margin: "14px 0 0", lineHeight: 1.5, maxWidth: 420 }}>
               จัดอันดับแต้มพิเศษจากการตอบแชท<span style={{ color: C.t1 }}>นอกเวลาทำการ</span> — ยิ่งตอบดึก ยิ่งเป็นวันหยุด และยิ่งตอบไว ยิ่งได้แต้มมาก
@@ -127,8 +126,12 @@ export default function LeaderboardTab({ active = true }) {
           <div style={{ textAlign: "right", position: "relative", paddingLeft: 30 }}>
             <div style={{ position: "absolute", right: -8, top: -18, width: 200, height: 120, background: `radial-gradient(60% 60% at 70% 40%, ${C.purple}44, transparent 72%)`, filter: "blur(14px)", pointerEvents: "none", animation: "lbBreathe 4s ease-in-out infinite" }} />
             <div style={{ position: "relative", fontSize: 11, letterSpacing: ".34em", textTransform: "uppercase", color: C.t3, fontWeight: 600, fontFamily: NUM }}>แต้มรวมทั้งหมด</div>
-            <div style={{ position: "relative", fontFamily: NUM, fontVariantNumeric: "tabular-nums", fontSize: "clamp(46px,7vw,84px)", fontWeight: 800, lineHeight: .92, letterSpacing: "-.03em", marginTop: 6, transition: "transform .35s cubic-bezier(.2,.8,.2,1)", transform: flash ? "scale(1.04)" : "scale(1)", color: isLight ? "#0F172A" : "transparent", background: isLight ? "none" : "linear-gradient(176deg,#FFFFFF 30%,#C9B6FF 100%)", WebkitBackgroundClip: isLight ? "border-box" : "text", WebkitTextFillColor: isLight ? "#0F172A" : "transparent", filter: isLight ? "none" : `drop-shadow(0 6px 30px ${C.purple}55)` }}>
-              {res ? (res.total ?? 0).toLocaleString() : "—"}
+            <div style={{ position: "relative", fontFamily: NUM, fontVariantNumeric: "tabular-nums", fontSize: "clamp(46px,7vw,84px)", fontWeight: 800, lineHeight: .92, letterSpacing: "-.03em", marginTop: 6, transition: "transform .35s cubic-bezier(.2,.8,.2,1)", transform: flash ? "scale(1.04)" : "scale(1)", color: "#0F172A", background: "none", WebkitBackgroundClip: "border-box", WebkitTextFillColor: "#0F172A", filter: "none" }}>
+              {/* ตอนยังไม่มีข้อมูลเคยเรนเดอร์ "—" ที่ขนาด 84px ซึ่งอ่านเป็นแท่งดำ ไม่ใช่สถานะ
+                  ใช้ 0 ที่สีจางแทน — สื่อว่า "ยังไม่มีแต้ม" โดยรูปแบบตัวเลขยังคงเดิม */}
+              <span style={res ? undefined : { color: C.t3, fontWeight: 600 }}>
+                {res ? (res.total ?? 0).toLocaleString() : "0"}
+              </span>
             </div>
             <div style={{ position: "relative", marginTop: 8, fontSize: 13, color: C.t2 }}>
               <span style={{ color: C.gold, fontWeight: 600, fontFamily: NUM }}>{fmtDMY(since)}{since !== until ? `  –  ${fmtDMY(until)}` : ""}</span>
@@ -175,7 +178,7 @@ export default function LeaderboardTab({ active = true }) {
       {/* ═══ CINEMATIC PODIUM STAGE (hero) ═══ */}
       {board.length > 0 ? (
         <div style={{ position: "relative", overflow: "hidden", marginTop: 8, minHeight: 480,
-          background: isLight ? "radial-gradient(130% 90% at 50% -10%, #FFFFFF 0%, #EEF3FA 48%, #E5EBF4 100%)" : "radial-gradient(130% 90% at 50% -10%, #1A2130 0%, #0C1017 42%, #06080C 100%)" }}>
+          background: "radial-gradient(130% 90% at 50% -10%, #FFFFFF 0%, #EEF3FA 48%, #E5EBF4 100%)" }}>
           {/* atmospheric top haze */}
           <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 240, background: "radial-gradient(70% 100% at 50% 0%, rgba(255,255,255,.05), transparent 70%)", pointerEvents: "none" }} />
           {/* faint ticker line horizon */}
@@ -186,7 +189,7 @@ export default function LeaderboardTab({ active = true }) {
           </svg>
           {/* reflective floor */}
           <div style={{ position: "absolute", left: 0, right: 0, bottom: 88, height: 1, background: `linear-gradient(90deg,transparent, ${C.gold}88, rgba(255,255,255,.35), ${C.gold}88, transparent)`, opacity: .5 }} />
-          <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 96, background: isLight ? "linear-gradient(180deg, rgba(229,235,244,0), #E5EBF4 70%)" : "linear-gradient(180deg, rgba(6,8,12,0), #06080C 70%)", pointerEvents: "none" }} />
+          <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 96, background: "linear-gradient(180deg, rgba(229,235,244,0), #E5EBF4 70%)", pointerEvents: "none" }} />
 
           <div className="lb-podium" style={{ position: "relative", display: "flex", alignItems: "flex-end", justifyContent: "center", gap: "clamp(14px,4vw,64px)", padding: `70px ${PAD} 96px`, zIndex: 2 }}>
             {order.map((rank, i) => {
@@ -243,7 +246,7 @@ export default function LeaderboardTab({ active = true }) {
           </div>
         </div>
       ) : (!busy && res) ? (
-        <div style={{ margin: `20px ${PAD} 40px`, textAlign: "center", padding: "72px 20px", borderRadius: 22, border: `1px solid ${C.hair}`, background: isLight ? "radial-gradient(100% 100% at 50% 0%, #FFFFFF, #EEF2F7)" : "radial-gradient(100% 100% at 50% 0%, #10141d, #0A0D12)" }}>
+        <div style={{ margin: `20px ${PAD} 40px`, textAlign: "center", padding: "72px 20px", borderRadius: 22, border: `1px solid ${C.hair}`, background: "radial-gradient(100% 100% at 50% 0%, #FFFFFF, #EEF2F7)" }}>
           <Trophy size={44} style={{ color: C.t3, margin: "0 auto 14px" }} />
           <div style={{ fontSize: 16, fontWeight: 700, color: C.t2 }}>ยังไม่มีแต้มในช่วงนี้</div>
           <div style={{ fontSize: 13.5, color: C.t3, marginTop: 6 }}>แต้มจะปรากฏเมื่อมีการตอบแชทนอกเวลาทำการ</div>

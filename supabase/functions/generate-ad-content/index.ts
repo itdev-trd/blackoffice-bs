@@ -14,6 +14,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { Image } from "https://deno.land/x/imagescript@1.2.17/mod.ts";
 import { authorizeRequest } from "../_shared/permissions.ts";
 import { readJsonBody } from "../_shared/security.ts";
+import { getOpenAIKey } from "../_shared/openai.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -133,7 +134,7 @@ async function generateWithOpenAI(brief: Record<string, unknown>, numCopies: num
     method: "POST",
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${Deno.env.get("IMAGE_API_KEY")}`,
+      authorization: `Bearer ${await getOpenAIKey()}`,
     },
     body: JSON.stringify({
       model: "gpt-5",
@@ -366,7 +367,7 @@ async function generateAndInsertImage(
       });
       imgResp = await fetch("https://api.openai.com/v1/images/edits", {
         method: "POST",
-        headers: { authorization: `Bearer ${Deno.env.get("IMAGE_API_KEY")}` },
+        headers: { authorization: `Bearer ${await getOpenAIKey()}` },
         body: form,
       });
     } else {
@@ -374,7 +375,7 @@ async function generateAndInsertImage(
         method: "POST",
         headers: {
           "content-type": "application/json",
-          authorization: `Bearer ${Deno.env.get("IMAGE_API_KEY")}`,
+          authorization: `Bearer ${await getOpenAIKey()}`,
         },
         body: JSON.stringify({
           model: imageModel,

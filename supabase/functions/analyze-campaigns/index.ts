@@ -9,6 +9,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getMetaToken } from "../_shared/meta.ts";
 import { getPromptOverride, withOverride } from "../_shared/ai-prompts.ts";
 import { authorizeRequest } from "../_shared/permissions.ts";
+import { getOpenAIKey } from "../_shared/openai.ts";
 import { canAccessMetaNodes } from "../_shared/meta-authorization.ts";
 
 const GRAPH_VERSION = "v22.0"; // อัปจาก v19 (sunset ต้นปี 2026)
@@ -63,7 +64,7 @@ async function runClaude(payload: unknown, sys: string = AI_SYSTEM) {
 async function runOpenAI(payload: unknown, sys: string = AI_SYSTEM) {
   const resp = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${Deno.env.get("IMAGE_API_KEY")}` },
+    headers: { "content-type": "application/json", authorization: `Bearer ${await getOpenAIKey()}` },
     body: JSON.stringify({
       model: "gpt-5",
       max_completion_tokens: 8000,

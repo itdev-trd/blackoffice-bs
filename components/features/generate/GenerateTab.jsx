@@ -5,6 +5,7 @@ import { Sparkles, Wand2, Upload, X, Loader2 } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { readFunctionErrorMessage } from "@/lib/utils/errors";
 import NumInput from "@/components/shared/NumInput";
+import { SectionTitle } from "@/components/ui";
 
 // ---------------------------------------------------------------
 // Generate tab
@@ -89,8 +90,8 @@ function GenerateTab({ settings, onGenerated }) {
   const brandOptions = brandConfig.brands;
   const [form, setForm] = useState({
     brand_id: brandConfig.active_brand_id || brandOptions[0]?.id || "default",
-    product_name: "Exness IB Rebate Program",
-    offer: "รับ rebate สูงสุด X% ต่อ lot พร้อมสัญญาณเทรดฟรี",
+    product_name: "",
+    offer: "",
     target_audience_desc: brandVoice.target_audience_desc || "",
     brand_voice: brandVoice.brand_voice || "",
     num_copies: 4,
@@ -226,9 +227,16 @@ function GenerateTab({ settings, onGenerated }) {
   const hasSavedBrandVoice = Boolean(brandVoice.brand_voice || brandVoice.target_audience_desc);
 
   return (
-    <div className="max-w-xl space-y-5">
-      <form onSubmit={handleGenerate} className="space-y-4 bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
-        <div className="flex items-center justify-between">
+    <div className="w-full max-w-[1400px] space-y-5">
+      <SectionTitle
+        title="สร้างคอนเทนต์"
+        subtitle="ให้ AI เขียนข้อความและสร้างรูปโฆษณาจากบรีฟ แล้วส่งเข้าคิวรออนุมัติ"
+      />
+      {/* แยกสองคอลัมน์: ซ้ายคือบรีฟที่ต้องคิดใหม่ทุกครั้ง ขวาคือค่าตั้งที่ตั้งครั้งเดียวแล้วใช้ซ้ำ
+          เดิมเป็นคอลัมน์แคบยาวเดียว ต้องเลื่อนหาปุ่มสร้าง และทิ้งพื้นที่ขวาว่างทั้งจอ */}
+      <form onSubmit={handleGenerate} className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.5fr)_minmax(330px,1fr)]">
+        <div className="ds-card p-5 space-y-4">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
           <span className="text-xs text-slate-400">กรอกด้วยตัวเอง หรือดึงค่าจากหน้า "ตั้งค่า" มาเติมให้อัตโนมัติ</span>
           <button
             type="button"
@@ -300,7 +308,7 @@ function GenerateTab({ settings, onGenerated }) {
                   <button
                     type="button"
                     onClick={() => setProductReferences((current) => current.filter((_, i) => i !== index))}
-                    className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-slate-900 text-white shadow hover:bg-rose-600"
+                    className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-brand-600 text-white shadow hover:bg-rose-600"
                     aria-label={`ลบรูปสินค้า ${index + 1}`}
                   >
                     <X size={13} />
@@ -360,7 +368,11 @@ function GenerateTab({ settings, onGenerated }) {
             </div>
           )}
         </div>
-        <div className="flex flex-wrap gap-4">
+        </div>
+
+        <div className="ds-card p-5 space-y-4">
+        <div className="text-[12.5px] font-semibold text-slate-500">ตั้งค่าผลลัพธ์</div>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-3">
           <div>
             <label className="text-sm text-slate-600">จำนวน copy</label>
             <NumInput min={1} max={10}
@@ -437,11 +449,12 @@ function GenerateTab({ settings, onGenerated }) {
         <button
           type="submit"
           disabled={loading}
-          className="w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-medium hover:bg-slate-800 disabled:opacity-60 flex items-center justify-center gap-2"
+          className="w-full bg-brand-600 text-white rounded-lg py-2.5 text-sm font-medium hover:bg-brand-700 disabled:opacity-60 flex items-center justify-center gap-2"
         >
           {loading ? <Loader2 className="animate-spin" size={16} /> : <Sparkles size={16} />}
           สร้างคอนเทนต์
         </button>
+        </div>
       </form>
       {audienceInfo && (
         <div className="text-sm bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 space-y-1.5">

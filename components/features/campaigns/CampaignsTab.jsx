@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { AlertTriangle, Loader2, PauseCircle, ArrowUpCircle } from "lucide-react";
+import { AlertTriangle, Loader2, PauseCircle, ArrowUpCircle, TrendingUp } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { readFunctionErrorMessage } from "@/lib/utils/errors";
 import StatusBadge from "@/components/shared/StatusBadge";
+import { Badge, Card, EmptyState, SectionTitle } from "@/components/ui";
 
 // ---------------------------------------------------------------
 // Campaigns (monitor) tab
@@ -177,12 +178,15 @@ export function ArchiveBar({ a, visibleIds, archivedCount }) {
           <button onClick={() => a.setSel([])} className="text-slate-400 hover:text-slate-600">ยกเลิก</button>
         </>
       )}
-      <button
-        onClick={() => { a.setShowArchived(!a.showArchived); a.setSel([]); }}
-        className={`rounded-lg border px-2 py-1 ml-auto ${a.showArchived ? "bg-slate-800 text-white border-slate-800" : "border-slate-300 text-slate-500 hover:bg-slate-50"}`}
-      >
-        {a.showArchived ? "← กลับไปรายการปกติ" : `ดูที่ซ่อนไว้ (${archivedCount})`}
-      </button>
+      {/* ไม่โชว์ปุ่มตอนยังไม่มีอะไรถูกซ่อน — ปุ่มที่กดแล้วเจอหน้าว่างเปล่าคือปุ่มที่ไม่ควรมี */}
+      {(a.showArchived || archivedCount > 0) && (
+        <button
+          onClick={() => { a.setShowArchived(!a.showArchived); a.setSel([]); }}
+          className={`rounded-control border px-2 py-1 ml-auto ${a.showArchived ? "bg-brand-600 text-white border-brand-600" : "border-slate-300 text-slate-500 hover:bg-slate-50"}`}
+        >
+          {a.showArchived ? "← กลับไปรายการปกติ" : `ดูที่ซ่อนไว้ (${archivedCount})`}
+        </button>
+      )}
       {a.msg && <span className={a.msg.startsWith("ไม่สำเร็จ") ? "text-rose-600 w-full" : "text-emerald-600 w-full"}>{a.msg}</span>}
     </div>
   );
@@ -208,8 +212,15 @@ function CampaignsTab({ adContent, metricsByAdId, onChanged, filter = "all", onF
   else if (filter === "scale") campaigns = pool.filter((a) => a.scale_suggested);
   else campaigns = launched;
 
+  const activeFilterLabel = filters.find((f) => f.key === filter)?.label || "";
+
   return (
-    <div className="space-y-3">
+    <div className="w-full max-w-[1400px] space-y-4">
+      <SectionTitle
+        title="แคมเปญ"
+        subtitle="โฆษณาที่ยิงจริงแล้ว พร้อมสถานะและผลล่าสุดจาก Meta"
+        right={<Badge tone={launched.length ? "brand" : "slate"}>ยิงแล้ว {launched.length} ชิ้น</Badge>}
+      />
       <ArchiveBar a={arch} visibleIds={campaigns.map((c) => c.id)} archivedCount={archivedAll.length} />
       <div className="flex flex-wrap gap-2">
         {filters.map((f) => (
@@ -218,7 +229,7 @@ function CampaignsTab({ adContent, metricsByAdId, onChanged, filter = "all", onF
             onClick={() => onFilterChange?.(f.key)}
             className={`text-xs px-3 py-1.5 rounded-full font-medium border transition ${
               filter === f.key
-                ? "bg-slate-900 text-white border-slate-900"
+                ? "bg-brand-600 text-white border-brand-600"
                 : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"
             }`}
           >
@@ -227,9 +238,17 @@ function CampaignsTab({ adContent, metricsByAdId, onChanged, filter = "all", onF
         ))}
       </div>
       {campaigns.length === 0 ? (
-        <div className="text-sm text-slate-500 py-10 text-center">
-          {arch.showArchived ? "ไม่มีรายการที่ซ่อนไว้ในหมวดนี้" : "ยังไม่มีแคมเปญในหมวดนี้"}
-        </div>
+        <Card>
+          <EmptyState
+            icon={TrendingUp}
+            title={arch.showArchived ? "ไม่มีรายการที่ซ่อนไว้" : `ยังไม่มีแคมเปญในหมวด "${activeFilterLabel}"`}
+            hint={
+              arch.showArchived
+                ? "รายการที่ซ่อนจะมาอยู่ที่นี่ และกู้คืนกลับได้ทุกเมื่อ"
+                : "แคมเปญจะมาแสดงที่นี่หลังอนุมัติคอนเทนต์และยิงโฆษณาขึ้น Meta"
+            }
+          />
+        </Card>
       ) : (
         campaigns.map((item) => (
           <div key={item.id} className="flex items-start gap-2">

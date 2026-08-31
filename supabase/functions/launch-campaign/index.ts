@@ -324,7 +324,7 @@ Deno.serve(async (req) => {
             image_id: image?.id ?? null,
             launch_group_id: launchGroupId,
             launch_mode: mode,
-            reviewed_by: userData.user.id,
+            reviewed_by: auth.user?.id ?? null,
             reviewed_at: new Date().toISOString(),
           })
           .select()
@@ -366,7 +366,7 @@ Deno.serve(async (req) => {
             image_id: image?.id ?? null,
             launch_group_id: launchGroupId,
             launch_mode: mode,
-            reviewed_by: userData.user.id,
+            reviewed_by: auth.user?.id ?? null,
             reviewed_at: new Date().toISOString(),
           })
           .select()

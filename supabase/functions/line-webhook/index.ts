@@ -2,8 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getLineConfig, lineApi } from "../_shared/line.ts";
 
 const enc = new TextEncoder();
-// พักการใช้งาน LINE OA ชั่วคราว: ยังตอบ 200 ให้ LINE แต่ไม่ ingest ข้อความ/ไม่แจ้งเตือน
-const LINE_INGEST_ENABLED = false;
+const LINE_INGEST_ENABLED = true;
 async function verifySignature(raw: string, signature: string, secret: string) {
   const key = await crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   const signed = new Uint8Array(await crypto.subtle.sign("HMAC", key, enc.encode(raw)));
@@ -73,6 +72,7 @@ Deno.serve(async (req) => {
       const stickerUrl = stickerImageUrl(event.message);
       const item = {
         w: "u", t: text, at, mid: mid || null, via: "line", line_type: event.message?.type || "unknown",
+        ...(event.message?.quoteToken ? { quote_token: String(event.message.quoteToken) } : {}),
         ...(stickerUrl ? { img: stickerUrl, sticker: true, sticker_id: String(event.message.stickerId), package_id: String(event.message.packageId || "") } : {}),
         ...(event.message?.markAsReadToken ? { mark_as_read_token: String(event.message.markAsReadToken) } : {}),
       };
@@ -87,7 +87,7 @@ Deno.serve(async (req) => {
       if (error) throw error;
       await notify(id, pageId, pageName, row.customer_name, text);
     }
-    return new Response("webhook processing failed", { status: 500 });
+    return new Response("ok", { status: 200 });
   } catch (error) {
     console.error("LINE webhook", error);
     return new Response("ok");

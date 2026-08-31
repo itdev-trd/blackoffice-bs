@@ -17,6 +17,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getMetaToken } from "../_shared/meta.ts";
 import { getPromptOverride, withOverride } from "../_shared/ai-prompts.ts";
 import { authorizeRequest } from "../_shared/permissions.ts";
+import { getOpenAIKey } from "../_shared/openai.ts";
 
 let META_TOKEN = "";
 const GRAPH_VERSION = "v22.0"; // อัปจาก v19 (sunset ต้นปี 2026)
@@ -78,7 +79,7 @@ async function runOpenAI(payload: unknown, sys: string = AI_SYSTEM_PROMPT) {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${Deno.env.get("IMAGE_API_KEY")}`,
+      authorization: `Bearer ${await getOpenAIKey()}`,
     },
     body: JSON.stringify({
       model: "gpt-5",

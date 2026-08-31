@@ -3,7 +3,7 @@ import UpdateBanner from "@/components/shared/UpdateBanner";
 import AuthListener from "@/components/shared/AuthListener";
 
 export const metadata = {
-  title: "AI Ads Automation — ระบบยิงโฆษณาอัตโนมัติ",
+  title: "AdFlow OS — ระบบยิงโฆษณาและตอบแชทอัตโนมัติ",
   manifest: "/manifest.webmanifest",
   icons: {
     icon: "/favicon-64.png",
@@ -12,7 +12,7 @@ export const metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "AI Ads",
+    title: "AdFlow",
   },
 };
 
@@ -20,29 +20,20 @@ export const viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
-  themeColor: "#090B10",
+  themeColor: "#F4F7FB",
 };
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="th" suppressHydrationWarning>
+    <html lang="th" suppressHydrationWarning className="dark">
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        {/* IBM Plex Sans Thai = ตัวอักษรทั้งระบบ (ครอบไทย+ละตินในตระกูลเดียว)
+            IBM Plex Mono = ตัวเลขที่ต้องเทียบกันเป็นคอลัมน์ (ยอดเงิน สถิติ วันเวลา) */}
         <link
-          href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap"
+          href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap"
           rel="stylesheet"
-        />
-        <script
-          // ตั้งธีมก่อน React render เพื่อกันหน้ากระพริบ โดยคง dark เป็นค่าเริ่มต้นสำหรับผู้ใช้เดิม
-          dangerouslySetInnerHTML={{
-            __html: `try {
-              var theme = localStorage.getItem("ui.theme") === "light" ? "light" : "dark";
-              document.documentElement.classList.add("theme-" + theme);
-              document.documentElement.dataset.theme = theme;
-              document.documentElement.style.colorScheme = theme;
-            } catch (e) { document.documentElement.classList.add("theme-dark"); }`,
-          }}
         />
       </head>
       <body>

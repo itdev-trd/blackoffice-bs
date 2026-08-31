@@ -3,505 +3,478 @@
 @tailwind utilities;
 
 /* =====================================================================
-   AI Ads Automation — DESIGN SYSTEM
-   "Dark Luxury Fintech" · ธีมเดียว (ล็อก dark)
+   AdFlow OS — ระบบดีไซน์
+   เครื่องมือทำงานภายในสำหรับทีมการตลาด/แอดมิน ไม่ใช่หน้าเว็บการตลาด
    ---------------------------------------------------------------------
-   สถาปัตยกรรม: แอปเป็น monolith ที่เขียน Tailwind utility แบบ inline
-   จึงคุมภาษางานออกแบบทั้งหมดจากชั้น token เดียวตรงนี้ (map utility -> token)
-   เปลี่ยนที่นี่ = ทุกหน้าเปลี่ยนตามพร้อมกัน เป็นผลิตภัณฑ์เดียวกันทั้งระบบ
+   หลักการ
+   1. ธีมเดียว (สว่าง) — ไม่มีชั้น override ไล่ทับ Tailwind อีก
+      ไฟล์นี้เคยมี !important 185 จุดคอยรีแมป slate/white ให้เป็นธีมมืด
+      ซึ่งตีกับคลาสที่เขียนไว้ใน JSX เอง เป็นต้นเหตุที่หน้าตาแต่ละหน้าไม่ตรงกัน
+      ตอนนี้ JSX ใช้คลาส Tailwind ตรงๆ ได้ผลตามที่เขียน
+   2. เส้นขอบผมเส้นทำงานแทนเงา — เงาใช้เฉพาะของที่ "ลอยอยู่เหนือ" จริง
+      (dropdown, modal) ไม่ใช่การ์ดทุกใบ
+   3. สีมีความหมายเสมอ — น้ำเงิน brand = สิ่งที่กดได้/กำลังเลือก
+      เขียว/เหลือง/แดง = สถานะ ไม่เอามาใช้ตกแต่ง
+   4. โทเคนจริงอยู่ใน tailwind.config.js ที่นี่เก็บแค่คลาสประกอบ (.ds-*)
+      กับสไตล์ที่ Tailwind เขียนไม่ได้ (safe-area, keyframes)
    ===================================================================== */
 
 :root {
-  /* --- Surfaces (editorial luxury — ดำลึกแบบหน้ากระดานแต้ม) --- */
-  --bg:        #07090D;   /* พื้นหลังหน้า (ดำลึก) */
-  --card:      #0E121A;   /* การ์ดหลัก */
-  --card-2:    #141924;   /* การ์ดรอง / พื้นผิวยก */
-  --card-3:    #1A2029;   /* hover / ชั้นลึกกว่า */
-  --border:    rgba(255,255,255,.07);
-  --border-strong: rgba(255,255,255,.13);
-  --divider:   rgba(255,255,255,.055);
-
-  /* --- Text --- */
-  --text:      #FFFFFF;
-  --text-2:    rgba(255,255,255,.66);
-  --text-3:    rgba(255,255,255,.46);
-  --text-4:    rgba(255,255,255,.34);
-
-  /* --- Brand / Accents --- */
-  --purple:    #9D6BFF;
-  --purple-2:  #7C4DFF;
-  --gold:      #F7C948;
-  --silver:    #C9D3E2;
-  --bronze:    #C8894B;
-  --green:     #1ED760;
-  --blue:      #4E8CFF;
-  --red:       #FF5C5C;
-
-  /* --- Shape / Motion --- */
-  --radius:    22px;
-  --radius-sm: 15px;
-  --blur:      20px;
-  --ease:      cubic-bezier(.2,.8,.2,1);
-  --dur:       .22s;
-
-  /* --- Elevation (เงานุ่มลึกแบบ cinematic) --- */
-  --shadow-sm: 0 1px 2px rgba(0,0,0,.5);
-  --shadow-md: 0 18px 50px -30px rgba(0,0,0,.85);
-  --shadow-lg: 0 40px 110px -50px rgba(0,0,0,.92);
-  --glow:      0 0 0 1px rgba(157,107,255,.35), 0 8px 30px -8px rgba(157,107,255,.35);
+  --ground: #F6F7F9;      /* พื้นหลังหน้า */
+  --surface: #FFFFFF;     /* การ์ด/พาเนล */
+  --line: #E4E7EC;        /* เส้นขอบผมเส้น */
+  --line-strong: #CFD4DD; /* เส้นขอบตอน hover/โฟกัส */
+  --ink: #14171F;         /* ตัวอักษรหลัก */
+  --ink-2: #475467;       /* ตัวอักษรรอง */
+  --ink-3: #667085;       /* คำอธิบาย */
+  --brand: #3452E0;
+  --brand-strong: #2A41B8;
+  --brand-soft: #EEF1FE;
+  --radius-card: 14px;
+  --radius-control: 10px;
+  --ease: cubic-bezier(.2, .8, .2, 1);
+  --dur: .18s;
 }
+
+/* ธีมมืดตาม mockup ที่ผู้ใช้ส่งมา — เปิดผ่าน class="dark" บน <html>
+   แก้แค่ค่าตัวแปร ไม่ใช้ !important จึงไม่ชนกับ Tailwind (บทเรียนจากธีมมืดชุดก่อน) */
+html.dark {
+  --ground: #0D1117;
+  --surface: #161B22;
+  --line: #30363D;
+  --line-strong: #444C56;
+  --ink: #E6EDF3;
+  --ink-2: #8B949E;
+  --ink-3: #6E7681;
+  --brand: #1F6FEB;
+  --brand-strong: #58A6FF;
+  --brand-soft: rgba(31, 111, 235, .15);
+  color-scheme: dark;
+}
+html.dark body { background: var(--ground); color: var(--ink-2); }
+
+/* Dark theme bridge: หน้าฟีเจอร์เก่าบางส่วนยังใช้ utility slate/white อยู่
+   จึง remap เฉพาะใต้ html.dark ให้ทุกหน้ามี surface เดียวกับ Inbox โดยไม่กระทบธีมสว่าง */
+html.dark .bg-white { background-color: var(--surface) !important; }
+html.dark .bg-slate-50,
+html.dark .bg-slate-100,
+html.dark .bg-gray-50,
+html.dark .bg-gray-100 { background-color: var(--ground) !important; }
+html.dark .text-slate-900,
+html.dark .text-slate-800,
+html.dark .text-slate-700,
+html.dark .text-gray-900,
+html.dark .text-gray-800,
+html.dark .text-gray-700 { color: var(--ink) !important; }
+html.dark .text-slate-600,
+html.dark .text-slate-500,
+html.dark .text-gray-600,
+html.dark .text-gray-500 { color: var(--ink-2) !important; }
+html.dark .text-slate-400,
+html.dark .text-slate-300,
+html.dark .text-gray-400,
+html.dark .text-gray-300 { color: var(--ink-3) !important; }
+html.dark .border-slate-100,
+html.dark .border-slate-200,
+html.dark .border-slate-300,
+html.dark .border-gray-200,
+html.dark .border-gray-300 { border-color: var(--line) !important; }
+html.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]),
+html.dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]) { border-color: var(--line) !important; }
+html.dark .bg-brand-50,
+html.dark .bg-brand-50\/40 { background-color: var(--brand-soft) !important; }
+html.dark input,
+html.dark textarea,
+html.dark select { color-scheme: dark; }
+
+/* Keep semantic status colors readable on the chat theme. */
+html.dark .bg-emerald-50 { background-color: rgba(16, 185, 129, .14) !important; }
+html.dark .bg-rose-50 { background-color: rgba(244, 63, 94, .14) !important; }
+html.dark .bg-amber-50 { background-color: rgba(245, 158, 11, .14) !important; }
+html.dark .bg-sky-50 { background-color: rgba(14, 165, 233, .14) !important; }
+html.dark .bg-violet-50,
+html.dark .bg-purple-50 { background-color: rgba(139, 92, 246, .14) !important; }
+html.dark .text-emerald-600,
+html.dark .text-emerald-700,
+html.dark .text-emerald-800 { color: #6ee7b7 !important; }
+html.dark .text-rose-600,
+html.dark .text-rose-700,
+html.dark .text-rose-800 { color: #fda4af !important; }
+html.dark .text-amber-600,
+html.dark .text-amber-700,
+html.dark .text-amber-800 { color: #fcd34d !important; }
+html.dark .text-sky-600,
+html.dark .text-sky-700,
+html.dark .text-sky-800 { color: #7dd3fc !important; }
+html.dark .text-violet-600,
+html.dark .text-violet-700,
+html.dark .text-violet-800,
+html.dark .text-purple-600,
+html.dark .text-purple-700,
+html.dark .text-purple-800 { color: #c4b5fd !important; }
+html.dark .placeholder\:text-slate-400::placeholder,
+html.dark .placeholder\:text-gray-400::placeholder { color: var(--ink-3) !important; }
 
 /* กันหน้าล้นขอบจอแนวนอนบนมือถือ */
 html, body, #root { max-width: 100%; overflow-x: clip; }
+
+/* หน้าทำงานทั่วไปมีกรอบกลางร่วมกัน ส่วน Inbox ตั้งใจให้เต็มพื้นที่เพื่อคุยได้กว้าง */
+.dashboard-page-main > * {
+  width: min(100%, 1600px);
+  margin-inline: auto;
+}
+
+/* Settings มีหัวข้อจำนวนมาก: ให้แถบนำทางคงตำแหน่งและเลื่อนในตัวเอง
+   เพื่อให้ผู้ใช้เห็นฟอร์มหลักต่อเนื่องโดยไม่ต้องเลื่อนย้อนกลับไปหาเมนู */
+@media (min-width: 768px) {
+  .settings-page-layout { align-items: flex-start; }
+  .settings-page-nav-desktop {
+    max-height: calc(100dvh - 9rem);
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+  .settings-page-content { min-width: 0; }
+}
+
+html { color-scheme: light; }
+
 body {
+  background: var(--ground);
+  color: var(--ink-2);
+  font-family: "IBM Plex Sans Thai", "Noto Sans Thai", system-ui, sans-serif;
   overflow-wrap: break-word;
-  background: var(--bg);
-  color: var(--text-2);
-  font-family: "IBM Plex Sans Thai", "Noto Sans Thai", sans-serif;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
 
-::selection { background: rgba(157,107,255,.32); color: #fff; }
+::selection { background: rgba(52, 82, 224, .16); color: var(--ink); }
 
-/* ===== ธีม Dark Luxury (class theme-dark ติดตลอด) ===== */
-html.theme-dark { color-scheme: dark; }
-html.theme-dark body { background: var(--bg); color: var(--text-2); }
+/* โฟกัสต้องเห็นชัดด้วยคีย์บอร์ด แต่ไม่ขึ้นตอนคลิกเมาส์ */
+:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 
-/* --- พื้นผิว --- */
-html.theme-dark .bg-white       { background-color: var(--card) !important; }
-html.theme-dark .bg-slate-50    { background-color: var(--bg) !important; }
-html.theme-dark .bg-slate-100   { background-color: var(--card-2) !important; }
-html.theme-dark .bg-slate-200   { background-color: var(--card-3) !important; }
-html.theme-dark .min-h-screen.bg-slate-50 { background: var(--bg) !important; }
-
-/* --- การ์ด: ยกด้วยเงานุ่ม + เส้นขอบผมเส้น ให้ดูพรีเมียม --- */
-html.theme-dark .shadow-sm { box-shadow: var(--shadow-sm) !important; }
-html.theme-dark .shadow    { box-shadow: var(--shadow-md) !important; }
-html.theme-dark .shadow-md { box-shadow: var(--shadow-md) !important; }
-html.theme-dark .shadow-lg { box-shadow: var(--shadow-lg) !important; }
-html.theme-dark .shadow-xl { box-shadow: var(--shadow-lg) !important; }
-
-/* --- รัศมีมุมแบบพรีเมียม --- */
-html.theme-dark .rounded-2xl { border-radius: var(--radius) !important; }
-html.theme-dark .rounded-xl  { border-radius: var(--radius-sm) !important; }
-
-/* --- ปุ่มหลัก / ชิปที่เลือก (เดิม slate-900/800) -> ไล่เฉดม่วงพรีเมียม --- */
-html.theme-dark .bg-slate-900,
-html.theme-dark .bg-slate-800 {
-  background-image: linear-gradient(135deg, var(--purple), var(--purple-2)) !important;
-  background-color: var(--purple) !important;
-  border-color: transparent !important;
-  color: #fff !important;
-  box-shadow: 0 6px 20px -8px rgba(157,107,255,.55) !important;
+/* แถบเลื่อนบางลง ไม่แย่งสายตาจากข้อมูล */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(20, 23, 31, .16);
+  border: 2px solid transparent;
+  background-clip: content-box;
+  border-radius: 8px;
 }
-html.theme-dark .bg-slate-900:hover,
-html.theme-dark .bg-slate-800:hover { filter: brightness(1.08); }
-html.theme-dark .bg-indigo-600 { background-color: var(--purple-2) !important; }
-html.theme-dark .bg-indigo-600:hover { background-color: var(--purple) !important; }
+::-webkit-scrollbar-thumb:hover { background: rgba(20, 23, 31, .28); background-clip: content-box; }
 
-/* --- ตัวอักษร --- */
-html.theme-dark .text-white   { color: #fff !important; }
-html.theme-dark .text-slate-900 { color: var(--text) !important; }
-html.theme-dark .text-slate-800 { color: rgba(255,255,255,.92) !important; }
-html.theme-dark .text-slate-700 { color: rgba(255,255,255,.80) !important; }
-html.theme-dark .text-slate-600 { color: var(--text-2) !important; }
-html.theme-dark .text-slate-500 { color: var(--text-3) !important; }
-html.theme-dark .text-slate-400 { color: var(--text-3) !important; }
-html.theme-dark .text-slate-300 { color: var(--text-4) !important; }
-html.theme-dark .fill-slate-800 { fill: rgba(255,255,255,.92) !important; }
-
-/* --- เส้นขอบ / เส้นคั่น (ผมเส้น ไม่แข็ง) --- */
-html.theme-dark .border-slate-100 { border-color: var(--divider) !important; }
-html.theme-dark .border-slate-200 { border-color: var(--border) !important; }
-html.theme-dark .border-slate-300 { border-color: var(--border-strong) !important; }
-html.theme-dark .border-slate-400 { border-color: rgba(255,255,255,.18) !important; }
-html.theme-dark .border-slate-900 { border-color: var(--purple) !important; }
-html.theme-dark .border-white     { border-color: var(--border) !important; }
-html.theme-dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]) { border-color: var(--divider) !important; }
-html.theme-dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]) { border-color: var(--border) !important; }
-
-/* --- hover พื้นผิว --- */
-html.theme-dark .hover\:bg-slate-50:hover  { background-color: var(--card-2) !important; }
-html.theme-dark .hover\:bg-slate-100:hover { background-color: var(--card-3) !important; }
-html.theme-dark .hover\:bg-slate-200:hover { background-color: var(--card-3) !important; }
-html.theme-dark .hover\:bg-white:hover     { background-color: var(--card-2) !important; }
+/* ตัวเลขที่ต้องเทียบกันเป็นคอลัมน์ ต้องกว้างเท่ากันทุกตัว */
+.tabular, table td, table th { font-variant-numeric: tabular-nums; }
 
 /* =====================================================================
-   สีเน้น (accent) — map เป็นพาเลตต์ luxury: เขียว/ทอง/ฟ้า/แดง/ม่วง
-   พื้นอ่อน = โปร่งบนพื้นเข้ม, ตัวอักษร = เฉดสว่างอ่านชัด
+   คลาสประกอบ (.ds-*) — ใช้ผ่าน components/ui/index.jsx เป็นหลัก
    ===================================================================== */
 
-/* เขียว (emerald) -> --green */
-html.theme-dark .bg-emerald-50   { background-color: rgba(30,215,96,.12) !important; }
-html.theme-dark .bg-emerald-100  { background-color: rgba(30,215,96,.16) !important; }
-html.theme-dark .bg-emerald-500  { background-color: var(--green) !important; }
-html.theme-dark .bg-emerald-600  { background-color: #17b84f !important; }
-html.theme-dark .bg-emerald-700  { background-color: #12994180 !important; }
-html.theme-dark .text-emerald-600, html.theme-dark .text-emerald-700, html.theme-dark .text-emerald-800 { color: #4ade80 !important; }
-
-/* แดง/กุหลาบ (rose) -> --red */
-html.theme-dark .bg-rose-50   { background-color: rgba(255,92,92,.12) !important; }
-html.theme-dark .bg-rose-100  { background-color: rgba(255,92,92,.16) !important; }
-html.theme-dark .bg-rose-500  { background-color: var(--red) !important; }
-html.theme-dark .bg-rose-600  { background-color: #e64545 !important; }
-html.theme-dark .bg-rose-700  { background-color: #c53a3a !important; }
-html.theme-dark .text-rose-500, html.theme-dark .text-rose-600, html.theme-dark .text-rose-700 { color: #ff8080 !important; }
-
-/* ฟ้า (blue) -> --blue */
-html.theme-dark .bg-blue-50   { background-color: rgba(78,140,255,.12) !important; }
-html.theme-dark .bg-blue-100  { background-color: rgba(78,140,255,.18) !important; }
-html.theme-dark .bg-blue-600  { background-color: var(--blue) !important; }
-html.theme-dark .bg-blue-700  { background-color: #3a76e6 !important; }
-html.theme-dark .text-blue-600, html.theme-dark .text-blue-700, html.theme-dark .text-blue-800 { color: #8fb4ff !important; }
-
-/* คราม (indigo) / ม่วง (purple) -> --purple */
-html.theme-dark .bg-indigo-50   { background-color: rgba(157,107,255,.14) !important; }
-html.theme-dark .bg-indigo-100  { background-color: rgba(157,107,255,.20) !important; }
-html.theme-dark .bg-indigo-500  { background-color: var(--purple) !important; }
-html.theme-dark .bg-indigo-700  { background-color: var(--purple-2) !important; }
-html.theme-dark .bg-purple-50   { background-color: rgba(157,107,255,.14) !important; }
-html.theme-dark .text-indigo-500, html.theme-dark .text-indigo-600, html.theme-dark .text-indigo-700 { color: #c4a9ff !important; }
-html.theme-dark .text-purple-600 { color: #c4a9ff !important; }
-
-/* เหลือง/อำพัน (amber) -> --gold */
-html.theme-dark .bg-amber-50   { background-color: rgba(247,201,72,.14) !important; }
-html.theme-dark .bg-amber-100  { background-color: rgba(247,201,72,.20) !important; }
-html.theme-dark .text-amber-500, html.theme-dark .text-amber-600, html.theme-dark .text-amber-700, html.theme-dark .text-amber-800 { color: var(--gold) !important; }
-
-/* ม่วงอมน้ำเงิน (violet) — เดิมไม่ได้ map ทำให้จางอ่านไม่ออกบนพื้นเข้ม (เช่นตารางแต้มพิเศษ) */
-html.theme-dark .bg-violet-50, html.theme-dark .bg-violet-50\/50 { background-color: rgba(157,107,255,.10) !important; }
-html.theme-dark .bg-violet-100 { background-color: rgba(157,107,255,.18) !important; }
-html.theme-dark .border-violet-200 { border-color: rgba(157,107,255,.30) !important; }
-html.theme-dark .text-violet-600, html.theme-dark .text-violet-700, html.theme-dark .text-violet-800 { color: #c4a9ff !important; }
-
-/* ตารางทั้งระบบ: hover แถวนุ่มๆ ให้ไล่สายตาได้ง่าย (ไม่ใส่ !important เพื่อให้แถวที่มีสีสถานะของตัวเองชนะ) */
-html.theme-dark tbody tr:hover > td { background-color: rgba(255,255,255,.022); }
-
-/* ฟ้าอมเขียว (sky) */
-html.theme-dark .bg-sky-50   { background-color: rgba(78,140,255,.12) !important; }
-html.theme-dark .bg-sky-100  { background-color: rgba(78,140,255,.18) !important; }
-html.theme-dark .text-sky-600, html.theme-dark .text-sky-700 { color: #7fc4ff !important; }
-
-/* ---- พื้นโปร่งแบบมี /opacity (Tailwind สร้างคนละคลาส ต้อง map แยก) ---- */
-html.theme-dark .bg-white\/90 { background-color: rgba(17,21,30,.9) !important; }
-html.theme-dark .bg-white\/60 { background-color: rgba(17,21,30,.7) !important; }
-html.theme-dark .bg-indigo-50\/40 { background-color: rgba(157,107,255,.10) !important; }
-html.theme-dark .bg-indigo-50\/30 { background-color: rgba(157,107,255,.08) !important; }
-html.theme-dark .bg-sky-50\/40 { background-color: rgba(78,140,255,.08) !important; }
-html.theme-dark .bg-emerald-50\/40 { background-color: rgba(30,215,96,.08) !important; }
-html.theme-dark .bg-rose-50\/40 { background-color: rgba(255,92,92,.08) !important; }
-html.theme-dark .bg-amber-50\/50 { background-color: rgba(247,201,72,.10) !important; }
-html.theme-dark .bg-slate-50\/40, html.theme-dark .bg-slate-50\/50, html.theme-dark .bg-slate-50\/60 { background-color: rgba(255,255,255,.04) !important; }
-
-/* ---- ขอบสีเน้น (หรี่ให้เนียน) ---- */
-html.theme-dark .border-blue-100, html.theme-dark .border-blue-200, html.theme-dark .border-blue-300 { border-color: rgba(78,140,255,.40) !important; }
-html.theme-dark .border-indigo-100 { border-color: rgba(157,107,255,.28) !important; }
-html.theme-dark .border-indigo-200, html.theme-dark .border-indigo-300 { border-color: rgba(157,107,255,.45) !important; }
-html.theme-dark .border-emerald-200, html.theme-dark .border-emerald-300, html.theme-dark .border-emerald-400 { border-color: rgba(30,215,96,.40) !important; }
-html.theme-dark .border-rose-200, html.theme-dark .border-rose-300 { border-color: rgba(255,92,92,.40) !important; }
-html.theme-dark .border-rose-500 { border-color: var(--red) !important; }
-html.theme-dark .border-amber-400 { border-color: rgba(247,201,72,.55) !important; }
-html.theme-dark .border-amber-500 { border-color: var(--gold) !important; }
-html.theme-dark .border-sky-200 { border-color: rgba(78,140,255,.40) !important; }
-html.theme-dark .border-slate-900\/10 { border-color: var(--border) !important; }
-
-/* ---- ring (โฟกัส/ไฮไลต์) -> ม่วง/ทอง ---- */
-html.theme-dark .ring-slate-800, html.theme-dark .ring-slate-900 { --tw-ring-color: var(--purple) !important; }
-html.theme-dark .ring-slate-400 { --tw-ring-color: rgba(255,255,255,.20) !important; }
-html.theme-dark .ring-amber-400 { --tw-ring-color: var(--gold) !important; }
-
-/* ---- hover สีเน้น ---- */
-html.theme-dark .hover\:bg-rose-50:hover { background-color: rgba(255,92,92,.14) !important; }
-html.theme-dark .hover\:bg-rose-100:hover { background-color: rgba(255,92,92,.20) !important; }
-html.theme-dark .hover\:bg-emerald-50:hover { background-color: rgba(30,215,96,.14) !important; }
-html.theme-dark .hover\:bg-amber-50:hover { background-color: rgba(247,201,72,.14) !important; }
-html.theme-dark .hover\:bg-indigo-50:hover { background-color: rgba(157,107,255,.14) !important; }
-html.theme-dark .hover\:bg-blue-50:hover { background-color: rgba(78,140,255,.14) !important; }
-html.theme-dark .hover\:bg-blue-100:hover { background-color: rgba(78,140,255,.20) !important; }
-html.theme-dark .hover\:bg-blue-700:hover { background-color: #3a76e6 !important; }
-html.theme-dark .hover\:bg-emerald-700:hover { background-color: #12994180 !important; }
-html.theme-dark .hover\:bg-rose-700:hover { background-color: #c53a3a !important; }
-html.theme-dark .hover\:bg-indigo-700:hover { background-color: var(--purple-2) !important; }
-html.theme-dark .hover\:text-slate-900:hover, html.theme-dark .hover\:text-slate-800:hover { color: #fff !important; }
-html.theme-dark .hover\:text-slate-700:hover, html.theme-dark .hover\:text-slate-600:hover { color: rgba(255,255,255,.82) !important; }
-html.theme-dark .hover\:text-indigo-500:hover, html.theme-dark .hover\:text-indigo-600:hover { color: #c4a9ff !important; }
-html.theme-dark .hover\:text-rose-500:hover, html.theme-dark .hover\:text-rose-700:hover { color: #ff9a9a !important; }
-html.theme-dark .hover\:border-slate-300:hover, html.theme-dark .hover\:border-slate-400:hover { border-color: var(--border-strong) !important; }
-
-/* แท่งกราฟ/แถบสถานะเทา */
-html.theme-dark .bg-slate-300 { background-color: rgba(255,255,255,.14) !important; }
-
-/* โมดัล/ฉากหลังมืด + เบลอกระจก */
-html.theme-dark .bg-black\/40 { background-color: rgba(5,7,12,.72) !important; backdrop-filter: blur(6px); }
-
-/* --- ฟอร์ม input/select/textarea --- */
-html.theme-dark input,
-html.theme-dark select,
-html.theme-dark textarea {
-  background-color: rgba(255,255,255,.03) !important;
-  color: #fff !important;
-  border-color: var(--border) !important;
-}
-html.theme-dark input:focus,
-html.theme-dark select:focus,
-html.theme-dark textarea:focus {
-  border-color: rgba(157,107,255,.6) !important;
-  outline: none;
-  box-shadow: 0 0 0 3px rgba(157,107,255,.18) !important;
-}
-html.theme-dark input::placeholder,
-html.theme-dark textarea::placeholder { color: var(--text-4) !important; }
-html.theme-dark option { background-color: var(--card); color: #fff; }
-html.theme-dark input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(.85); }
-html.theme-dark input[type="checkbox"] { accent-color: var(--purple); }
-
-/* --- แถบเลื่อนแบบพรีเมียม --- */
-html.theme-dark ::-webkit-scrollbar { width: 10px; height: 10px; }
-html.theme-dark ::-webkit-scrollbar-track { background: transparent; }
-html.theme-dark ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.10); border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
-html.theme-dark ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.18); background-clip: content-box; }
-
-/* =====================================================================
-   Micro-interactions — ทรานสิชันนุ่มทั้งระบบ 200ms (ไม่หวือหวา)
-   ===================================================================== */
-html.theme-dark button,
-html.theme-dark a,
-html.theme-dark [role="button"] {
-  transition: background-color var(--dur) var(--ease),
-              border-color var(--dur) var(--ease),
-              color var(--dur) var(--ease),
-              box-shadow var(--dur) var(--ease),
-              transform var(--dur) var(--ease),
-              filter var(--dur) var(--ease);
-}
-
-/* =====================================================================
-   Design System utility classes (ใช้ใน component library ui.jsx)
-   ===================================================================== */
 .ds-card {
-  background:
-    linear-gradient(180deg, rgba(255,255,255,.022), rgba(255,255,255,0) 42%),
-    var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-md);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
 }
+
+/* พาเนลรอง — ใช้เมื่อต้องแยกกลุ่มข้อมูลย่อยในการ์ดใบใหญ่
+   (เดิมชื่อ glass ทำเอฟเฟกต์กระจกซึ่งไม่มีความหมายในดีไซน์แบน) */
 .ds-card-glass {
-  background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,0));
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-md);
-  backdrop-filter: blur(var(--blur));
-}
-.ds-hover-lift { transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease), border-color var(--dur) var(--ease); }
-.ds-hover-lift:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); border-color: var(--border-strong); }
-
-.ds-btn { border-radius: 12px; font-weight: 600; transition: all var(--dur) var(--ease); }
-.ds-btn-primary { background-image: linear-gradient(135deg, var(--purple), var(--purple-2)); color: #fff; box-shadow: 0 6px 20px -8px rgba(157,107,255,.55); }
-.ds-btn-primary:hover { filter: brightness(1.08); box-shadow: 0 10px 26px -8px rgba(157,107,255,.7); }
-.ds-btn-secondary { background: rgba(255,255,255,.05); color: rgba(255,255,255,.92); border: 1px solid var(--border); }
-.ds-btn-secondary:hover { background: rgba(255,255,255,.09); border-color: var(--border-strong); }
-.ds-btn-danger { background: rgba(255,92,92,.12); color: #ff8080; border: 1px solid rgba(255,92,92,.30); }
-.ds-btn-danger:hover { background: rgba(255,92,92,.2); }
-.ds-btn-ghost { background: transparent; color: var(--text-2); }
-.ds-btn-ghost:hover { background: rgba(255,255,255,.05); color: #fff; }
-
-.ds-gold  { color: var(--gold); }
-.ds-silver{ color: var(--silver); }
-.ds-bronze{ color: var(--bronze); }
-
-/* ===== Editorial luxury (ภาษางานออกแบบหน้ากระดานแต้ม) — ใช้ได้ทั้งเว็บ ===== */
-/* ป้ายหัวข้อเล็ก uppercase สีทองมีเส้นนำ */
-.ds-eyebrow { display:inline-flex; align-items:center; gap:10px; font-size:11px; letter-spacing:.34em; text-transform:uppercase; color:var(--gold); font-weight:600; }
-.ds-eyebrow::before { content:""; width:22px; height:1px; background:linear-gradient(90deg,transparent,var(--gold)); }
-/* หัวข้อใหญ่หนา ตัวอักษรชิด */
-.ds-title { font-weight:800; letter-spacing:-.025em; line-height:1.02; color:#fff; }
-/* ตัวเลขใหญ่ไล่เฉด ขาว→ม่วง มีเงาเรือง (สถิติเด่น) */
-.ds-figure { font-variant-numeric:tabular-nums; font-weight:800; letter-spacing:-.03em; line-height:.92;
-  background:linear-gradient(176deg,#FFFFFF 34%,#C9B6FF 100%); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; color:transparent;
-  filter:drop-shadow(0 6px 30px rgba(157,107,255,.42)); }
-.ds-figure-gold { background:linear-gradient(176deg,#FFF3C4 20%,#F3C233 100%); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; color:transparent; filter:drop-shadow(0 6px 26px rgba(247,201,72,.4)); }
-/* เส้นคั่นผมเส้น (แทนกรอบกล่องหนา) */
-.ds-hairline { border-top:1px solid var(--divider); }
-
-/* =====================================================================
-   Chat / Inbox — premium CRM polish (ใช้เฉพาะหน้าตอบแชท)
-   ===================================================================== */
-/* segmented control: ปุ่มที่เลือก = ไล่เฉดม่วง */
-.seg-on {
-  background-image: linear-gradient(135deg, var(--purple), var(--purple-2)) !important;
-  background-color: transparent !important;
-  color: #fff !important;
-  box-shadow: 0 4px 14px -6px rgba(157,107,255,.6);
-}
-/* รายการแชทที่เปิดอยู่ = แถบม่วงด้านซ้าย */
-.chat-item-active { box-shadow: inset 3px 0 0 0 var(--purple); }
-/* ฟองข้อความฝั่งเรา (เพจ) = ไล่เฉดม่วงพรีเมียม */
-.chat-bubble-me { background-image: linear-gradient(135deg, var(--purple), var(--purple-2)); }
-/* avatar ลูกค้าในลิสต์/หัวแชท = วงกลมโทนม่วงนุ่ม */
-html.theme-dark .bg-indigo-100 { background-color: rgba(157,107,255,.16) !important; }
-
-/* Skeleton shimmer */
-@keyframes ds-shimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
-.ds-skeleton {
-  background: linear-gradient(90deg, rgba(255,255,255,.04) 25%, rgba(255,255,255,.08) 37%, rgba(255,255,255,.04) 63%);
-  background-size: 800px 100%;
-  animation: ds-shimmer 1.4s infinite linear;
-  border-radius: 10px;
+  background: var(--ground);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
 }
 
-/* =====================================================================
-   BLACK GOLD — โทนดำทองหรูหรา (accent หลัก = ทอง แทนม่วง)
-   วางท้ายสุดเพื่อ override ทุก accent ที่ตั้งไว้ข้างบน
-   ===================================================================== */
-/* ปุ่มหลัก/ชิปที่เลือก = ไล่เฉดทอง + ตัวอักษรดำ (หรูแบบการ์ดพรีเมียม) */
-html.theme-dark .bg-slate-900, html.theme-dark .bg-slate-800 {
-  background-image: linear-gradient(135deg, #F7C948, #E0A82E) !important;
-  color: #1a1400 !important;
-  box-shadow: 0 6px 22px -8px rgba(247,201,72,.5) !important;
-}
-html.theme-dark .bg-slate-900 *, html.theme-dark .bg-slate-800 * { color: #1a1400 !important; }
+/* การ์ดที่กดได้ — บอกด้วยเส้นขอบเข้มขึ้น ไม่ใช่การขยับตำแหน่ง
+   (การ์ดเลื่อนขึ้นลงตอน hover ในตารางข้อมูลแน่นๆ กลายเป็นสัญญาณรบกวน) */
+.ds-hover-lift { transition: border-color var(--dur) var(--ease), background-color var(--dur) var(--ease); }
+.ds-hover-lift:hover { border-color: var(--line-strong); }
 
-/* Meta account picker: keep account details readable and color only the status word. */
-.meta-account-menu,
-html.theme-dark .meta-account-menu {
-  background: #0b0f16 !important;
-  border-color: rgba(255,255,255,.18) !important;
-  color: #fff !important;
+.ds-btn {
+  border-radius: var(--radius-control);
+  font-weight: 600;
+  transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
-.meta-account-heading,
-html.theme-dark .meta-account-heading {
-  background: #0b0f16 !important;
-  color: rgba(255,255,255,.62) !important;
-}
-.meta-account-option,
-html.theme-dark .meta-account-option,
-html.theme-dark .meta-account-option * {
-  background: transparent !important;
-  color: #fff !important;
-}
-.meta-account-option:hover,
-.meta-account-option.is-selected,
-html.theme-dark .meta-account-option:hover,
-html.theme-dark .meta-account-option.is-selected {
-  background: rgba(255,255,255,.09) !important;
-}
-.meta-status-active,
-html.theme-dark .meta-account-option .meta-status-active,
-html.theme-dark .meta-status-active {
-  color: #4ade80 !important;
-}
-.meta-status-inactive,
-html.theme-dark .meta-account-option .meta-status-inactive,
-html.theme-dark .meta-status-inactive {
-  color: #ff6b6b !important;
-}
-html.theme-dark .bg-slate-900:hover, html.theme-dark .bg-slate-800:hover { filter: brightness(1.06); }
-/* ปุ่มรอง (เดิมม่วง) = ทองเข้มตัน */
-html.theme-dark .bg-indigo-600 { background-color: #D9A62B !important; color: #1a1400 !important; }
-html.theme-dark .bg-indigo-600:hover, html.theme-dark .hover\:bg-indigo-700:hover { background-color: #E9B93E !important; }
+.ds-btn-primary { background: var(--brand); color: #fff; }
+.ds-btn-primary:hover:not(:disabled) { background: var(--brand-strong); }
 
-/* Customer database Export dialog: isolated from the global button utility remap. */
-.customer-export-modal-backdrop {
-  background: rgba(3, 5, 9, .82);
-  backdrop-filter: blur(10px);
-}
-.customer-export-modal-panel {
-  background: linear-gradient(180deg, #121821 0%, #0b1017 100%);
-  border: 1px solid rgba(247, 201, 72, .32);
-  color: #fff;
-  box-shadow: 0 30px 90px -28px rgba(0, 0, 0, .95), 0 0 0 1px rgba(247, 201, 72, .06);
-}
-.customer-export-modal-panel::before {
-  content: "";
-  position: absolute;
-  inset: 0 0 auto;
-  height: 3px;
-  background: linear-gradient(90deg, #f7c948, #e0a82e 55%, transparent);
-}
-.customer-export-modal-header { border-bottom: 1px solid rgba(255, 255, 255, .08); }
-.customer-export-modal-kicker {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: #f7c948;
+.ds-btn-secondary { background: var(--surface); color: var(--ink-2); border: 1px solid var(--line); }
+.ds-btn-secondary:hover:not(:disabled) { background: var(--ground); border-color: var(--line-strong); color: var(--ink); }
+
+.ds-btn-danger { background: #FDEDEC; color: #B42318; border: 1px solid #F6C9C5; }
+.ds-btn-danger:hover:not(:disabled) { background: #FBDDDA; }
+
+.ds-btn-ghost { background: transparent; color: var(--ink-3); }
+.ds-btn-ghost:hover:not(:disabled) { background: rgba(20, 23, 31, .05); color: var(--ink); }
+
+/* หัวข้อ — น้ำหนักและระยะตัวอักษรสร้างลำดับชั้น ไม่ใช้ฟอนต์คนละตระกูล */
+.ds-title { font-weight: 700; letter-spacing: -.015em; line-height: 1.2; color: var(--ink); }
+.ds-section-title { margin-bottom: .25rem; }
+.ds-section-actions { display: flex; align-items: center; gap: .5rem; }
+
+/* ป้ายเล็กเหนือหัวข้อ — บอกว่ากำลังอยู่ส่วนไหน
+   (เดิม letter-spacing .34em กว้างจนอ่านเป็นคำไม่ได้) */
+.ds-eyebrow {
+  display: inline-block;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--brand);
 }
-.customer-export-modal-title { color: #fff; line-height: 1.35; }
+
+/* ตัวเลขเด่นประจำหน้า (ยอดใช้จ่าย ฯลฯ)
+   เดิมเป็นตัวอักษรไล่เฉดตัดด้วย background-clip ซึ่งอ่านยากและพิมพ์ไม่ติด */
+.ds-figure {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  letter-spacing: -.02em;
+  line-height: 1;
+  color: var(--ink);
+}
+
+/* ตัวควบคุมแบบแบ่งช่อง — ช่องที่เลือกเป็นสี brand */
+.seg-on { background: var(--brand) !important; color: #fff !important; }
+
+/* =====================================================================
+   หน้าตอบแชท
+   ===================================================================== */
+
+/* ห้องที่เปิดอยู่ในลิสต์ซ้าย — แถบสีด้านซ้าย อ่านได้เร็วกว่าเปลี่ยนสีพื้นทั้งแถว */
+.chat-item-active { box-shadow: inset 3px 0 0 0 var(--brand); }
+
+/* ฟองข้อความฝั่งเพจ (เรา) */
+.chat-bubble-me { background: var(--brand); color: #fff; }
+
+/* แถบเครื่องมือในช่องพิมพ์ — แยกสีตามหน้าที่เพื่อกวาดตาหาได้เร็ว
+   ใช้โทนอ่อนพื้น + ตัวอักษรเข้ม ให้คอนทราสต์ผ่านบนพื้นขาว */
+.chat-compose-guide {
+  color: var(--ink-2);
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+.chat-language-control {
+  color: var(--ink-2);
+  border: 1px solid var(--line);
+  background: var(--ground);
+}
+.chat-compose-guide > div:first-child { min-width: 0; }
+.chat-language-control select { color: var(--ink); background: var(--surface); width: min(240px, 38vw); }
+.chat-language-hint { color: var(--ink-2); background: var(--ground); border: 1px solid var(--line); }
+
+/* ฟอร์มข้อมูลลูกค้าที่ฝังอยู่ใน Inbox ต้องใช้ surface เดียวกับแผงข้อมูล
+   ไม่ดึงสี slate/white ของหน้าฐานข้อมูลลูกค้ามาปนในธีมมืด */
+.chat-customer-form,
+.chat-trade-checker { color: var(--ink-2); }
+.chat-customer-form .border-slate-200,
+.chat-trade-checker .border-slate-200 { border-color: var(--line); }
+.chat-customer-form .border-slate-300,
+.chat-trade-checker .border-slate-300 { border-color: var(--line-strong); }
+.chat-customer-form .text-slate-600,
+.chat-trade-checker .text-slate-600 { color: var(--ink); }
+.chat-customer-form .text-slate-500,
+.chat-trade-checker .text-slate-500 { color: var(--ink-2); }
+.chat-customer-form .text-slate-400,
+.chat-trade-checker .text-slate-400 { color: var(--ink-3); }
+.chat-customer-form input,
+.chat-customer-form select,
+.chat-trade-checker input { background: var(--surface); color: var(--ink); border-color: var(--line-strong); }
+.chat-customer-form input::placeholder,
+.chat-trade-checker input::placeholder { color: var(--ink-3); }
+.chat-customer-form .bg-white { background: var(--surface); }
+.chat-customer-form .divide-slate-100 > :not([hidden]) ~ :not([hidden]) { border-color: var(--line); }
+.chat-customer-form .hover\:bg-slate-50:hover { background: var(--ground); }
+.chat-customer-form .bg-brand-50\/40 { background: var(--brand-soft); }
+.chat-insights .text-night-ink-3 { color: var(--ink-2); }
+.chat-insights input,
+.chat-insights textarea { background: var(--surface); color: var(--ink); border-color: var(--line); }
+.chat-insights input::placeholder,
+.chat-insights textarea::placeholder { color: var(--ink-3); }
+
+/* แผงลูกค้าด้านขวา: ลดช่องไฟเพื่อคืนพื้นที่ให้บทสนทนา แต่ยังแสดงข้อมูลทุกส่วน */
+.chat-customer-panel > .chat-customer-form,
+.chat-customer-panel > .chat-insights { gap: .5rem; }
+.chat-customer-panel > * + * { margin-top: .75rem !important; }
+.chat-customer-panel .chat-customer-form > * + *,
+.chat-customer-panel .chat-insights > * + * { margin-top: .5rem !important; }
+.chat-customer-panel .chat-customer-form { padding-top: .6rem; margin-top: 0; }
+.chat-customer-panel .chat-customer-form .grid { gap: .4rem; }
+.chat-customer-panel .chat-customer-form input,
+.chat-customer-panel .chat-insights input { padding-top: .35rem; padding-bottom: .35rem; }
+.chat-customer-panel .chat-insights textarea { min-height: 4.5rem; }
+
+.chat-tool-row { overflow: visible; }
+.chat-tool-button {
+  display: inline-flex; align-items: center; gap: .35rem; flex: 0 0 auto;
+  min-height: 34px; padding: .4rem .65rem; border-radius: var(--radius-control);
+  font-size: 11px; font-weight: 600; line-height: 1;
+  border: 1px solid transparent;
+  transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease);
+}
+.chat-tool-button:hover { border-color: currentColor; }
+.chat-tool-button.is-active { border-color: currentColor; box-shadow: inset 0 0 0 1px currentColor; }
+.chat-tool-button b {
+  min-width: 18px; padding: 2px 5px; border-radius: 999px;
+  text-align: center; background: var(--ground); color: inherit;
+}
+.chat-tool-emoji,
+.chat-tool-attach,
+.chat-tool-saved,
+.chat-tool-knowledge {
+  color: var(--ink-2);
+  border-color: var(--line);
+  background: var(--surface);
+}
+.chat-tool-button:hover,
+.chat-tool-button.is-active { color: var(--brand-strong); background: var(--brand-soft); }
+
+/* รายการแชทบนมือถือ — compact แต่ยังคงชื่อเพจ, ช่องทาง, ค้นหา และตัวกรองครบ */
+@media (max-width: 767px) {
+  .chat-list-header { padding: .5rem .65rem; }
+  .chat-list-avatar { width: 2rem; height: 2rem; }
+  .chat-list-title { font-size: .875rem; }
+  .chat-list-filters { padding: .55rem .65rem; }
+  .chat-list-filters > .flex:first-child { gap: .7rem; }
+  .chat-list-filters .relative input { padding: .5rem .75rem .5rem 2.2rem; font-size: .75rem; }
+  .chat-list-filters .relative > svg { left: .75rem; }
+  .chat-list-filters .flex.gap-1\.5 > button { padding: .4rem .7rem; font-size: .75rem; }
+  .chat-list-filters button.w-full { padding: .45rem .65rem; }
+}
+
+@media (max-width: 640px) {
+  .chat-compose-guide { align-items: center; flex-wrap: nowrap; padding: .45rem .6rem; gap: .5rem; }
+  .chat-compose-guide > div:first-child { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .chat-compose-guide > div:first-child span { display: none; }
+  .chat-language-control { margin-left: auto; width: auto; flex: 0 0 auto; padding: .2rem .35rem; gap: .25rem; }
+  .chat-language-control select { min-width: 0; max-width: 10.5rem; padding: .25rem .35rem; }
+  .chat-language-hint { flex: 0 0 auto; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+
+/* ช่วง tablet แนวนอน: ยังมี 3 คอลัมน์ได้ แต่ต้องลดความกว้างก่อนที่แผงขวาจะถูกตัด */
+@media (min-width: 768px) and (max-width: 1100px) {
+  .chat-inbox-list { width: 280px !important; }
+  .chat-customer-panel { width: 280px !important; padding: .75rem !important; }
+  .chat-customer-form .grid { grid-template-columns: minmax(0, 1fr); }
+  .chat-conversation-panel .chat-compose-guide { flex-wrap: wrap; }
+  .chat-conversation-panel .chat-language-control { margin-left: 0; }
+  .chat-conversation-panel .chat-language-control select { width: 220px; }
+}
+
+/* Inbox ระหว่างมือถือกับ desktop: ไม่บีบ 3 คอลัมน์จนอ่าน/กดไม่ได้
+   ใช้รูปแบบเดียวกับมือถือ โดยเปิดทีละแผง */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .chat-shell:not(.is-selected) .chat-inbox-list { width: 100% !important; }
+  .chat-shell:not(.is-selected) .chat-conversation-panel { display: none !important; }
+  .chat-shell.is-selected .chat-inbox-list,
+  .chat-shell.is-selected .chat-customer-panel { display: none !important; }
+  .chat-shell.is-selected .chat-conversation-panel {
+    display: flex !important;
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 40 !important;
+    width: 100% !important;
+    height: 100dvh !important;
+    max-width: none !important;
+  }
+  .chat-mobile-back,
+  .chat-mobile-status { display: inline-flex !important; }
+}
+
+/* ความสูงห้องแชท — มือถือเต็มจอ เดสก์ท็อปเว้นขอบ
+   มือถือ: เผื่อพื้นที่ด้านล่างให้แถบเมนูล่าง (~60px) เฉพาะตอนโชว์ลิสต์ —
+   ตอนเปิดคุยกับลูกค้า ChatInboxTab จะซ้อนทับด้วย fixed inset-0 เต็มจอทับแถบเมนูล่างอยู่แล้ว ไม่ต้องหักพื้นที่ */
+.chat-shell { height: 82vh; }
+@media (min-width: 768px) {
+  .chat-shell { height: 100vh; border-radius: 0 !important; border-width: 0 !important; }
+}
+@media (max-width: 767px) {
+  .chat-shell {
+    height: calc(100vh - 60px - env(safe-area-inset-bottom));
+    height: calc(100dvh - 60px - env(safe-area-inset-bottom));
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  .chat-fullbleed { margin-left: calc(-1 * env(safe-area-inset-left)); margin-right: calc(-1 * env(safe-area-inset-right)); }
+}
+
+/* =====================================================================
+   ตัวเลือกบัญชี Meta (dropdown ลอยเหนือเนื้อหา)
+   ===================================================================== */
+.meta-account-menu {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  box-shadow: 0 10px 30px -12px rgba(20, 23, 31, .18), 0 2px 6px rgba(20, 23, 31, .06);
+  color: var(--ink);
+}
+.meta-account-heading { background: var(--surface); color: var(--ink-3); }
+.meta-account-option { background: transparent; color: var(--ink); }
+.meta-account-option:hover,
+.meta-account-option.is-selected { background: var(--brand-soft); }
+.meta-status-active { color: #0E9F5F; }
+.meta-status-inactive { color: #D0362A; }
+
+/* =====================================================================
+   กล่องดาวน์โหลดฐานข้อมูลลูกค้า (modal)
+   ===================================================================== */
+.customer-export-modal-backdrop { background: rgba(20, 23, 31, .38); backdrop-filter: blur(2px); }
+.customer-export-modal-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  box-shadow: 0 24px 60px -20px rgba(20, 23, 31, .28);
+}
+.customer-export-modal-header,
+.customer-export-modal-footer { border-color: var(--line); background: var(--ground); }
+.customer-export-modal-header { border-bottom: 1px solid var(--line); }
+.customer-export-modal-footer { border-top: 1px solid var(--line); }
+.customer-export-modal-kicker {
+  display: inline-flex; align-items: center; gap: 6px;
+  color: var(--brand); font-size: 11px; font-weight: 700; letter-spacing: .1em;
+}
+.customer-export-modal-title { color: var(--ink); line-height: 1.35; }
 .customer-export-modal-page {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  max-width: 100%;
-  color: rgba(255, 255, 255, .82);
-  font-size: 13px;
+  display: inline-flex; align-items: center; gap: 8px; max-width: 100%;
+  color: var(--ink-2); font-size: 13px;
 }
-.customer-export-modal-page span {
-  color: #f7c948;
-  font-size: 11px;
-  font-weight: 700;
+.customer-export-modal-page span { color: var(--brand); font-size: 11px; font-weight: 700; }
+.customer-export-modal-body { background: var(--surface); }
+.customer-export-modal-label { display: block; color: var(--ink-2); font-size: 12px; font-weight: 600; }
+.customer-export-modal-select,
+.customer-export-modal-input {
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--ink);
+  border-radius: var(--radius-control);
 }
+.customer-export-modal-hint { color: var(--ink-3); font-size: 12px; }
 .customer-export-modal-close {
   flex: 0 0 auto;
-  border: 1px solid rgba(255, 255, 255, .10);
-  border-radius: 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
   padding: 8px;
-  color: rgba(255, 255, 255, .58);
-  background: rgba(255, 255, 255, .04);
-  transition: .18s ease;
+  color: var(--ink-3);
+  background: var(--surface);
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
-.customer-export-modal-close:hover { color: #fff; background: rgba(255, 255, 255, .09); }
-.customer-export-modal-body { background: rgba(0, 0, 0, .12); }
-.customer-export-modal-label {
-  display: block;
-  color: rgba(255, 255, 255, .66);
-  font-size: 12px;
-  font-weight: 600;
-}
-.customer-export-modal-select,
-.customer-export-modal-input,
-html.theme-dark .customer-export-modal-select,
-html.theme-dark .customer-export-modal-input {
-  border: 1px solid rgba(255, 255, 255, .17) !important;
-  background: #080d14 !important;
-  color: rgba(255, 255, 255, .94) !important;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .025) !important;
-}
-.customer-export-modal-select:focus,
-.customer-export-modal-input:focus {
-  outline: none;
-  border-color: rgba(247, 201, 72, .72) !important;
-  box-shadow: 0 0 0 3px rgba(247, 201, 72, .13) !important;
-}
-.customer-export-modal-hint {
-  color: rgba(255, 255, 255, .42);
-  font-size: 12px;
-}
-.customer-export-modal-footer {
-  border-top: 1px solid rgba(255, 255, 255, .08);
-  background: rgba(0, 0, 0, .16);
-}
+.customer-export-modal-close:hover { color: var(--ink); background: var(--ground); }
 .customer-export-modal-cancel {
-  border: 1px solid rgba(255, 255, 255, .17);
-  background: transparent;
-  color: rgba(255, 255, 255, .76);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--ink-2);
 }
-.customer-export-modal-cancel:hover { background: rgba(255, 255, 255, .07); color: #fff; }
+.customer-export-modal-cancel:hover { background: var(--ground); color: var(--ink); }
 .customer-export-modal-download {
-  border: 1px solid rgba(255, 222, 120, .35);
-  background: linear-gradient(135deg, #f7c948, #e0a82e);
-  color: #1a1400;
-  box-shadow: 0 10px 28px -12px rgba(247, 201, 72, .72);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: var(--brand);
+  color: #fff;
 }
-.customer-export-modal-download:hover:not(:disabled) { filter: brightness(1.07); }
+.customer-export-modal-download:hover:not(:disabled) { background: var(--brand-strong); }
 .customer-export-modal-download:disabled {
-  border-color: rgba(255, 255, 255, .08);
-  background: #202631;
-  color: rgba(255, 255, 255, .34);
-  box-shadow: none;
+  background: var(--ground);
+  border-color: var(--line);
+  color: var(--ink-3);
   cursor: not-allowed;
 }
 @media (max-width: 639px) {
@@ -509,257 +482,67 @@ html.theme-dark .customer-export-modal-input {
   .customer-export-modal-footer button { width: 100%; }
 }
 
-/* ปุ่ม/องค์ประกอบ design system = ทอง */
-.ds-btn-primary { background-image: linear-gradient(135deg, #F7C948, #E0A82E); color: #1a1400; box-shadow: 0 6px 20px -8px rgba(247,201,72,.55); }
-.ds-btn-primary:hover { filter: brightness(1.06); box-shadow: 0 10px 26px -8px rgba(247,201,72,.7); }
-
-/* คลังคำตอบ: การ์ดเพิ่มเองต้องคอนทราสต์สูงในธีมดำทอง */
-.knowledge-manual-card,
-html.theme-dark .knowledge-manual-card {
-  background: linear-gradient(180deg, #121821 0%, #0d121a 100%) !important;
-  border: 1px solid rgba(247,201,72,.38) !important;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.035), 0 14px 34px -24px rgba(0,0,0,.9);
+/* =====================================================================
+   คลังคำถาม-คำตอบ: การ์ดที่แอดมินเพิ่มเอง
+   ===================================================================== */
+.knowledge-manual-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
 }
-.knowledge-manual-title,
-html.theme-dark .knowledge-manual-title { color: #fff !important; }
-.knowledge-manual-label,
-html.theme-dark .knowledge-manual-label { color: rgba(255,255,255,.72) !important; }
-.knowledge-manual-field,
-html.theme-dark .knowledge-manual-field {
-  background: #080d14 !important;
-  border: 1px solid rgba(255,255,255,.18) !important;
-  color: rgba(255,255,255,.94) !important;
-  caret-color: #F7C948;
+.knowledge-manual-title { color: var(--ink); }
+.knowledge-manual-label { color: var(--ink-2); }
+.knowledge-manual-field {
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-control);
+  color: var(--ink);
+  caret-color: var(--brand);
 }
-.knowledge-manual-field::placeholder,
-html.theme-dark .knowledge-manual-field::placeholder { color: rgba(255,255,255,.34) !important; }
-.knowledge-manual-field option { background: #080d14; color: #fff; }
+.knowledge-manual-field::placeholder { color: var(--ink-3); }
 
-/* ตัวเลขเด่น = ไล่เฉด ขาว→ทอง */
-.ds-figure { background: linear-gradient(176deg, #FFFFFF 30%, #F7C948 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; color: transparent; filter: drop-shadow(0 6px 30px rgba(247,201,72,.42)); }
-
-/* โฟกัสฟอร์ม = วงแหวนทอง */
-html.theme-dark input:focus, html.theme-dark select:focus, html.theme-dark textarea:focus {
-  border-color: rgba(247,201,72,.6) !important; box-shadow: 0 0 0 3px rgba(247,201,72,.16) !important;
+/* =====================================================================
+   สถานะโหลด
+   ===================================================================== */
+@keyframes ds-shimmer {
+  0% { background-position: -400px 0; }
+  100% { background-position: 400px 0; }
 }
-
-/* segmented control ที่เลือก = ทอง + ตัวอักษรดำ */
-.seg-on { background-image: linear-gradient(135deg, #F7C948, #E0A82E) !important; color: #1a1400 !important; box-shadow: 0 4px 14px -6px rgba(247,201,72,.55); }
-/* แชทที่เปิดอยู่ = แถบทองด้านซ้าย */
-.chat-item-active { box-shadow: inset 3px 0 0 0 #F7C948; }
-/* ฟองข้อความฝั่งเรา = ทอง + ตัวอักษรดำ */
-.chat-bubble-me { background-image: linear-gradient(135deg, #F7C948, #E0A82E); }
-html.theme-dark .chat-bubble-me, html.theme-dark .chat-bubble-me * { color: #1a1400 !important; }
-html.theme-light .chat-bubble-me,
-html.theme-light .chat-bubble-me * {
-  color: #3B2800 !important;
+.ds-skeleton {
+  background: linear-gradient(90deg, #EEF0F3 25%, #F7F8FA 37%, #EEF0F3 63%);
+  background-size: 800px 100%;
+  animation: ds-shimmer 1.4s infinite linear;
+  border-radius: 8px;
 }
 
-/* แถบเครื่องมือหน้าแชท — แยกสีตามหน้าที่เพื่อมองหาได้เร็ว */
-.chat-compose-guide {
-  color: #dbeafe;
-  border: 1px solid rgba(78,140,255,.28);
-  background: linear-gradient(90deg, rgba(78,140,255,.13), rgba(157,107,255,.08));
-}
-.chat-language-control {
-  color: #fef3c7;
-  border: 1px solid rgba(247,201,72,.35);
-  background: rgba(247,201,72,.12);
-}
-.chat-language-control select { color: #fff; background: #181d27 !important; }
-.chat-language-hint { color: #86efac; background: rgba(30,215,96,.11); border: 1px solid rgba(30,215,96,.24); }
-.chat-tool-row { overflow: visible; }
-.chat-tool-button {
-  display: inline-flex; align-items: center; gap: .35rem; flex: 0 0 auto;
-  min-height: 34px; padding: .4rem .65rem; border-radius: 10px;
-  font-size: 11px; font-weight: 600; line-height: 1;
-  border: 1px solid transparent; transition: transform .16s ease, filter .16s ease, box-shadow .16s ease;
-}
-.chat-tool-button:hover { transform: translateY(-1px); filter: brightness(1.15); }
-.chat-tool-button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
-.chat-tool-button.is-active { box-shadow: 0 0 0 2px rgba(255,255,255,.16), 0 6px 18px -8px currentColor; filter: brightness(1.18); }
-.chat-tool-button b { min-width: 18px; padding: 2px 5px; border-radius: 999px; text-align: center; background: rgba(0,0,0,.24); color: inherit; }
-.chat-tool-emoji { color: #fde68a; border-color: rgba(247,201,72,.30); background: rgba(247,201,72,.12); }
-.chat-tool-attach { color: #93c5fd; border-color: rgba(78,140,255,.30); background: rgba(78,140,255,.12); }
-.chat-tool-saved { color: #6ee7b7; border-color: rgba(30,215,96,.28); background: rgba(30,215,96,.11); }
-.chat-tool-knowledge { color: #c4b5fd; border-color: rgba(157,107,255,.34); background: rgba(157,107,255,.14); }
-@media (max-width: 640px) {
-  .chat-compose-guide { align-items: stretch; }
-  .chat-language-control { margin-left: 0; width: 100%; justify-content: space-between; }
-  .chat-language-control select { min-width: 0; max-width: 70%; }
+/* =====================================================================
+   PWA เต็มจอ — เว้น safe area กันเนื้อหาชนแถบสถานะ/ติ่งจอ
+   ===================================================================== */
+@media (display-mode: standalone), (display-mode: fullscreen) {
+  .app-header { padding-top: env(safe-area-inset-top); }
+  .chat-shell { padding-top: env(safe-area-inset-top); }
+  .safe-top { padding-top: env(safe-area-inset-top); }
+  .safe-x { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
 }
 
-/* ลิงก์/แอคเซนต์ (เดิมม่วง) = ทองอ่อน */
-html.theme-dark .text-indigo-500, html.theme-dark .text-indigo-600, html.theme-dark .text-indigo-700,
-html.theme-dark .text-purple-600,
-html.theme-dark .hover\:text-indigo-500:hover, html.theme-dark .hover\:text-indigo-600:hover { color: #EBC873 !important; }
-/* avatar/พื้นม่วงอ่อน = ทองโปร่ง */
-html.theme-dark .bg-indigo-100 { background-color: rgba(247,201,72,.16) !important; }
-html.theme-dark .bg-indigo-50 { background-color: rgba(247,201,72,.10) !important; }
-/* checkbox + ไฮไลต์เลือกข้อความ = ทอง */
-html.theme-dark input[type="checkbox"] { accent-color: #E0A82E; }
-::selection { background: rgba(247,201,72,.28); color: #fff; }
-
-/* มือถือ: แตะง่ายขึ้น */
+/* มือถือ: เป้าแตะของ select/date ต้องใหญ่พอกดด้วยนิ้ว */
 @media (max-width: 640px) {
   select, input[type="date"] { min-height: 38px; }
 }
 
-/* PWA เต็มจอ (standalone) — header เผื่อ safe area บนสุด กันซ้อนนาฬิกา/ติ่ง */
-@media (display-mode: standalone) {
-  .app-header { padding-top: env(safe-area-inset-top); }
-  .chat-shell { padding-top: env(safe-area-inset-top); }
-  /* หัวข้อของหน้า overlay เต็มจอ (fixed inset-0) เช่น รายงานแคมเปญ/เปรียบเทียบ — เว้น safe area กันทับแถบสถานะ */
-  .safe-top { padding-top: env(safe-area-inset-top); }
-  /* เผื่อ safe area ซ้าย/ขวา (จอมีติ่ง/มุมโค้งแนวนอน) ให้ overlay ไม่ชนขอบ */
-  .safe-x { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
-}
-/* iOS PWA รุ่นเก่าบางตัวรายงานเป็น fullscreen แทน standalone — เผื่อไว้ให้ครอบด้วย */
-@media (display-mode: fullscreen) {
-  .app-header, .safe-top { padding-top: env(safe-area-inset-top); }
-  .chat-shell { padding-top: env(safe-area-inset-top); }
-}
-
-/* หน้าตอบแชท — ความสูง responsive */
-.chat-shell { height: 82vh; }
 @media (max-width: 767px) {
-  .chat-shell {
-    height: 100vh;
-    height: 100dvh;
-    padding-bottom: env(safe-area-inset-bottom);
-  }
-  .chat-fullbleed { margin-left: calc(-1 * env(safe-area-inset-left)); margin-right: calc(-1 * env(safe-area-inset-right)); }
+  .dashboard-page-main { padding-inline: 12px; }
+  .dashboard-page-main > * { width: 100%; }
+  .dashboard-page-main .grid { grid-template-columns: minmax(0, 1fr); }
+  .dashboard-page-main .overflow-x-auto { max-width: 100%; }
+  .ds-section-title { gap: .75rem; }
+  .ds-section-actions { width: 100%; }
+  .ds-section-actions > * { flex: 1 1 auto; }
+  .settings-page { padding-bottom: 0.5rem; }
+  .settings-page-content { width: 100%; }
 }
 
-/* =====================================================================
-   LIGHT THEME — Bright Editorial
-   ใช้ token ชุดเดียวกับ Dark Luxury เพื่อให้ทุกหน้า/โมดัล/PWA สลับพร้อมกัน
-   ===================================================================== */
-html.theme-light {
-  color-scheme: light;
-  --bg: #F4F7FB;
-  --card: #FFFFFF;
-  --card-2: #F8FAFC;
-  --card-3: #EEF2F7;
-  --border: rgba(15,23,42,.11);
-  --border-strong: rgba(15,23,42,.20);
-  --divider: rgba(15,23,42,.075);
-  --text: #0F172A;
-  --text-2: #0F172A;
-  --text-3: #0F172A;
-  --text-4: #0F172A;
-  --purple: #6D4AFF;
-  --purple-2: #5936E8;
-  --gold: #C18B00;
-  --silver: #64748B;
-  --bronze: #A96022;
-  --green: #059669;
-  --blue: #2563EB;
-  --red: #DC2626;
-  --shadow-sm: 0 1px 3px rgba(15,23,42,.08);
-  --shadow-md: 0 18px 45px -30px rgba(15,23,42,.32);
-  --shadow-lg: 0 32px 80px -42px rgba(15,23,42,.34);
-  --glow: 0 0 0 1px rgba(109,74,255,.18), 0 8px 26px -12px rgba(109,74,255,.24);
+@media (prefers-reduced-motion: reduce) {
+  .ds-skeleton { animation: none; }
+  * { transition-duration: .01ms !important; }
 }
-html.theme-light body { background: var(--bg); color: #0F172A; }
-html.theme-light .text-slate-300,
-html.theme-light .text-slate-400,
-html.theme-light .text-slate-500,
-html.theme-light .text-slate-600,
-html.theme-light .text-slate-700,
-html.theme-light .text-slate-800,
-html.theme-light .text-slate-900,
-html.theme-light .text-slate-950 {
-  color: #0F172A !important;
-}
-html.theme-light .min-h-screen.bg-slate-50 { background: var(--bg) !important; }
-html.theme-light .bg-slate-950 { background: #F4F7FB !important; }
-html.theme-light .permission-denied { color: #0F172A !important; }
-html.theme-light .permission-denied .text-slate-300 { color: #0F172A !important; }
-html.theme-light .permission-denied .bg-white\/5 { background: #FFFFFF !important; border-color: rgba(220,38,38,.25) !important; box-shadow: var(--shadow-md); }
-html.theme-light aside .bg-amber-500\/10.text-white { color: #92400E !important; background: #FEF3C7 !important; }
-html.theme-light .shadow-sm { box-shadow: var(--shadow-sm) !important; }
-html.theme-light .shadow, html.theme-light .shadow-md { box-shadow: var(--shadow-md) !important; }
-html.theme-light .shadow-lg, html.theme-light .shadow-xl { box-shadow: var(--shadow-lg) !important; }
-html.theme-light .ds-title { color: var(--text); }
-html.theme-light .ds-figure {
-  background: linear-gradient(176deg, #0F172A 30%, #6D4AFF 100%);
-  -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
-  filter: drop-shadow(0 5px 20px rgba(109,74,255,.16));
-}
-html.theme-light .ds-figure-gold {
-  background: linear-gradient(176deg,#7A5200 10%,#C18B00 100%);
-  -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
-}
-html.theme-light .ds-btn-secondary { background: #fff; color: #334155; border-color: var(--border); }
-html.theme-light .ds-btn-secondary:hover { background: #F8FAFC; border-color: var(--border-strong); }
-html.theme-light .ds-btn-ghost:hover { background: rgba(15,23,42,.05); color: #0F172A; }
-
-/* ปุ่มสลับธีม — ตำแหน่งถูกวางไว้ใน header/sidebar ของทุกแพลตฟอร์ม */
-.theme-toggle {
-  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
-  min-width: 38px; min-height: 38px; padding: 7px 10px; border-radius: 12px;
-  border: 1px solid var(--border-strong); background: var(--card-2); color: var(--text-2);
-  box-shadow: var(--shadow-sm); transition: background .2s ease, color .2s ease, border-color .2s ease, transform .2s ease;
-}
-.theme-toggle:hover { background: var(--card-3); color: var(--text); transform: translateY(-1px); }
-.theme-toggle:focus-visible { outline: 3px solid rgba(109,74,255,.25); outline-offset: 2px; }
-.theme-toggle-label { font-size: 12px; font-weight: 650; }
-@media (max-width: 639px) { .theme-toggle { padding: 7px; } .theme-toggle-label { display: none; } }
-
-/* เมนูบัญชี Meta */
-html.theme-light .meta-account-menu,
-html.theme-light .meta-account-heading { background: #FFFFFF !important; color: #64748B !important; border-color: var(--border) !important; }
-html.theme-light .meta-account-option,
-html.theme-light .meta-account-option * { background: transparent !important; color: #0F172A !important; }
-html.theme-light .meta-account-option:hover,
-html.theme-light .meta-account-option.is-selected { background: #EEF2F7 !important; }
-html.theme-light .meta-account-option .meta-status-active { color: #059669 !important; }
-html.theme-light .meta-account-option .meta-status-inactive { color: #DC2626 !important; }
-
-/* Modal export ฐานข้อมูล */
-html.theme-light .customer-export-modal-backdrop { background: rgba(15,23,42,.34); }
-html.theme-light .customer-export-modal-panel { background: #FFFFFF; border-color: rgba(193,139,0,.35); color: #0F172A; box-shadow: var(--shadow-lg); }
-html.theme-light .customer-export-modal-header,
-html.theme-light .customer-export-modal-footer { border-color: var(--border); background: #F8FAFC; }
-html.theme-light .customer-export-modal-title { color: #0F172A; }
-html.theme-light .customer-export-modal-page { color: #475569; }
-html.theme-light .customer-export-modal-body { background: #FFFFFF; }
-html.theme-light .customer-export-modal-label { color: #475569; }
-html.theme-light .customer-export-modal-select,
-html.theme-light .customer-export-modal-input { background: #FFFFFF !important; color: #0F172A !important; border-color: #CBD5E1 !important; }
-html.theme-light .customer-export-modal-hint { color: #64748B; }
-html.theme-light .customer-export-modal-close,
-html.theme-light .customer-export-modal-cancel { color: #475569; background: #FFFFFF; border-color: #CBD5E1; }
-html.theme-light .customer-export-modal-close:hover,
-html.theme-light .customer-export-modal-cancel:hover { color: #0F172A; background: #EEF2F7; }
-
-/* คลังคำถามคำตอบ */
-html.theme-light .knowledge-manual-card { background: linear-gradient(180deg,#FFFFFF,#F8FAFC) !important; border-color: rgba(193,139,0,.32) !important; box-shadow: var(--shadow-md); }
-html.theme-light .knowledge-manual-title { color: #0F172A !important; }
-html.theme-light .knowledge-manual-label { color: #475569 !important; }
-html.theme-light .knowledge-manual-field { background: #FFFFFF !important; border-color: #CBD5E1 !important; color: #0F172A !important; caret-color: #B98500; }
-html.theme-light .knowledge-manual-field::placeholder { color: #94A3B8 !important; }
-html.theme-light .knowledge-manual-field option { background: #FFFFFF; color: #0F172A; }
-
-/* Inbox / composer */
-html.theme-light .chat-compose-guide { color: #1E3A8A; border-color: rgba(37,99,235,.22); background: linear-gradient(90deg,#EFF6FF,#F5F3FF); }
-html.theme-light .chat-language-control { color: #713F12; border-color: rgba(193,139,0,.3); background: #FFFBEB; }
-html.theme-light .chat-language-control select { color: #0F172A; background: #FFFFFF !important; }
-html.theme-light .chat-language-hint { color: #047857; background: #ECFDF5; border-color: #A7F3D0; }
-html.theme-light .chat-tool-emoji { color: #92400E; background: #FFFBEB; }
-html.theme-light .chat-tool-attach { color: #1D4ED8; background: #EFF6FF; }
-html.theme-light .chat-tool-saved { color: #047857; background: #ECFDF5; }
-html.theme-light .chat-tool-knowledge { color: #6D28D9; background: #F5F3FF; }
-html.theme-light .chat-tool-button b { background: rgba(15,23,42,.08); }
-
-html.theme-light input,
-html.theme-light select,
-html.theme-light textarea { color-scheme: light; }
-html.theme-light option { background: #FFFFFF; color: #0F172A; }
-html.theme-light ::-webkit-scrollbar-thumb { background: rgba(15,23,42,.16); border-radius: 8px; border: 2px solid transparent; background-clip: content-box; }
-html.theme-light ::selection { background: rgba(109,74,255,.20); color: #0F172A; }
-
-/* เปลี่ยนธีมอย่างนุ่มนวล แต่เคารพผู้ใช้ที่ลด motion */
-body, .ds-card, .ds-card-glass { transition: background-color .22s ease, color .22s ease, border-color .22s ease; }
-@media (prefers-reduced-motion: reduce) { body, .ds-card, .ds-card-glass, .theme-toggle { transition: none; } }

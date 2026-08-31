@@ -33,12 +33,14 @@ import Spinner from "@/components/shared/Spinner";
 import NumInput from "@/components/shared/NumInput";
 import { normalizeBrandConfig } from "@/components/features/generate/GenerateTab";
 import { SETTINGS_SECTIONS } from "@/lib/constants/settings";
+import { EmptyState, SectionTitle } from "@/components/ui";
 import {
   AiAssistPanel,
   BrandAssetUploader,
   CiStyleUploader,
   MetaTokenPanel,
   LineOAPanel,
+  OpenAIKeyPanel,
   PermissionsPanel,
   ActivityPanel,
 } from "@/components/features/settings/SettingsPanelsA";
@@ -115,7 +117,7 @@ function GameOfficeSettingsPanel() {
         <p className="text-[11px] text-slate-400 mt-1">ค่าเริ่มต้นเดา sheet 4 แถว (ลง/ซ้าย/ขวา/ขึ้น) เฟรมละ 32×32 · ถ้าตัวละครเพี้ยน ปรับตัวเลขให้ตรง sheet ที่โหลดมา แล้วบันทึก+รีเฟรช</p>
       </div>
       <div className="flex items-center gap-3">
-        <button onClick={save} disabled={saving} className="bg-slate-900 text-white rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-60">{saving ? "กำลังบันทึก..." : "บันทึก"}</button>
+        <button onClick={save} disabled={saving} className="bg-brand-600 text-white rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-60">{saving ? "กำลังบันทึก..." : "บันทึก"}</button>
         {msg && <span className={`text-xs ${msg.startsWith("บันทึกแล้ว") ? "text-emerald-600" : "text-rose-600"}`}>{msg}</span>}
       </div>
     </div>
@@ -178,7 +180,7 @@ function LeaderboardSettingsPanel() {
         <p className="text-[11px] text-slate-400 mt-1">เลือกเฉพาะเพจที่ต้องการให้เข้าแข่ง · เว้นทั้งหมด = นับทุกเพจ</p>
       </div>
       <div className="flex items-center gap-3">
-        <button onClick={save} disabled={saving} className="bg-slate-900 text-white rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-60">{saving ? "กำลังบันทึก..." : "บันทึก"}</button>
+        <button onClick={save} disabled={saving} className="bg-brand-600 text-white rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-60">{saving ? "กำลังบันทึก..." : "บันทึก"}</button>
         {msg && <span className={`text-xs ${msg.startsWith("บันทึกแล้ว") ? "text-emerald-600" : "text-rose-600"}`}>{msg}</span>}
       </div>
     </div>
@@ -277,7 +279,7 @@ function InsightsPrefetchPanel() {
             <div className="text-xs font-medium text-slate-600 mb-1">ช่วงเวลาที่จะดึง (เลือกได้หลายอัน)</div>
             <div className="flex flex-wrap gap-1.5">
               {PREFETCH_RANGES.map(([k, l]) => (
-                <button key={k} onClick={() => toggleRange(k)} className={`text-xs rounded-full px-2.5 py-1 border ${cfg.ranges.includes(k) ? "bg-indigo-600 text-white border-indigo-600" : "border-slate-300 text-slate-600 hover:bg-slate-50"}`}>{l}</button>
+                <button key={k} onClick={() => toggleRange(k)} className={`text-xs rounded-full px-2.5 py-1 border ${cfg.ranges.includes(k) ? "bg-brand-600 text-white border-brand-600" : "border-slate-300 text-slate-600 hover:bg-slate-50"}`}>{l}</button>
               ))}
             </div>
             <div className="flex items-center gap-1.5 mt-2 text-xs flex-wrap">
@@ -285,7 +287,7 @@ function InsightsPrefetchPanel() {
               <input type="date" value={custom.since} onChange={(e) => setCustom((s) => ({ ...s, since: e.target.value }))} className="rounded-lg border border-slate-300 px-1.5 py-1" />
               <span>–</span>
               <input type="date" value={custom.until} onChange={(e) => setCustom((s) => ({ ...s, until: e.target.value }))} className="rounded-lg border border-slate-300 px-1.5 py-1" />
-              <button disabled={!custom.since || !custom.until} onClick={() => { toggleRange({ since: custom.since, until: custom.until }); setCustom({ since: "", until: "" }); }} className="rounded-lg bg-slate-900 text-white px-2.5 py-1 disabled:opacity-40">+ เพิ่มช่วง</button>
+              <button disabled={!custom.since || !custom.until} onClick={() => { toggleRange({ since: custom.since, until: custom.until }); setCustom({ since: "", until: "" }); }} className="rounded-lg bg-brand-600 text-white px-2.5 py-1 disabled:opacity-40">+ เพิ่มช่วง</button>
             </div>
             {cfg.ranges.length > 0 && (
               <div className="flex flex-wrap gap-1 mt-2">
@@ -308,7 +310,7 @@ function InsightsPrefetchPanel() {
             <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-96 overflow-y-auto">
               <div className="flex items-center justify-between px-3 py-1.5 bg-slate-50 text-[11px] text-slate-500">
                 <span>แคมเปญ · ติ๊ก = ดึงระดับแคมเปญ · กดลูกศรเพื่อเลือกลึกลงไป</span>
-                <button onClick={() => pickAll(campaigns.map((c) => ({ id: c.id, name: c.name })), "campaign")} className="text-indigo-600 hover:underline">เลือกทุกแคมเปญ</button>
+                <button onClick={() => pickAll(campaigns.map((c) => ({ id: c.id, name: c.name })), "campaign")} className="text-brand-600 hover:underline">เลือกทุกแคมเปญ</button>
               </div>
               {campaigns.map((c) => (
                 <div key={c.id}>
@@ -322,7 +324,7 @@ function InsightsPrefetchPanel() {
                     <div className="pl-8 pr-2 pb-1">
                       {kids[c.id]?.loading ? <div className="text-[11px] text-slate-400 py-1">กำลังโหลดชุดโฆษณา...</div> : (kids[c.id]?.nodes || []).length === 0 ? <div className="text-[11px] text-slate-400 py-1">ไม่มีชุดโฆษณา</div> : (
                         <>
-                          <button onClick={() => pickAll((kids[c.id].nodes).map((s) => ({ id: s.id, name: s.name })), "adset", [c.id])} className="text-[11px] text-indigo-600 hover:underline">เลือกทุกชุดในแคมเปญนี้</button>
+                          <button onClick={() => pickAll((kids[c.id].nodes).map((s) => ({ id: s.id, name: s.name })), "adset", [c.id])} className="text-[11px] text-brand-600 hover:underline">เลือกทุกชุดในแคมเปญนี้</button>
                           {(kids[c.id].nodes).map((s) => (
                             <div key={s.id}>
                               <div className="flex items-center gap-2 py-1 text-sm">
@@ -335,7 +337,7 @@ function InsightsPrefetchPanel() {
                                 <div className="pl-7 pb-1">
                                   {kids[s.id]?.loading ? <div className="text-[11px] text-slate-400 py-1">กำลังโหลดโฆษณา...</div> : (kids[s.id]?.nodes || []).length === 0 ? <div className="text-[11px] text-slate-400 py-1">ไม่มีโฆษณา</div> : (
                                     <>
-                                      <button onClick={() => pickAll((kids[s.id].nodes).map((a) => ({ id: a.id, name: a.name })), "ad", [c.id, s.id])} className="text-[11px] text-indigo-600 hover:underline">เลือกทุกโฆษณาในชุดนี้</button>
+                                      <button onClick={() => pickAll((kids[s.id].nodes).map((a) => ({ id: a.id, name: a.name })), "ad", [c.id, s.id])} className="text-[11px] text-brand-600 hover:underline">เลือกทุกโฆษณาในชุดนี้</button>
                                       {(kids[s.id].nodes).map((a) => (
                                         <div key={a.id} className="flex items-center gap-2 py-0.5 text-sm">
                                           <input type="checkbox" checked={isPicked(a.id)} onChange={() => togglePick({ id: a.id, name: a.name, level: "ad" }, [c.id, s.id], [])} className="w-4 h-4" />
@@ -377,7 +379,7 @@ function InsightsPrefetchPanel() {
       )}
 
       <div className="flex items-center gap-3 pt-1 flex-wrap">
-        <button onClick={save} disabled={saving} className="bg-slate-900 text-white rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-60">{saving ? "กำลังบันทึก..." : "บันทึก"}</button>
+        <button onClick={save} disabled={saving} className="bg-brand-600 text-white rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-60">{saving ? "กำลังบันทึก..." : "บันทึก"}</button>
         {cfg.enabled && cfg.targets.length > 0 && (
           <button onClick={async () => { setMsg("กำลังเริ่มดึง..."); await save(); const { data } = await supabase.functions.invoke("prefetch-insights", { body: { seed: true } }); setMsg(data?.ok ? `เริ่มดึงแล้ว ✓ (คิว ${data.remaining ?? "-"} งาน · ทยอยดึงทุก 15 นาที)` : "เริ่มดึงไม่สำเร็จ — อาจยังไม่ได้ deploy prefetch-insights"); }} className="border border-slate-300 text-slate-700 rounded-lg px-4 py-2 text-sm font-medium hover:bg-slate-50">เริ่มดึงตอนนี้</button>
         )}
@@ -478,7 +480,7 @@ function PushNotificationPanel() {
 
       <div className="flex flex-wrap gap-2">
         <button onClick={enable} disabled={!!busy}
-          className="rounded-lg bg-indigo-600 text-white px-4 py-2 text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
+          className="rounded-lg bg-brand-600 text-white px-4 py-2 text-sm font-medium hover:bg-brand-700 disabled:opacity-50">
           {busy === "enable" ? "กำลังทำ..." : perm === "granted" ? "🔔 ต่ออายุการแจ้งเตือน" : "🔔 เปิดการแจ้งเตือน"}
         </button>
         <button onClick={test} disabled={!!busy || perm !== "granted"}
@@ -621,7 +623,7 @@ function TvAdminSettingsPanel() {
             </div>
             <div className="flex justify-end gap-2 pt-1">
               <button onClick={() => setWhOpen(false)} className="px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-600 hover:bg-slate-50">ยกเลิก</button>
-              <button onClick={saveWebhook} disabled={whSaving} className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50">{whSaving ? "กำลังบันทึก..." : "บันทึก"}</button>
+              <button onClick={saveWebhook} disabled={whSaving} className="px-4 py-2 rounded-lg bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 disabled:opacity-50">{whSaving ? "กำลังบันทึก..." : "บันทึก"}</button>
             </div>
           </div>
         </div>
@@ -679,7 +681,7 @@ function TvAdminSettingsPanel() {
             )}
             <div className="flex justify-end gap-2 pt-1">
               <button onClick={() => setBe(null)} className="px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-600 hover:bg-slate-50">ยกเลิก</button>
-              <button onClick={saveBrand} disabled={beSaving} className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50">{beSaving ? "กำลังบันทึก..." : "บันทึก"}</button>
+              <button onClick={saveBrand} disabled={beSaving} className="px-4 py-2 rounded-lg bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 disabled:opacity-50">{beSaving ? "กำลังบันทึก..." : "บันทึก"}</button>
             </div>
           </div>
         </div>
@@ -693,7 +695,7 @@ function TvAdminSettingsPanel() {
           </div>
           <div className="flex gap-2 shrink-0">
             <button onClick={openWebhook} className="px-3 py-2 rounded-lg border border-slate-300 text-sm text-slate-700 hover:bg-slate-50">ตั้งค่า n8n</button>
-            <button onClick={newBrand} className="px-3 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700">+ เพิ่มแบรนด์</button>
+            <button onClick={newBrand} className="px-3 py-2 rounded-lg bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700">+ เพิ่มแบรนด์</button>
           </div>
         </div>
         {msg && <div className="text-sm rounded-lg bg-slate-100 border border-slate-200 px-3 py-2 text-slate-700 whitespace-pre-line">{msg}</div>}
@@ -731,7 +733,7 @@ function TvAdminSettingsPanel() {
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
                 <button onClick={() => checkBrand(b)} disabled={checkingId === b.id} className="px-2 py-1 rounded-md border border-slate-300 text-[11px] text-slate-600 hover:bg-slate-50 disabled:opacity-50">{checkingId === b.id ? "ตรวจ..." : "ตรวจระบบ"}</button>
-                <button onClick={() => addScript(b.id)} className="px-2 py-1 rounded-md bg-indigo-600 text-white text-[11px] font-medium hover:bg-indigo-700">+ สคริปต์</button>
+                <button onClick={() => addScript(b.id)} className="px-2 py-1 rounded-md bg-brand-600 text-white text-[11px] font-medium hover:bg-brand-700">+ สคริปต์</button>
                 <button onClick={() => editBrand(b)} className="px-2 py-1 rounded-md border border-slate-300 text-[11px] text-slate-600 hover:bg-slate-50">แก้ไข</button>
                 <button onClick={() => deleteBrand(b)} className="px-2 py-1 rounded-md text-[11px] text-rose-600 hover:bg-rose-50"><Trash2 size={12} /></button>
               </div>
@@ -769,11 +771,14 @@ function TvAdminSettingsPanel() {
 }
 
 function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages = null, onOpenChat }) {
-  // allowedSettings = null → เห็นทุกหัวข้อ (admin) ; array → เห็นเฉพาะหัวข้อที่ได้รับสิทธิ์ (permissions สงวนให้ admin เสมอ)
+  // allowedSettings = null → เห็นทุกหัวข้อ (admin) ; array → เห็นเฉพาะหัวข้อที่ได้รับสิทธิ์
+  // permissions/tv_settings/openai_key สงวนให้แอดมินสูงสุดเสมอ ต่อให้ติ๊กสิทธิ์ให้ก็ยังมองไม่เห็น
+  // (openai_key เป็นคีย์เดียวที่ทั้งระบบใช้ร่วมกัน ไม่ควรให้ผู้ใช้อื่นแก้ได้)
   const visibleSections = allowedSettings
-    ? SETTINGS_SECTIONS.filter((s) => s.key !== "permissions" && s.key !== "tv_settings" && allowedSettings.includes(s.key))
+    ? SETTINGS_SECTIONS.filter((s) => s.key !== "permissions" && s.key !== "tv_settings" && s.key !== "openai_key" && allowedSettings.includes(s.key))
     : SETTINGS_SECTIONS;
   const [section, setSection] = useState(() => visibleSections[0]?.key || "general");
+  const [sectionQuery, setSectionQuery] = useState("");
   const [secMenuOpen, setSecMenuOpen] = useState(false);   // (เดิม) มือถือ: กางรายการหัวข้อตั้งค่า
   const [mobileDetail, setMobileDetail] = useState(false);  // มือถือ: false = โชว์ลิสต์เมนู (แบบหน้าโฮม), true = เข้าไปดูเนื้อหาหัวข้อ
   // ถ้าหัวข้อปัจจุบันไม่มีสิทธิ์เข้า → เด้งไปหัวข้อแรกที่เข้าได้
@@ -882,17 +887,44 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
   }
 
   const cur = visibleSections.find((s) => s.key === section) || visibleSections[0];
+  const filteredSections = visibleSections.filter((s) => s.label.toLowerCase().includes(sectionQuery.trim().toLowerCase()));
+  const settingsGroups = [
+    { label: "วางแผนและ AI", keys: ["general", "campaign", "decision", "brand", "ai_models", "ai_prompts"] },
+    { label: "แชทและลูกค้า", keys: ["ghost", "leadfields", "synccfg", "savedreplies", "knowledge", "replystats"] },
+    { label: "ระบบและการเชื่อมต่อ", keys: ["notifications", "jobs", "prefetch", "meta", "openai_key", "line", "permissions", "tv_settings", "leaderboard", "activity"] },
+  ];
+  const groupedSections = settingsGroups.map((group) => ({
+    ...group,
+    items: group.keys.map((key) => filteredSections.find((s) => s.key === key)).filter(Boolean),
+  })).filter((group) => group.items.length > 0);
   if (!cur) {
     return <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800">ยังไม่ได้รับสิทธิ์เข้าถึงหัวข้อย่อยในหน้าตั้งค่า</div>;
   }
 
   return (
-    <div className="flex flex-col md:flex-row gap-4">
+    <div className="w-full max-w-[1400px] space-y-5 settings-page">
+      <SectionTitle title="ตั้งค่า" subtitle="ปรับการทำงานของระบบ คีย์ API สิทธิ์ผู้ใช้ และงานอัตโนมัติ" />
+      <div className="settings-page-overview ds-card flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <div className="text-xs font-semibold uppercase tracking-wide text-brand-600">Settings center</div>
+          <div className="mt-1 text-sm text-slate-500">เลือกหัวข้อที่ต้องการแก้ไข หรือค้นหาจากชื่อเมนูได้ทันที</div>
+        </div>
+        <div className="relative w-full sm:max-w-xs">
+          <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            value={sectionQuery}
+            onChange={(e) => setSectionQuery(e.target.value)}
+            placeholder="ค้นหาหัวข้อตั้งค่า..."
+            className="w-full rounded-control border border-slate-300 bg-white py-2.5 pl-9 pr-3 text-sm"
+          />
+        </div>
+      </div>
+      <div className="settings-page-layout flex flex-col md:flex-row gap-4">
       {/* แถบเมนูตั้งค่า — มือถือ: โชว์เป็นลิสต์เหมือนหน้าโฮม (ซ่อนเมื่อเข้าไปดูหัวข้อ) */}
-      <div className={`md:w-60 shrink-0 ${mobileDetail ? "hidden md:block" : "block"}`}>
+      <div className={`settings-page-nav md:w-56 shrink-0 ${mobileDetail ? "hidden md:block" : "block"}`}>
         {/* มือถือ: ลิสต์หัวข้อแนวตั้งแบบเมนูหน้าโฮม แตะเพื่อเข้าไปดูเนื้อหา */}
         <nav className="md:hidden flex flex-col gap-0.5 bg-white rounded-2xl border border-slate-200 p-2">
-          {visibleSections.map((s) => (
+          {filteredSections.map((s) => (
             <button
               key={s.key}
               onClick={() => { setSection(s.key); setMobileDetail(true); window.scrollTo({ top: 0, behavior: "smooth" }); }}
@@ -906,23 +938,31 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
         </nav>
 
         {/* เดสก์ท็อป: รายการแนวตั้งติดขอบจอ */}
-        <div className="hidden md:flex md:flex-col gap-1 bg-white rounded-2xl border border-slate-200 p-2 md:sticky md:top-24">
-          {visibleSections.map((s) => (
-            <button
-              key={s.key}
-              onClick={() => setSection(s.key)}
-              className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap text-left shrink-0 ${
-                section === s.key ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100"
-              }`}
-            >
-              <s.icon size={16} /> {s.label}
-            </button>
+        <div className="settings-page-nav-desktop hidden md:flex md:flex-col gap-1 bg-white rounded-2xl border border-slate-200 p-2 md:sticky md:top-24">
+          {groupedSections.map((group) => (
+            <div key={group.label} className="settings-nav-group">
+              <div className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400">{group.label}</div>
+              {group.items.map((s) => (
+                <button
+                  key={s.key}
+                  onClick={() => setSection(s.key)}
+                  className={`flex w-full items-center gap-2 px-3 py-2 rounded-control text-sm font-medium whitespace-nowrap text-left shrink-0 border-l-[3px] ${
+                    section === s.key
+                      ? "border-brand-600 bg-brand-50 text-brand-700"
+                      : "border-transparent text-slate-600 hover:bg-slate-50"
+                  }`}
+                >
+                  <s.icon size={16} /> <span className="truncate">{s.label}</span>
+                </button>
+              ))}
+            </div>
           ))}
+          {filteredSections.length === 0 && <div className="p-3 text-center text-xs text-slate-400">ไม่พบหัวข้อนี้</div>}
         </div>
       </div>
 
       {/* เนื้อหาของหมวดที่เลือก — มือถือโชว์เฉพาะตอนเข้าไปในหัวข้อ (มีปุ่มย้อนกลับ) */}
-      <div className={`flex-1 min-w-0 space-y-6 ${mobileDetail ? "block" : "hidden md:block"}`}>
+      <div className={`settings-page-content flex-1 min-w-0 space-y-6 ${mobileDetail ? "block" : "hidden md:block"}`}>
         {/* มือถือ: ปุ่มย้อนกลับไปลิสต์เมนู + ชื่อหัวข้อปัจจุบัน */}
         <button
           onClick={() => { setMobileDetail(false); window.scrollTo({ top: 0, behavior: "smooth" }); }}
@@ -951,6 +991,7 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
       {section === "knowledge" && <KnowledgeBasePanel allowedPages={allowedPages} />}
       {section === "ai_prompts" && <AiPromptsPanel />}
       {section === "meta" && <MetaTokenPanel />}
+      {section === "openai_key" && <OpenAIKeyPanel />}
       {section === "line" && <LineOAPanel />}
       {section === "permissions" && <PermissionsPanel />}
       {section === "tv_settings" && <TvAdminSettingsPanel />}
@@ -1013,7 +1054,7 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
           >
             {brandConfig.brands.map((brand) => <option key={brand.id} value={brand.id}>{brand.name}</option>)}
           </select>
-          <button type="button" onClick={addBrand} className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800">
+          <button type="button" onClick={addBrand} className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-brand-600 px-3 py-2 text-sm font-medium text-white hover:bg-brand-700">
             <Plus size={15} /> เพิ่มแบรนด์
           </button>
           <button type="button" onClick={removeSelectedBrand} disabled={brandConfig.brands.length <= 1} className="rounded-lg border border-rose-200 px-3 py-2 text-sm font-medium text-rose-600 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-40">
@@ -1180,7 +1221,7 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
           <button
             onClick={handleSave}
             disabled={saving}
-            className="bg-slate-900 text-white rounded-lg px-5 py-2.5 text-sm font-medium hover:bg-slate-800 disabled:opacity-60 flex items-center gap-2"
+            className="bg-brand-600 text-white rounded-lg px-5 py-2.5 text-sm font-medium hover:bg-brand-700 disabled:opacity-60 flex items-center gap-2"
           >
             {saving ? <Loader2 className="animate-spin" size={16} /> : null}
             บันทึกตั้งค่า
@@ -1189,6 +1230,7 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
           {saveError && <span className="text-sm text-rose-700 bg-rose-50 rounded-lg px-3 py-2">{saveError}</span>}
         </div>
       )}
+      </div>
       </div>
     </div>
   );
@@ -1273,9 +1315,15 @@ export function SavedRepliesPanel({ allowedPages = null }) {
           <h3 className="font-semibold text-slate-800">ข้อความบันทึกไว้</h3>
           <p className="text-xs text-slate-500 mt-0.5">ข้อความสำเร็จรูปสำหรับกดใช้ในหน้า "ตอบแชท" (แนบรูปได้) · เลือกได้ว่าใช้ทุกเพจหรือเฉพาะเพจ</p>
         </div>
-        <button onClick={addNew} className="bg-slate-900 text-white rounded-lg px-3 py-2 text-sm font-medium hover:bg-slate-800">+ เพิ่มใหม่</button>
+        <button onClick={addNew} className="bg-brand-600 text-white rounded-lg px-3 py-2 text-sm font-medium hover:bg-brand-700">+ เพิ่มใหม่</button>
       </div>
-      {items.length === 0 && <div className="text-sm text-slate-400 py-6 text-center">ยังไม่มีข้อความบันทึกไว้ — กด "เพิ่มใหม่"</div>}
+      {items.length === 0 && (
+        <EmptyState
+          icon={MessageSquare}
+          title="ยังไม่มีข้อความบันทึกไว้"
+          hint='กด "เพิ่มใหม่" เพื่อสร้างข้อความที่ใช้ตอบซ้ำบ่อย แล้วเรียกใช้ได้จากหน้าตอบแชท'
+        />
+      )}
       <div className="space-y-3">
         {items.map((it, idx) => (
           <div key={it.id || it.tmp} className="rounded-xl border border-slate-200 p-3 space-y-2">
@@ -1293,11 +1341,11 @@ export function SavedRepliesPanel({ allowedPages = null }) {
             <textarea rows={3} value={it.message || ""} onChange={(e) => setField(idx, "message", e.target.value)} placeholder="ข้อความตอบกลับอัตโนมัติ/ข้อความสำเร็จรูป..." className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
             <div className="flex items-center gap-3 flex-wrap">
               {it.image_url && <img src={it.image_url} alt="" className="w-14 h-14 rounded object-cover border border-slate-200" />}
-              <label className="text-xs text-indigo-600 hover:underline cursor-pointer">{it.image_url ? "เปลี่ยนรูป" : "แนบรูป"}<input type="file" accept="image/*" className="hidden" onChange={(e) => uploadImg(idx, e.target.files?.[0])} /></label>
+              <label className="text-xs text-brand-600 hover:underline cursor-pointer">{it.image_url ? "เปลี่ยนรูป" : "แนบรูป"}<input type="file" accept="image/*" className="hidden" onChange={(e) => uploadImg(idx, e.target.files?.[0])} /></label>
               {it.image_url && <button onClick={() => setField(idx, "image_url", null)} className="text-xs text-rose-500 hover:underline">ลบรูป</button>}
               <div className="ml-auto flex items-center gap-2">
                 <button onClick={() => del(idx)} className="text-xs text-rose-600 hover:underline">ลบ</button>
-                <button onClick={() => save(idx)} disabled={saving === (it.id || it.tmp)} className="bg-indigo-600 text-white rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-indigo-700 disabled:opacity-60">{saving === (it.id || it.tmp) ? "กำลังบันทึก..." : "บันทึก"}</button>
+                <button onClick={() => save(idx)} disabled={saving === (it.id || it.tmp)} className="bg-brand-600 text-white rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-brand-700 disabled:opacity-60">{saving === (it.id || it.tmp) ? "กำลังบันทึก..." : "บันทึก"}</button>
               </div>
             </div>
           </div>
@@ -1434,7 +1482,13 @@ function KnowledgeBasePanel({ allowedPages = null }) {
         <h4 className="text-sm font-semibold text-slate-700">รายการรอตรวจสอบ</h4>
         <span className="text-xs text-slate-400">{items.length} รายการ</span>
       </div>
-      {items.length === 0 && <div className="text-sm text-slate-400 text-center py-8">ไม่มีรายการรอตรวจสอบ</div>}
+      {items.length === 0 && (
+        <EmptyState
+          icon={CheckCircle2}
+          title="ไม่มีรายการรอตรวจสอบ"
+          hint="คู่คำถาม-คำตอบใหม่จากหน้าตอบแชทจะมารอที่นี่ให้อนุมัติก่อนเข้าคลังความรู้"
+        />
+      )}
       <div className="space-y-3">
         {items.map((item) => (
           <div key={item.id} className="rounded-xl border border-slate-200 p-3 space-y-2">
@@ -1473,7 +1527,7 @@ function KnowledgeBasePanel({ allowedPages = null }) {
           </label>
         </div>
         {approvedItems === null ? <Spinner label="กำลังโหลดรายการที่ใช้งานอยู่..." /> : approvedItems.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-slate-300 py-8 text-center text-sm text-slate-400">ไม่พบรายการที่ตรงกับการค้นหา</div>
+          <div className="rounded-xl border border-dashed border-slate-300 py-8 text-center text-sm text-slate-500">ไม่พบรายการที่ตรงกับการค้นหา</div>
         ) : (
           <div className="space-y-2">
             {approvedItems.map((item) => {
@@ -1506,7 +1560,7 @@ function KnowledgeBasePanel({ allowedPages = null }) {
           <span className="text-center text-xs text-slate-400 sm:text-left">แสดง {(approvedPageNumber - 1) * approvedPageSize + 1}–{Math.min(approvedPageNumber * approvedPageSize, approvedTotal)} จาก {approvedTotal.toLocaleString()}</span>
           <div className="flex flex-wrap items-center justify-center gap-1">
             <button type="button" aria-label="หน้าก่อนหน้า" onClick={() => setApprovedPageNumber((page) => Math.max(1, page - 1))} disabled={approvedPageNumber <= 1} className="rounded-lg border border-slate-300 p-2 text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35"><ChevronLeft size={15} /></button>
-            {approvedPageButtons.map((page) => typeof page === "number" ? <button type="button" key={page} onClick={() => setApprovedPageNumber(page)} className={`min-w-8 rounded-lg border px-2 py-1.5 text-xs font-medium ${approvedPageNumber === page ? "border-amber-400 bg-amber-400 text-slate-950" : "border-slate-300 text-slate-600 hover:bg-slate-50"}`}>{page}</button> : <span key={page} className="px-1 text-xs text-slate-400">…</span>)}
+            {approvedPageButtons.map((page) => typeof page === "number" ? <button type="button" key={page} onClick={() => setApprovedPageNumber(page)} className={`min-w-8 rounded-lg border px-2 py-1.5 text-xs font-medium ${approvedPageNumber === page ? "border-brand-600 bg-brand-600 text-white" : "border-slate-300 text-slate-600 hover:bg-slate-50"}`}>{page}</button> : <span key={page} className="px-1 text-xs text-slate-400">…</span>)}
             <button type="button" aria-label="หน้าถัดไป" onClick={() => setApprovedPageNumber((page) => Math.min(approvedPageCount, page + 1))} disabled={approvedPageNumber >= approvedPageCount} className="rounded-lg border border-slate-300 p-2 text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35"><ChevronRight size={15} /></button>
           </div>
         </div>}

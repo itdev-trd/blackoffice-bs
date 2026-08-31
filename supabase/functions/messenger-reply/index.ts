@@ -10,6 +10,7 @@ import { getMetaPages } from "../_shared/meta-pages.ts";
 import { authorizeRequest, canAccessPage } from "../_shared/permissions.ts";
 import { getLineConfig, lineApi } from "../_shared/line.ts";
 import { readJsonBody } from "../_shared/security.ts";
+import { getOpenAIKey } from "../_shared/openai.ts";
 
 const GRAPH_VERSION = "v22.0"; // v19 หมดอายุแล้ว (sunset ต้นปี 2026)
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`;
@@ -109,7 +110,7 @@ async function clearRelatedUnread(admin: any, row: any, nowIso: string, answered
 
 // เรียก OpenAI (ตัวเดียวกับที่ทั้งระบบใช้ — IMAGE_API_KEY) คืน JSON
 async function openaiJson(model: string, sys: string, user: string): Promise<any> {
-  const key = Deno.env.get("IMAGE_API_KEY");
+  const key = await getOpenAIKey();
   const resp = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
@@ -208,6 +209,12 @@ const TRANSLATE_SYS = `คุณคือล่ามของเพจธุร
 - ต้องแปลทุกข้อความในรายการ รวมข้อความภาษาลาวและข้อความที่ผสมอักษรลาวกับอังกฤษ ห้ามข้ามรายการ
 อินพุตเป็นรายการข้อความ แต่ละอันมี i (คีย์) กับ t (ข้อความ) — ต้องส่ง i กลับให้ตรงเดิม
 ตอบ JSON เท่านั้น: {"lang":"ชื่อภาษา (เช่น Lao, Vietnamese, Bahasa Indonesia, Tagalog, Bahasa Malaysia, Thai, English)","country":"ประเทศ(ภาษาไทย)","items":[{"i":"<คีย์เดิม>","th":"คำแปลไทยที่เป็นธรรมชาติ"}]}`;
+
+// prompt สรุปบทสนทนา — กดเองจากปุ่มในหน้าตอบแชท ไม่ auto
+const SUMMARIZE_SYS = `คุณคือแอดมินเพจ "เทรดทอง/ฟอเร็กซ์" สรุปบทสนทนากับลูกค้าให้เพื่อนแอดมินอ่านต่อได้เร็ว
+- สรุปเป็นภาษาไทย กระชับ 3-5 ประโยค ครอบคลุม: ลูกค้าสนใจอะไร/ถามอะไร, สถานะล่าสุดของการคุย (รอลูกค้าตอบ/รอแอดมินตอบ/ปิดจบแล้ว), ข้อมูลสำคัญที่หลุดมา (เช่น เบอร์/Trade ID/งบที่พูดถึง) ถ้ามี
+- ห้ามเดาข้อมูลที่ไม่มีในบทสนทนา ถ้าไม่มีข้อมูลด้านไหนให้ข้ามไปเลย ไม่ต้องเขียนว่า "ไม่มีข้อมูล"
+ตอบ JSON เท่านั้น: {"summary":"ข้อความสรุป"}`;
 
 // prompt แปลคำตอบแอดมิน (ไทย) → ภาษาลูกค้า โดยอิงภาษาจาก "ข้อความล่าสุดของลูกค้า"
 const REPLY_SYS = `คุณคือแอดมินเพจ "เทรดทอง/ฟอเร็กซ์"
@@ -337,6 +344,26 @@ Deno.serve(async (req) => {
       return json({ ok: true, translations, lang: dispLang, country: dispCountry, translated: misses.length });
     }
 
+    // ---------- สรุปบทสนทนา (กดเอง จากปุ่มในหน้าตอบแชท) ----------
+    if (action === "summarize") {
+      if (!transcript.length) throw new Error("ยังไม่มีข้อความในบทสนทนานี้");
+      // ส่งเฉพาะ 60 ข้อความล่าสุดพอ กันพร้อมท์ยาวเกินกับแชทเก่าที่คุยมานาน
+      const recent = transcript.slice(-60).map((m: any) => ({
+        who: m.w === "u" ? "ลูกค้า" : "แอดมิน",
+        text: String(m.th || m.t || (m.img ? "[รูปภาพ/ไฟล์แนบ]" : "")).trim(),
+      })).filter((m: any) => m.text);
+      if (!recent.length) throw new Error("ไม่มีข้อความตัวอักษรให้สรุป");
+      const out = await openaiJson(model, SUMMARIZE_SYS, JSON.stringify({
+        customer_name: row.customer_name || null,
+        messages: recent,
+      }));
+      const summary = String(out?.summary || "").trim();
+      if (!summary) throw new Error("สรุปไม่สำเร็จ ลองใหม่อีกครั้ง");
+      const nowIso = new Date().toISOString();
+      await admin.from("chat_customers").update({ ai_summary: summary, ai_summary_at: nowIso }).eq("id", id);
+      return json({ ok: true, summary, summarized_at: nowIso });
+    }
+
     // ---------- แปลคำตอบไทย → ภาษาลูกค้า แล้วส่งเข้า Messenger ----------
     if (action === "preview" || action === "send") {
       const textTh = String(body?.text_th || "").trim();
@@ -360,6 +387,7 @@ Deno.serve(async (req) => {
       const replyToMid = String(body?.reply_to_mid || "").trim();
       const replyToImg = String(body?.reply_to_img || "").trim();
       const replyToAt = String(body?.reply_to_at || "").trim();
+      const replyToQuoteToken = String(body?.reply_to_quote_token || "").trim();
       const approvedText = action === "send" && body?.approved_text ? String(body.approved_text).trim() : "";
       let replyText: string, lang: string;
       if (approvedText) {
@@ -384,8 +412,10 @@ Deno.serve(async (req) => {
       // Preview แปลอย่างเดียว ยังไม่แตะ Meta/DB ผู้ใช้แก้ข้อความปลายทางและกดอนุมัติก่อนส่งจริง
       if (action === "preview") return json({ ok: true, preview_text: replyText, lang, source_text: textTh });
 
-      // ลูกค้าเห็นข้อความอ้างอิงแบบย่อสำหรับข้อความตัวอักษร ส่วนรูป/สื่อส่งเฉพาะคำตอบ
-      const outText = composeCustomerReplyText(replyText, replyToText, replyToImg);
+      // LINE แสดง native quote ให้ลูกค้าแล้ว จึงไม่ต้องเติมข้อความอ้างอิงซ้ำในเนื้อหา
+      const outText = row.source === "line" && replyToQuoteToken
+        ? replyText
+        : composeCustomerReplyText(replyText, replyToText, replyToImg);
 
       // ส่งจริง
       let send: any, gotPsid: string | null = row.psid || null;
@@ -394,9 +424,9 @@ Deno.serve(async (req) => {
         if (!cfg.accessToken) throw new Error("ยังไม่ได้ตั้งค่า LINE Channel access token");
         send = await lineApi("/v2/bot/message/push", cfg.accessToken, {
           method: "POST", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ to: row.psid, messages: [{ type: "text", text: outText }] }),
+          body: JSON.stringify({ to: row.psid, messages: [{ type: "text", text: outText, ...(replyToQuoteToken ? { quoteToken: replyToQuoteToken } : {}) }] }),
         });
-        send = { ...send, message_id: null, _delivery_mode: "line_push" };
+        send = { ...send, message_id: send?.sentMessages?.[0]?.id || null, quote_token: send?.sentMessages?.[0]?.quoteToken || null, _delivery_mode: "line_push" };
       } else {
         // ช่องทาง Meta เท่านั้นจึงต้องดึง Page access token
         const token = await getMetaToken();
@@ -465,6 +495,7 @@ Deno.serve(async (req) => {
         ...(replyToMid ? { reply_to_mid: replyToMid } : {}),
         ...(replyToImg ? { reply_to_img: replyToImg } : {}),
         ...(replyToAt ? { reply_to_at: replyToAt } : {}),
+        ...(send?.quote_token ? { quote_token: send.quote_token } : {}),
         ...(replyText !== textTh ? { th: textTh } : {}),
       };
       const newTranscript = [...transcript, replyItem];
@@ -535,7 +566,7 @@ Deno.serve(async (req) => {
       }
       if (!isComment) await clearRelatedUnread(admin, { ...row, id: conversationId, psid: gotPsid || row.psid }, nowIso, true);
       await syncPushState(conversationId);
-      return json({ ok: true, sent_text: replyText, delivered_text: outText, lang, message_id: send?.message_id || null, via, delivery_mode: send?._delivery_mode || null, conversation_id: conversationId, merged_into_existing: mergedIntoExisting, reply_to_text: replyToText || null, reply_to_mid: replyToMid || null, reply_to_img: replyToImg || null, reply_to_at: replyToAt || null });
+      return json({ ok: true, sent_text: replyText, delivered_text: outText, lang, message_id: send?.message_id || null, quote_token: send?.quote_token || null, via, delivery_mode: send?._delivery_mode || null, conversation_id: conversationId, merged_into_existing: mergedIntoExisting, reply_to_text: replyToText || null, reply_to_mid: replyToMid || null, reply_to_img: replyToImg || null, reply_to_at: replyToAt || null });
     }
 
     // ---------- ดึงรูปโปรไฟล์ลูกค้า (เก็บไว้ใช้ในลิสต์) ----------
@@ -577,6 +608,7 @@ Deno.serve(async (req) => {
             ? { type: "video", originalContentUrl: url, previewImageUrl: url }
             : { type: "audio", originalContentUrl: url, duration: Number(body?.duration || 1000) };
         send = await lineApi("/v2/bot/message/push", cfg.accessToken, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ to: row.psid, messages: [lineMessage] }) });
+        send = { ...send, message_id: send?.sentMessages?.[0]?.id || null };
       } else {
         const token = await getMetaToken();
         const pd = await getMetaPages(GRAPH_BASE, token, {
@@ -637,7 +669,7 @@ Deno.serve(async (req) => {
       return json({ ok: true, cleared: clearedIds.length });
     }
 
-    throw new Error("action ไม่ถูกต้อง (translate | preview | send | send_attachment | profile | saved_replies | mark_seen)");
+    throw new Error("action ไม่ถูกต้อง (translate | preview | send | send_attachment | profile | saved_replies | mark_seen | summarize)");
   } catch (err) {
     return json({ ok: false, error: String(err instanceof Error ? err.message : err) }, 200);
   }

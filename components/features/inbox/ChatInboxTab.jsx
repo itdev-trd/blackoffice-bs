@@ -14,6 +14,7 @@ import {
   X,
   Paperclip,
   Eye,
+  Send,
 } from "lucide-react";
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from "@/lib/supabase/client";
 import { lsGet, lsSet } from "@/lib/utils/storage";
@@ -21,13 +22,15 @@ import { logActivity, getDeviceId } from "@/lib/utils/activity";
 import { readFunctionErrorMessage } from "@/lib/utils/errors";
 import Spinner from "@/components/shared/Spinner";
 import { TradeIdChecker, CustomerDataForm } from "@/components/features/customerdb/CustomerDatabaseTab";
+import { SearchInput, FilterPill } from "@/components/ui";
+import { CHAT_STAGES } from "@/lib/constants/settings";
 
 // ตัวเลือกอิโมจิชุดเต็มมีข้อมูลจำนวนมาก — โหลดเฉพาะตอนเปิดใช้ ไม่ถ่วงหน้าแชท/PWA ตอนเริ่มต้น
 const EmojiPicker = React.lazy(() => import("emoji-picker-react").then((module) => ({ default: module.default })));
 
-const INBOX_LINE_OA_ENABLED = false; // พัก LINE OA ชั่วคราวโดยไม่ลบข้อมูล/การตั้งค่าเดิม
+const INBOX_LINE_OA_ENABLED = true; // เปิดใช้งาน LINE OA ในหน้าตอบแชท
 const INBOX_COMMENTS_ENABLED = false; // พักระบบ "ความคิดเห็น" (ซ่อนแท็บ + หยุดดึงความคิดเห็น) โดยไม่ลบข้อมูลเดิม
-const MSG_REPLY_ENABLED = false;      // ซ่อนปุ่ม "ตอบกลับข้อความนี้" ชั่วคราว (ไม่ลบโค้ด)
+const MSG_REPLY_ENABLED = true;
 const MSG_EMOJI_ENABLED = false;      // ซ่อนปุ่มอีโมจิในช่องตอบแชท ชั่วคราว (ไม่ลบโค้ด)
 
 export default function ChatInboxTab({ allowedPages = null, alertAllowed = true, alertMin = 3, alertPages = [], alertSound = true, alertNew = true, gotoChat = null, onGotoDone, active = true }) {
@@ -57,13 +60,14 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   const [knowledgeResults, setKnowledgeResults] = useState([]);
   const [knowledgeLoading, setKnowledgeLoading] = useState(false);
   const [knowledgeErr, setKnowledgeErr] = useState("");
-  const [messageMenu, setMessageMenu] = useState(null); // { index, text, img, mid, at, side } เมนูเมื่อคลิกข้อความลูกค้าหรือแอดมิน
+  const [messageMenu, setMessageMenu] = useState(null); // { index, text, img, mid, at, quoteToken, side } เมนูเมื่อคลิกข้อความลูกค้าหรือแอดมิน
   const [lightbox, setLightbox] = useState(null);       // URL รูปที่กดดูแบบขยายเต็มจอ (คลิกรูปในแชท)
   const [knowledgeCapture, setKnowledgeCapture] = useState(null); // { step, question, answer, answerIndex }
   const [knowledgeCaptureSaving, setKnowledgeCaptureSaving] = useState(false);
   const [knowledgeCaptureMsg, setKnowledgeCaptureMsg] = useState("");
   const savedCacheRef = useRef({});
-  const [listTab, setListTab] = useState("all");    // all | line | comments
+  const [listTab, setListTab] = useState("everything");    // everything | all(=Messenger) | line | comments
+  const [unreadOnly, setUnreadOnly] = useState(false);   // กรองดูเฉพาะแชทที่ยังไม่อ่าน
   const [messengerUnreadCount, setMessengerUnreadCount] = useState(0);
   const [commentUnreadCount, setCommentUnreadCount] = useState(0);
   const [lineUnreadCount, setLineUnreadCount] = useState(0);
@@ -258,12 +262,12 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
         renotify: true,
         requireInteraction: true,   // ค้างบนจอจนกว่าจะกด (ไม่หายเองใน 5 วิ) — ใกล้เคียง "กล่องทับแอปอื่น" ที่สุด
       });
-      n.onclick = () => { window.focus(); setListTab("all"); n.close(); };
+      n.onclick = () => { window.focus(); setListTab("everything"); n.close(); };
     } catch { /* บางเบราว์เซอร์บล็อก constructor ตรงๆ */ }
   }
   // เช็คจาก DB ตรงทุก 30 วิ (ไม่ผูกกับฟิลเตอร์หน้าจอ): แชท "ยังไม่อ่าน" ค้างเกินเกณฑ์ ในเพจที่เลือกเตือน
   useEffect(() => {
-    if (!alertAllowed) { setOverdueAlert(null); document.title = "AI Ads Automation"; return; }
+    if (!alertAllowed) { setOverdueAlert(null); document.title = "AdFlow OS"; return; }
     let stop = false;
     async function check() {
       const cutoff = new Date(Date.now() - alertMin * 60 * 1000).toISOString();
@@ -281,7 +285,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
       if (viewing.length) pageScope = viewing.filter((p) => !allowedPages || allowedPages.includes(p));
       else pageScope = alertPages.length ? alertPages.filter((p) => !allowedPages || allowedPages.includes(p)) : allowedPages;
       if (pageScope && pageScope.length === 0) {
-        if (!stop) { setOverdueAlert(null); document.title = "AI Ads Automation"; }
+        if (!stop) { setOverdueAlert(null); document.title = "AdFlow OS"; }
         return;
       }
       if (pageScope) q = q.in("page_id", pageScope);
@@ -317,16 +321,23 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
         }
       } else {
         setOverdueAlert(null);
-        document.title = "AI Ads Automation";
+        document.title = "AdFlow OS";
         notifiedRef.current = { ids: "", at: 0 };   // เคลียร์หมดแล้ว → รอบหน้าถือเป็นเรื่องใหม่
       }
     }
     check();
     const iv = setInterval(check, 30 * 1000);
-    return () => { stop = true; clearInterval(iv); document.title = "AI Ads Automation"; };
+    return () => { stop = true; clearInterval(iv); document.title = "AdFlow OS"; };
   }, [alertAllowed, alertMin, alertPages.join(","), allowedPages ? allowedPages.join(",") : "", pageSel.mode, pageSel.single, pageSel.multi.join(",")]);
   const [infoOpen, setInfoOpen] = useState(false);         // มือถือ: ขยายรายละเอียดแอด
   const [statusMenuOpen, setStatusMenuOpen] = useState(false); // มือถือ: เมนูแฮมเบอร์เกอร์ปรับสถานะ
+  // โน้ต/แท็ก/สรุปบทสนทนา — เก็บ draft ของโน้ตแยกจาก selected เพราะพิมพ์แล้วค่อย save ตอน blur
+  const [notesDraft, setNotesDraft] = useState("");
+  const [notesSaving, setNotesSaving] = useState(false);
+  const [tagDraft, setTagDraft] = useState("");
+  const [summarizing, setSummarizing] = useState(false);
+  const [summaryError, setSummaryError] = useState("");
+  useEffect(() => { setNotesDraft(selected?.notes || ""); setSummaryError(""); }, [selected?.id]);
   // รูปเพจ: ใช้ URL fbcdn ตรงเพจจาก cache กลางก่อน (เสถียร/ตรงเพจ) — ถ้ายังไม่มีค่อย fallback graph endpoint เดิม
   const pagePic = (id) => pagePics[id] || `https://graph.facebook.com/${id}/picture?type=square&width=96&height=96`;
   async function savePageSel(next) {
@@ -342,17 +353,17 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     else setSendMsg(`เปิดรับคอมเมนต์ Ads แบบเรียลไทม์ ${sync.selected_comment_pages?.length || 0} เพจแล้ว ✓`);
   }
   const renderAd = (ad) => (
-    <div key={ad.ad_id} className="rounded-lg border border-slate-200 overflow-hidden bg-slate-50/50">
+    <div key={ad.ad_id} className="rounded-lg border border-night-border overflow-hidden bg-night-surface2/50">
       {ad.media_url && (ad.media_type === "video"
         ? <video src={ad.media_url} poster={ad.thumb_url || undefined} controls className="w-full max-h-40 object-cover bg-black" />
         : <img src={ad.media_url} alt="" className="w-full max-h-40 object-cover" />)}
       <div className="p-2 space-y-0.5">
-        {ad.error ? <div className="text-[11px] text-slate-400">โหลดรายละเอียดแอดไม่ได้ — แอดอาจถูกลบ หรือไม่มีสิทธิ์เข้าถึงบัญชีโฆษณานี้</div> : (<>
-          <div className="text-[11px] text-slate-500">แคมเปญ: <span className="text-slate-700">{ad.campaign_name || "-"}</span></div>
-          <div className="text-[11px] text-slate-500">ชุดโฆษณา: <span className="text-slate-700">{ad.adset_name || "-"}</span></div>
-          <div className="text-[11px] text-slate-500">โฆษณา: <span className="text-slate-700">{ad.name || "-"}</span></div>
+        {ad.error ? <div className="text-[11px] text-night-ink-3">โหลดรายละเอียดแอดไม่ได้ — แอดอาจถูกลบ หรือไม่มีสิทธิ์เข้าถึงบัญชีโฆษณานี้</div> : (<>
+          <div className="text-[11px] text-night-ink-2">แคมเปญ: <span className="text-night-ink">{ad.campaign_name || "-"}</span></div>
+          <div className="text-[11px] text-night-ink-2">ชุดโฆษณา: <span className="text-night-ink">{ad.adset_name || "-"}</span></div>
+          <div className="text-[11px] text-night-ink-2">โฆษณา: <span className="text-night-ink">{ad.name || "-"}</span></div>
         </>)}
-        <div className="text-[10px] text-slate-400 break-all">ad_id: {ad.ad_id}</div>
+        <div className="text-[10px] text-night-ink-3 break-all">ad_id: {ad.ad_id}</div>
       </div>
     </div>
   );
@@ -416,9 +427,11 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     if (isBlocked !== filters.showBlocked) return false;
     if (allowedPages && !allowedPages.includes(String(row.page_id || ""))) return false;
     const selectedPages = currentPageIds();
-    if (selectedPages.length && !selectedPages.includes(String(row.page_id || ""))) return false;
+    // แท็บ "ทั้งหมด" ต้องรวมทุกเพจที่ผู้ใช้มีสิทธิ์ ไม่ถูก page selector ของเพจแรกบังแชทช่องทางอื่น
+    if (filters.listTab !== "everything" && selectedPages.length && !selectedPages.includes(String(row.page_id || ""))) return false;
     if (filters.listTab === "comments") return isCommentChat(row);
     if (filters.listTab === "line") return row.source === "line" && INBOX_LINE_OA_ENABLED;
+    if (filters.listTab === "everything") return true;
     return !isCommentChat(row) && row.source !== "line";
   }
 
@@ -488,6 +501,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     const key = JSON.stringify({
       listTab,
       showBlocked,
+      unreadOnly,
       pageMode: pageSel.mode,
       pageSingle: pageSel.single || null,
       pageMulti: pageSel.multi || [],
@@ -516,14 +530,19 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
         query = showBlocked ? query.not("blocked_at", "is", null) : query.is("blocked_at", null);
         if (listTab === "comments") query = query.or("source.eq.comment,id.like.fbc_%");
         else if (listTab === "line") query = query.eq("source", "line");
+        else if (listTab === "everything") { /* ทุกช่องทางจริง รวมความคิดเห็นด้วย */ }
         else query = query.not("id", "like", "fbc_%").or("source.is.null,and(source.neq.comment,source.neq.line)");
+        if (unreadOnly) query = query.eq("unread", true);
 
         if (listTab === "line") {
           if (allowedPages !== null) query = query.eq("page_id", "__line_permission_required__");
-        } else {
+        } else if (listTab !== "everything") {
           if (pageSel.mode === "single" && pageSel.single) query = query.eq("page_id", pageSel.single);
           else if (pageSel.mode === "multi" && pageSel.multi.length) query = query.in("page_id", pageSel.multi);
           if (allowedPages) query = query.in("page_id", allowedPages);
+        } else if (allowedPages) {
+          // รวมทุกเพจ แต่ยังเคารพสิทธิ์เพจที่ผู้ใช้ได้รับ
+          query = query.in("page_id", allowedPages);
         }
 
         const { data, error } = await query.abortSignal(controller.signal);
@@ -816,7 +835,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     window.addEventListener("focus", onFocus);
     return () => { stopped = true; clearTimeout(unreadRefreshTimerRef.current); clearTimeout(transcriptRefreshTimerRef.current); clearInterval(fallback); clearInterval(readTimer); clearInterval(commentReplyTimer); clearInterval(instagramFallbackTimer); supabase.removeChannel(channel); window.removeEventListener("focus", onFocus); document.removeEventListener("visibilitychange", onVis); };
   }, [active, alertMin]);
-  useEffect(() => { setList(null); loadList(); }, [listTab]);   // เปลี่ยนแท็บ = แสดงสถานะโหลด ไม่สรุปผิดว่าไม่มีแชท
+  useEffect(() => { setList(null); loadList(); }, [listTab, unreadOnly]);   // เปลี่ยนแท็บ/ตัวกรองยังไม่อ่าน = แสดงสถานะโหลด ไม่สรุปผิดว่าไม่มีแชท
   useEffect(() => { setSelected(null); setList(null); loadList(); }, [showBlocked]);
 
   useEffect(() => {
@@ -909,7 +928,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
       if (data.page_id && viewing.length > 0 && !viewing.includes(data.page_id)) {
         await savePageSel({ ...ps, mode: "single", single: data.page_id });
       }
-      setListTab("all");
+      setListTab("everything");
       // จำเวลาข้อความเป้าหมายไว้ — พอ transcript โหลดเสร็จจะเลื่อนไปหาและไฮไลต์ให้
       highlightAtRef.current = gotoChat.at || null;
       setHighlightAt(gotoChat.at || null);
@@ -944,13 +963,13 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     const timeout = setTimeout(() => controller.abort(), 12_000);
     setSelected({ ...item, transcript: null });
     logActivity("open_chat", { id: item.id, customer_name: item.customer_name, page_id: item.page_id });
-    setTranslations({}); setReply(""); setSendPreview(null); setSendMsg(""); setAdSources([]); setAdLoading(false); setSavedReplies([]); setSavedOpen(false); setKnowledgeOpen(false); setKnowledgeResults([]); setReplyTo(null); setMessageMenu(null); setKnowledgeCapture(null); setKnowledgeCaptureMsg(""); setEmojiOpen(false); setInfoOpen(false); setStatusMenuOpen(false); setLabelMsg(null);
+    setTranslations({}); setReply(""); setSendPreview(null); setSendMsg(""); setAdSources([]); setAdLoading(false); setSavedReplies([]); setSavedOpen(false); setKnowledgeOpen(false); setKnowledgeResults([]); setReplyTo(null); setMessageMenu(null); setKnowledgeCapture(null); setKnowledgeCaptureMsg(""); setEmojiOpen(false); setInfoOpen(false); setStatusMenuOpen(false); setLabelMsg(null); setQuickFillState({});
     setForceLang(lsGet(`ui.forceLang.${item.id}`, "auto"));   // ภาษาที่เคยเลือกไว้ของแชทนี้ (จำต่อเครื่อง)
     setTranslating(true);
     // แปลทำคู่ขนานกับการดึง transcript เพื่อไม่ต้องรอ query แรกจบแล้วค่อยเริ่ม Edge Function
     const translationPromise = supabase.functions.invoke("messenger-reply", { body: { action: "translate", id: item.id } });
     // ดึงเฉพาะคอลัมน์ที่หน้าแชทใช้จริง (เลี่ยง select * ที่ลากคอลัมน์หนักที่ไม่ได้ใช้ เช่น ads_context/hash → เปิดแชทไวขึ้นมากในแชทใหญ่)
-    const CHAT_COLS = "id, page_id, page_name, psid, customer_name, source, stage, stage_manual, classified_by, needs_ai, needs_verify, manual_data, manual_data_by, manual_data_at, trade_id, username, phone, email, awaiting_reply, unread, cust_read_at, cust_lang, country, profile_pic, transcript, account_opened_at, entry_ad_id, entry_ad_name, last_user_text, last_reply_text, last_reply_by, last_reply_at, last_message_at, comment_ad_name, comment_ad_ids, comment_ad_names, comment_is_ad, comment_promoted_to_inbox, comment_permalink, blocked_at, synced_at, updated_at";
+    const CHAT_COLS = "id, page_id, page_name, psid, customer_name, source, stage, stage_manual, classified_by, needs_ai, needs_verify, manual_data, manual_data_by, manual_data_at, trade_id, username, phone, email, awaiting_reply, unread, cust_read_at, cust_lang, country, profile_pic, transcript, account_opened_at, entry_ad_id, entry_ad_name, last_user_text, last_reply_text, last_reply_by, last_reply_at, last_message_at, comment_ad_name, comment_ad_ids, comment_ad_names, comment_is_ad, comment_promoted_to_inbox, comment_permalink, blocked_at, synced_at, updated_at, notes, tags, ai_summary, ai_summary_at";
     try {
       const { data, error } = await supabase.from("chat_customers").select(CHAT_COLS).eq("id", item.id).maybeSingle().abortSignal(controller.signal);
       if (openSeq !== openRequestRef.current.seq) return;
@@ -1140,12 +1159,13 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
           approved_text: approved.text, approved_lang: approved.lang, by: myEmail,
           reply_to_text: approved.replyTo?.text || null, reply_to_mid: approved.replyTo?.mid || null,
           reply_to_img: approved.replyTo?.img || null, reply_to_at: approved.replyTo?.at || null,
+          reply_to_quote_token: approved.replyTo?.quoteToken || null,
           force_lang: forceLang !== "auto" ? forceLang : undefined,
           comment_reply_mode: isCommentChat(selected) ? "public" : undefined,
         } });
         if (error) { rollbackOptimistic(); setSendMsg("ส่งไม่สำเร็จ: " + (await readFunctionErrorMessage(error))); return; }
         if (!data?.ok) { rollbackOptimistic(); setSendMsg("ส่งไม่สำเร็จ: " + (data?.error || "")); return; }
-        const realItem = { w: "p", t: data.sent_text, at: optAt, by: myEmail, mid: data.message_id || null, ...(data.reply_to_text ? { reply_to_text: data.reply_to_text } : {}), ...(data.reply_to_mid ? { reply_to_mid: data.reply_to_mid } : {}), ...(data.reply_to_img ? { reply_to_img: data.reply_to_img } : {}), ...(data.reply_to_at ? { reply_to_at: data.reply_to_at } : {}) };
+        const realItem = { w: "p", t: data.sent_text, at: optAt, by: myEmail, mid: data.message_id || null, ...(data.quote_token ? { quote_token: data.quote_token } : {}), ...(data.reply_to_text ? { reply_to_text: data.reply_to_text } : {}), ...(data.reply_to_mid ? { reply_to_mid: data.reply_to_mid } : {}), ...(data.reply_to_img ? { reply_to_img: data.reply_to_img } : {}), ...(data.reply_to_at ? { reply_to_at: data.reply_to_at } : {}) };
         setSelected((s) => {
           if (!s) return s;
           const tr = s.transcript || [];
@@ -1232,10 +1252,112 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     </div>
   );
 
+  // บันทึกโน้ตส่วนตัว — เรียกตอน blur ช่องพิมพ์ ไม่ save ทุกตัวอักษร
+  async function saveNotes() {
+    if (!selected) return;
+    const id = selected.id;
+    const value = notesDraft.trim();
+    if (value === (selected.notes || "")) return;
+    setNotesSaving(true);
+    try {
+      await supabase.from("chat_customers").update({ notes: value, updated_at: new Date().toISOString() }).eq("id", id);
+      setSelected((s) => (s && s.id === id ? { ...s, notes: value } : s));
+      setList((l) => (l || []).map((x) => (x.id === id ? { ...x, notes: value } : x)));
+    } finally {
+      setNotesSaving(false);
+    }
+  }
+  async function addTag(raw) {
+    const value = raw.trim();
+    if (!value || !selected) return;
+    const id = selected.id;
+    const nextTags = Array.from(new Set([...(selected.tags || []), value]));
+    setTagDraft("");
+    setSelected((s) => (s && s.id === id ? { ...s, tags: nextTags } : s));
+    setList((l) => (l || []).map((x) => (x.id === id ? { ...x, tags: nextTags } : x)));
+    await supabase.from("chat_customers").update({ tags: nextTags, updated_at: new Date().toISOString() }).eq("id", id);
+  }
+  async function removeTag(tag) {
+    if (!selected) return;
+    const id = selected.id;
+    const nextTags = (selected.tags || []).filter((t) => t !== tag);
+    setSelected((s) => (s && s.id === id ? { ...s, tags: nextTags } : s));
+    setList((l) => (l || []).map((x) => (x.id === id ? { ...x, tags: nextTags } : x)));
+    await supabase.from("chat_customers").update({ tags: nextTags, updated_at: new Date().toISOString() }).eq("id", id);
+  }
+  // สรุปบทสนทนา — กดเอง ไม่ auto (ต้นทุนเรียก AI ทุกครั้ง)
+  async function summarizeConversation() {
+    if (!selected || summarizing) return;
+    const id = selected.id;
+    setSummarizing(true); setSummaryError("");
+    try {
+      const { data, error } = await supabase.functions.invoke("messenger-reply", { body: { action: "summarize", id } });
+      if (error || !data?.ok) { setSummaryError(data?.error || (error ? await readFunctionErrorMessage(error) : "สรุปไม่สำเร็จ ลองใหม่ได้")); return; }
+      setSelected((s) => (s && s.id === id ? { ...s, ai_summary: data.summary, ai_summary_at: data.summarized_at } : s));
+      logActivity("summarize_chat", { id });
+    } finally {
+      setSummarizing(false);
+    }
+  }
+  // แผงโน้ต/แท็ก/สรุปบทสนทนา — ใช้ร่วมกันทั้งแผงมือถือและแผงข้อมูลเดสก์ท็อป
+  const ConversationInsights = () => !selected ? null : (
+    <div className="chat-insights space-y-2.5">
+      <div>
+        <div className="flex items-center justify-between text-xs text-night-ink-3 mb-1">
+          <span>โน้ตส่วนตัว</span>
+          {notesSaving && <Loader2 className="animate-spin" size={12} />}
+        </div>
+        <textarea
+          value={notesDraft}
+          onChange={(e) => setNotesDraft(e.target.value)}
+          onBlur={saveNotes}
+          rows={3}
+          placeholder="จดสิ่งที่ต้องจำเกี่ยวกับลูกค้าคนนี้..."
+          className="w-full rounded-lg border border-night-border px-2.5 py-2 text-xs resize-y"
+        />
+      </div>
+      <div>
+        <div className="text-xs text-night-ink-3 mb-1">แท็ก</div>
+        {(selected.tags || []).length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-1.5">
+            {selected.tags.map((t) => (
+              <span key={t} className="inline-flex items-center gap-1 text-[11px] font-medium pl-2 pr-1 py-1 rounded-full bg-blue-500/15 text-blue-400">
+                {t}
+                <button onClick={() => removeTag(t)} className="text-blue-400 hover:text-blue-400" aria-label={`ลบแท็ก ${t}`}><X size={11} /></button>
+              </span>
+            ))}
+          </div>
+        )}
+        <input
+          value={tagDraft}
+          onChange={(e) => setTagDraft(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addTag(tagDraft); } }}
+          placeholder="เพิ่มแท็ก แล้วกด Enter"
+          className="w-full rounded-lg border border-night-border px-2.5 py-1.5 text-xs"
+        />
+      </div>
+      <div className="pt-2 border-t border-night-border-subtle space-y-1.5">
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-night-ink-3">สรุปบทสนทนา (AI)</span>
+          <button onClick={summarizeConversation} disabled={summarizing} className="text-[11px] font-semibold text-blue-400 hover:text-blue-400 disabled:opacity-50 flex items-center gap-1">
+            {summarizing && <Loader2 className="animate-spin" size={12} />} {selected.ai_summary ? "สรุปใหม่" : "สรุปเลย"}
+          </button>
+        </div>
+        {summaryError && <div className="text-[11px] text-rose-400">{summaryError}</div>}
+        {selected.ai_summary && (
+          <div className="rounded-lg bg-blue-500/15 border border-blue-100 px-2.5 py-2 text-xs text-night-ink whitespace-pre-wrap">
+            {selected.ai_summary}
+            {selected.ai_summary_at && <div className="mt-1 text-[10px] text-night-ink-3">สรุปเมื่อ {new Date(selected.ai_summary_at).toLocaleString("th-TH")}</div>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
   function openMessageMenu(index, message, side) {
     const value = String(message?.t || "").trim() || (message?.img ? "[รูปภาพ]" : "");
     if (!value) return;
-    setMessageMenu((current) => current?.index === index ? null : { index, text: value, img: message?.img || null, mid: message?.mid || null, at: message?.at || null, side });
+    setMessageMenu((current) => current?.index === index ? null : { index, text: value, img: message?.img || null, mid: message?.mid || null, at: message?.at || null, quoteToken: message?.quote_token || null, side });
   }
   function goToReplyTarget(message) {
     const mid = String(message?.reply_to_mid || "");
@@ -1267,7 +1389,10 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   }
 
   const fmt = (t) => { try { return new Date(t).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" }); } catch { return t || ""; } };
-  const filtered = (list || []).filter((x) => !q.trim() || `${x.customer_name || ""} ${x.last_user_text || ""} ${x.country || ""}`.toLowerCase().includes(q.trim().toLowerCase()));
+  const filtered = (list || []).filter((x) =>
+    (!unreadOnly || x.unread) &&
+    (!q.trim() || `${x.customer_name || ""} ${x.last_user_text || ""} ${x.country || ""}`.toLowerCase().includes(q.trim().toLowerCase()))
+  );
   const tItemsRaw = Array.isArray(selected?.transcript) ? selected.transcript : [];
   // กันแสดงซ้ำ — ตาข่ายกันสุดท้าย ไม่ว่า transcript ใน DB จะเบิ้ลด้วยเหตุใด (race webhook / echo+sync คนละ id)
   // ยุบเฉพาะข้อความ "เหมือนกันเป๊ะ + อยู่ติดกัน" (ฝั่งเดียวกัน + รูป/ข้อความเดียวกัน) ภายใน ~90 วิ
@@ -1308,8 +1433,8 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     if (rd && rd >= mt - 1000) return { read: true, label: `อ่านแล้ว ${fmtMsgTime(selected.cust_read_at)}` };
     return { read: false, label: "ส่งแล้ว" };
   };
-  // บล็อกป้อนข้อมูล/เช็คไอดีเทรด (+ให้สิทธิ์ TV) แสดงเฉพาะเพจ BeSight เท่านั้น
-  // เพจที่ผูกกับแบรนด์ TV — ฟอร์มป้อนข้อมูล/เช็คไอดี/เพิ่ม TV จะโชว์เฉพาะเพจเหล่านี้ (ตั้งที่ ตั้งค่า → ตั้งค่า TV)
+  // เครื่องมือเช็คไอดีเทรด (TradeIdChecker) แสดงเฉพาะเพจที่ผูกกับแบรนด์ TradingView เท่านั้น
+  // (ตั้งที่ ตั้งค่า → ตั้งค่า TV) — ส่วนบันทึกข้อมูลลูกค้าพื้นฐาน (CustomerDataForm) ทำได้ทุกเพจแล้ว
   const [tvBrandPages, setTvBrandPages] = useState(null);   // Set<page_id> | null (ยังโหลดไม่เสร็จ)
   useEffect(() => {
     supabase.from("tv_brands").select("pages, active").then(({ data }) => {
@@ -1319,6 +1444,32 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     });
   }, []);
   const isBeSightPage = (r) => !!tvBrandPages && tvBrandPages.has(String(r?.page_id || ""));
+
+  // ---- บันทึกด่วนจากข้อความลูกค้า: ตรวจจับไอดีเทรด/username TradingView ที่ลูกค้าพิมพ์มาเอง ----
+  // ตัวเลขล้วน 4-8 หลัก = ไอดีเทรด · คำที่มีขีดล่างอย่างน้อย 1 ตัว = username (กันจับคำอังกฤษทั่วไปผิด)
+  const detectTradeIdCandidate = (text) => String(text || "").match(/\b\d{4,8}\b/)?.[0] || null;
+  const detectTvUsernameCandidate = (text) => {
+    const m = String(text || "").match(/\b[a-zA-Z][a-zA-Z0-9_]*_[a-zA-Z0-9_]*\b/);
+    return m && m[0].length >= 4 ? m[0] : null;
+  };
+  const [quickFillState, setQuickFillState] = useState({});   // { [key]: "saving"|"saved"|"error" }
+  async function quickSaveField(field, value, key) {
+    if (!selected) return;
+    setQuickFillState((s) => ({ ...s, [key]: "saving" }));
+    const { data, error } = await supabase.functions.invoke("save-lead-fields", {
+      body: {
+        id: selected.id,
+        trade_id: selected.trade_id || "", username: selected.username || "",
+        phone: selected.phone || "", email: selected.email || "",
+        [field]: value,
+      },
+    });
+    if (error || !data?.ok) { setQuickFillState((s) => ({ ...s, [key]: "error" })); return; }
+    const patch = { trade_id: data.trade_id, username: data.username, phone: data.phone, email: data.email, manual_data: true, manual_data_by: data.manual_data_by, manual_data_at: data.manual_data_at };
+    setSelected((s) => (s ? { ...s, ...patch } : s));
+    setList((l) => (l || []).map((x) => (x.id === selected.id ? { ...x, ...patch } : x)));
+    setQuickFillState((s) => ({ ...s, [key]: "saved" }));
+  }
   // ข้อความนี้คือข้อความที่ถูกอ้างถึงจากลิสต์หลักฐานไหม (เทียบที่ระดับวินาที กันคลาดจากรูปแบบ ISO ที่ต่างกัน)
   const isHl = (m) => {
     if (!highlightAt || !m?.at) return false;
@@ -1351,14 +1502,14 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
 
   return (
     // มือถือ: เต็มจอ (chat-shell ใช้ dvh ใน index.css) ไม่มีขอบมน — เดสก์ท็อป: การ์ด 82vh มีขอบมน
-    <div className="chat-shell bg-white md:rounded-2xl border-0 md:border border-slate-200 md:shadow-sm overflow-hidden flex relative">
+    <div className={`chat-shell ${selected ? "is-selected" : ""} bg-night-surface md:rounded-2xl border-0 md:border border-night-border md:shadow-sm overflow-hidden flex relative`}>
       {/* ดูรูปแบบขยายเต็มจอ (คลิกรูปในแชท) — กดพื้นดำ/ปุ่ม X เพื่อปิด · คลิกขวาที่รูปเพื่อ Save ได้ */}
       {lightbox && (
         <div className="fixed inset-0 z-[200] bg-black/85 flex items-center justify-center p-4" onClick={() => setLightbox(null)}>
           <button
             onClick={(e) => { e.stopPropagation(); setLightbox(null); }}
             style={{ top: "calc(env(safe-area-inset-top, 0px) + 16px)", right: "calc(env(safe-area-inset-right, 0px) + 16px)" }}
-            className="fixed w-12 h-12 rounded-full bg-white text-slate-900 flex items-center justify-center shadow-lg hover:bg-slate-100 z-20"
+            className="fixed w-12 h-12 rounded-full bg-night-surface text-night-ink flex items-center justify-center shadow-lg hover:bg-night-surface2 z-20"
             aria-label="ปิด"
           >
             <X size={26} />
@@ -1377,7 +1528,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
             rel="noopener noreferrer"
             onClick={(e) => e.stopPropagation()}
             style={{ bottom: "calc(env(safe-area-inset-bottom, 0px) + 20px)" }}
-            className="fixed left-1/2 -translate-x-1/2 px-4 py-2 rounded-full bg-white text-slate-900 text-sm font-medium shadow-lg hover:bg-slate-100 z-20"
+            className="fixed left-1/2 -translate-x-1/2 px-4 py-2 rounded-full bg-night-surface text-night-ink text-sm font-medium shadow-lg hover:bg-night-surface2 z-20"
           >
             ⬇︎ บันทึกรูป
           </a>
@@ -1386,12 +1537,12 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
       {/* popup เตือนแชทค้างอ่าน — กะพริบจนกว่าจะเปิดอ่าน/กดปิด */}
       {overdueAlert && (
         <div className="absolute top-3 left-1/2 -translate-x-1/2 z-40 animate-pulse">
-          <div className="bg-rose-600 text-white rounded-xl shadow-2xl px-4 py-2.5 flex items-center gap-3 border-2 border-rose-300">
+          <div className="bg-rose-600 text-white rounded-xl shadow-2xl px-4 py-2.5 flex items-center gap-3 border-2 border-rose-500/40">
             <span className="text-sm font-bold whitespace-nowrap">🔴 {overdueAlert.count} แชทค้างอ่านเกิน {alertMin} นาที</span>
             <span className="text-xs opacity-90 hidden sm:inline truncate max-w-[260px]">({overdueAlert.pages.join(", ")})</span>
             {/* บอกให้ชัดว่าแชทที่ค้างอยู่คนละเพจกับที่กำลังเปิดดู — กันงงว่า "ไม่เห็นมีแชทค้างสักหน่อย" */}
             {overdueAlert.outOfView && (
-              <span className="text-[11px] bg-white/20 rounded px-1.5 py-0.5 shrink-0">อยู่เพจอื่น</span>
+              <span className="text-[11px] bg-night-surface/20 rounded px-1.5 py-0.5 shrink-0">อยู่เพจอื่น</span>
             )}
             <button
               onClick={() => {
@@ -1402,10 +1553,10 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                     ? { ...pageSel, mode: "single", single: ids[0] }
                     : { ...pageSel, mode: "multi", multi: ids });
                 }
-                setListTab("all");
+                setListTab("everything");
                 setOverdueAlert(null);
               }}
-              className="bg-white text-rose-700 rounded-full px-2.5 py-1 text-xs font-semibold shrink-0 hover:bg-rose-50"
+              className="bg-night-surface text-rose-400 rounded-full px-2.5 py-1 text-xs font-semibold shrink-0 hover:bg-rose-500/15"
             >
               ดูเลย
             </button>
@@ -1414,148 +1565,182 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
         </div>
       )}
       {/* ซ้าย: หัวเพจ + แท็บ + ลิสต์ (มือถือ: เต็มจอ, ซ่อนเมื่อเปิดแชท) */}
-      <div className={`w-full md:w-80 border-r border-slate-200 flex-col shrink-0 ${selected ? "hidden md:flex" : "flex"}`}>
+      <div className={`chat-inbox-list w-full md:w-[340px] xl:w-[423px] border-r border-night-border flex-col shrink-0 ${selected ? "hidden md:flex" : "flex"}`}>
         {/* หัว: โลโก้+ชื่อเพจ + dropdown เลือกเพจ */}
-        <div className="p-2.5 border-b border-slate-200 relative">
-          <button onClick={() => setPageMenuOpen((o) => !o)} className="flex items-center gap-2 w-full text-left hover:bg-slate-50 rounded-lg p-1">
-            <div className="w-9 h-9 rounded-full bg-slate-100 overflow-hidden shrink-0 border border-slate-200 flex items-center justify-center relative">
+        <div className="chat-list-header p-2.5 border-b border-night-border relative">
+          <button onClick={() => setPageMenuOpen((o) => !o)} className="flex items-center gap-2 w-full text-left hover:bg-night-surface2 rounded-lg p-1">
+            <div className="chat-list-avatar w-9 h-9 rounded-full bg-night-surface2 overflow-hidden shrink-0 border border-night-border flex items-center justify-center relative">
               {headerPageId ? (
                 <>
                   {/* ตัวย่อชื่อเพจเป็นพื้นหลังเสมอ — ถ้ารูปโหลดไม่ขึ้นก็ยังเห็นตัวอักษร ไม่ว่างเปล่า */}
-                  <span className="text-[11px] font-bold text-slate-500">{(headerName || "?").slice(0, 2)}</span>
+                  <span className="text-[11px] font-bold text-night-ink-2">{(headerName || "?").slice(0, 2)}</span>
                   {/* key=URL → พอ pagePics โหลด URL ที่ดีมา img จะ remount แล้วลองใหม่ (แก้บั๊กซ่อนถาวรเมื่อ fallback graph พลาด) */}
                   <img key={pagePic(headerPageId)} src={pagePic(headerPageId)} alt="" referrerPolicy="no-referrer" decoding="async" className="absolute inset-0 w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display = "none"; }} />
                 </>
-              ) : <MessageSquare size={16} className="text-slate-400" />}
+              ) : <MessageSquare size={16} className="text-night-ink-3" />}
             </div>
-            <span className="font-bold text-slate-800 truncate flex-1">{headerName}</span>
-            <ChevronDown size={18} className={`text-slate-400 shrink-0 transition-transform ${pageMenuOpen ? "rotate-180" : ""}`} />
+            <span className="chat-list-title font-bold text-night-ink truncate flex-1">{headerName}</span>
+            <ChevronDown size={18} className={`text-night-ink-3 shrink-0 transition-transform ${pageMenuOpen ? "rotate-180" : ""}`} />
           </button>
           {pageMenuOpen && (
-            <div className="absolute top-full left-2.5 right-2.5 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg z-30 p-2">
-              <div className="flex gap-1 bg-slate-100 rounded-lg p-0.5 text-xs mb-2">
+            <div className="absolute top-full left-2.5 right-2.5 mt-1 bg-night-surface border border-night-border rounded-xl shadow-lg z-30 p-2">
+              <div className="flex gap-1 bg-night-surface2 rounded-lg p-0.5 text-xs mb-2">
                 {[["single", "เพจเดียว"], ["multi", "หลายเพจ"]].map(([k, l]) => (
-                  <button key={k} onClick={() => savePageSel({ ...pageSel, mode: k })} className={`flex-1 rounded-md px-2 py-1 font-medium ${pageSel.mode === k ? "seg-on" : "text-slate-500"}`}>{l}</button>
+                  <button key={k} onClick={() => savePageSel({ ...pageSel, mode: k })} className={`flex-1 rounded-md px-2 py-1 font-medium ${pageSel.mode === k ? "seg-on" : "text-night-ink-2"}`}>{l}</button>
                 ))}
               </div>
               <div className="max-h-60 overflow-y-auto space-y-0.5">
-                {pageOptions.length === 0 && <div className="text-xs text-slate-400 px-2 py-2">ยังไม่มีเพจ (ซิงก์ก่อน)</div>}
+                {pageOptions.length === 0 && <div className="text-xs text-night-ink-3 px-2 py-2">ยังไม่มีเพจ (ซิงก์ก่อน)</div>}
                 {pageOptions.map((p) => pageSel.mode === "single" ? (
-                  <button key={p.id} onClick={() => { savePageSel({ ...pageSel, single: p.id }); setPageMenuOpen(false); }} className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-50 ${pageSel.single === p.id ? "bg-indigo-50" : ""}`}>
-                    <img src={pagePic(p.id)} alt="" referrerPolicy="no-referrer" loading="lazy" decoding="async" className="w-7 h-7 rounded-full object-cover bg-slate-100 shrink-0" onError={(e) => { e.currentTarget.style.visibility = "hidden"; }} />
-                    <span className="text-sm text-slate-700 truncate">{p.name}</span>
+                  <button key={p.id} onClick={() => { savePageSel({ ...pageSel, single: p.id }); setPageMenuOpen(false); }} className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-night-surface2 ${pageSel.single === p.id ? "bg-night-accent/15" : ""}`}>
+                    <img src={pagePic(p.id)} alt="" referrerPolicy="no-referrer" loading="lazy" decoding="async" className="w-7 h-7 rounded-full object-cover bg-night-surface2 shrink-0" onError={(e) => { e.currentTarget.style.visibility = "hidden"; }} />
+                    <span className="text-sm text-night-ink truncate">{p.name}</span>
                   </button>
                 ) : (
-                  <label key={p.id} className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-50 cursor-pointer">
+                  <label key={p.id} className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-night-surface2 cursor-pointer">
                     <input type="checkbox" checked={pageSel.multi.includes(p.id)} onChange={(e) => { const m = e.target.checked ? [...pageSel.multi, p.id] : pageSel.multi.filter((x) => x !== p.id); savePageSel({ ...pageSel, multi: m }); }} className="w-4 h-4" />
-                    <img src={pagePic(p.id)} alt="" referrerPolicy="no-referrer" loading="lazy" decoding="async" className="w-7 h-7 rounded-full object-cover bg-slate-100 shrink-0" onError={(e) => { e.currentTarget.style.visibility = "hidden"; }} />
-                    <span className="text-sm text-slate-700 truncate">{p.name}</span>
+                    <img src={pagePic(p.id)} alt="" referrerPolicy="no-referrer" loading="lazy" decoding="async" className="w-7 h-7 rounded-full object-cover bg-night-surface2 shrink-0" onError={(e) => { e.currentTarget.style.visibility = "hidden"; }} />
+                    <span className="text-sm text-night-ink truncate">{p.name}</span>
                   </label>
                 ))}
               </div>
-              {pageSel.mode === "multi" && <div className="text-[10px] text-slate-400 mt-1 px-1">ติ๊กเพจที่ต้องการดูรวมกัน (ไม่ติ๊ก = ทุกเพจ)</div>}
+              {pageSel.mode === "multi" && <div className="text-[10px] text-night-ink-3 mt-1 px-1">ติ๊กเพจที่ต้องการดูรวมกัน (ไม่ติ๊ก = ทุกเพจ)</div>}
             </div>
           )}
         </div>
         {/* แท็บ + ค้นหา */}
-        <div className="p-2.5 border-b border-slate-200 space-y-2">
-          <div className="flex gap-1 bg-slate-100 rounded-lg p-0.5 text-xs">
-            {[["all", "Messenger"], ...(INBOX_LINE_OA_ENABLED ? [["line", "LINE OA"]] : []), ...(INBOX_COMMENTS_ENABLED ? [["comments", "ความคิดเห็น"]] : [])].map(([k, label]) => (
-              <button key={k} onClick={() => setListTab(k)} className={`relative flex-1 rounded-md px-1.5 py-1 font-medium whitespace-nowrap ${listTab === k ? "seg-on" : "text-slate-500 hover:text-slate-700"}`}>
+        <div className="chat-list-filters p-2.5 border-b border-night-border space-y-2">
+          {/* แท็บเลือกช่องทาง — "ทั้งหมด" รวมทุกช่องทาง (ยกเว้นความคิดเห็น), ที่เหลือกรองเฉพาะช่องทางนั้น
+              สไตล์ underline + จุดสีต่อช่องทาง ตามดีไซน์ mockup (ไม่ใช้ segmented pill แบบเดิม) */}
+          <div className="flex gap-3 -mx-2.5 px-2.5 border-b border-night-border-subtle">
+            {[["everything", "ทั้งหมด", "#58A6FF"], ["all", "Messenger", "#0084FF"], ...(INBOX_LINE_OA_ENABLED ? [["line", "LINE OA", "#06C755"]] : []), ...(INBOX_COMMENTS_ENABLED ? [["comments", "ความคิดเห็น", "#8B949E"]] : [])].map(([k, label, dot]) => (
+              <button key={k} onClick={() => { setListTab(k); if (k === "everything") { setShowBlocked(false); setUnreadOnly(false); } }} className={`relative flex items-center gap-1.5 pb-2 pt-0.5 text-[11px] font-medium whitespace-nowrap border-b-2 -mb-px ${listTab === k ? "border-night-accent text-night-accent-light" : "border-transparent text-night-ink-2 hover:text-night-ink"}`}>
+                <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: dot }} />
                 {label}
-                {k === "comments" && commentUnreadCount > 0 && <span className="absolute top-0.5 right-1 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-white" title={`มีความคิดเห็นใหม่ ${commentUnreadCount} รายการ`} />}
-                {k === "line" && lineUnreadCount > 0 && <span className="absolute top-0.5 right-1 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-white" title={`มีแชท LINE ใหม่ ${lineUnreadCount} รายการ`} />}
-                {k === "all" && messengerUnreadCount > 0 && <span className="absolute top-0.5 right-1 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-white" title={`มีแชท Messenger ใหม่ ${messengerUnreadCount} รายการ`} />}
+                {k === "comments" && commentUnreadCount > 0 && <span className="absolute -top-0.5 -right-2 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-night-surface" title={`มีความคิดเห็นใหม่ ${commentUnreadCount} รายการ`} />}
+                {k === "line" && lineUnreadCount > 0 && <span className="absolute -top-0.5 -right-2 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-night-surface" title={`มีแชท LINE ใหม่ ${lineUnreadCount} รายการ`} />}
+                {k === "all" && messengerUnreadCount > 0 && <span className="absolute -top-0.5 -right-2 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-night-surface" title={`มีแชท Messenger ใหม่ ${messengerUnreadCount} รายการ`} />}
+                {k === "everything" && (messengerUnreadCount + lineUnreadCount) > 0 && <span className="absolute -top-0.5 -right-2 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-night-surface" title="มีแชทใหม่ที่ยังไม่อ่าน" />}
               </button>
             ))}
           </div>
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหาชื่อ/ข้อความ/ประเทศ" className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-sm" />
-          <button onClick={() => setShowBlocked((v) => !v)} className={`mt-1 self-start text-[11px] font-medium flex items-center gap-1 ${showBlocked ? "text-rose-600" : "text-slate-400 hover:text-slate-600"}`}>
-            <AlertTriangle size={12} /> {showBlocked ? "← กลับไปแชทปกติ" : "ดูที่บล็อกไว้ (สแปม)"}
-          </button>
+          <SearchInput value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหาชื่อ/ข้อความ/ประเทศ"
+            inputClassName="!bg-night-surface2 !border-night-border !text-night-ink !placeholder-night-ink-3" />
+          <div className="flex gap-1.5 overflow-x-auto -mx-0.5 px-0.5 pb-0.5">
+            <FilterPill active={!showBlocked && !unreadOnly} onClick={() => { setShowBlocked(false); setUnreadOnly(false); }} className={!showBlocked && !unreadOnly ? "" : "!bg-night-surface2 !border-night-border !text-night-ink-2"}>แชทปกติ</FilterPill>
+            <FilterPill active={unreadOnly} onClick={() => { setShowBlocked(false); setUnreadOnly((v) => !v); }} className={unreadOnly ? "" : "!bg-night-surface2 !border-night-border !text-night-ink-2"}>ยังไม่อ่าน</FilterPill>
+            <FilterPill active={showBlocked} onClick={() => { setShowBlocked(true); setUnreadOnly(false); }} className={showBlocked ? "" : "!bg-night-surface2 !border-night-border !text-night-ink-2"}>
+              <span className="inline-flex items-center gap-1"><AlertTriangle size={12} /> บล็อกไว้ (สแปม)</span>
+            </FilterPill>
+          </div>
           {/* แจ้งเตือนแชทค้างอ่าน — แอดมินคุมทั้งหมด ผู้ใช้ไม่มีปุ่มปรับ
               เหลือแค่แถบ "ขออนุญาตแจ้งเตือน" ที่ต้องให้ผู้ใช้กดเอง เพราะเบราว์เซอร์บังคับว่า
               ต้องมาจากการคลิกของผู้ใช้เท่านั้น สั่งเปิดจากโค้ดล่วงหน้าไม่ได้ */}
           {/* iOS + เปิดใน Safari (ไม่ใช่ PWA) = แจ้งเตือนใช้ไม่ได้ → บอกให้ไปเพิ่มหน้าจอโฮมแทน */}
           {alertAllowed && notifPerm !== "granted" && iosSafariNotStandalone && (
-            <div className="w-full rounded-lg bg-sky-50 border border-sky-200 text-sky-800 px-2 py-1.5 text-[11px]">
+            <div className="w-full rounded-lg bg-sky-500/15 border border-sky-500/40 text-sky-300 px-2 py-1.5 text-[11px]">
               📲 บน iPhone: กดปุ่มแชร์ ⬆️ ด้านล่าง → <b>"เพิ่มไปยังหน้าจอโฮม"</b> แล้วเปิดแอปจากไอคอนนั้น แจ้งเตือนถึงจะใช้ได้
             </div>
           )}
           {alertAllowed && notifPerm !== "granted" && !iosSafariNotStandalone && (
+            /* เดิมเป็นบล็อกสีส้มทึบ ตัวอักษรขาว 11px — ดังกว่าเนื้อหาที่สำคัญกว่าในหน้า
+               และอ่านยาก เปลี่ยนเป็นการ์ดโทนอ่อนตัวอักษรเข้ม แบบเดียวกับกล่องแนะนำ iOS ด้านบน */
             <button
               onClick={askNotifPermission}
-              className="w-full rounded-lg bg-amber-500 text-white px-2 py-1.5 text-[11px] font-medium hover:bg-amber-600 text-left"
+              className={`w-full rounded-control border px-2.5 py-2 text-[11px] font-medium text-left leading-relaxed ${
+                notifPerm === "denied"
+                  ? "border-rose-500/40 bg-rose-500/15 text-rose-300 hover:bg-rose-500/25"
+                  : "border-amber-500/40 bg-amber-500/15 text-amber-300 hover:bg-amber-500/25"
+              }`}
               title="ต้องอนุญาตครั้งเดียวต่อเครื่อง เพื่อให้แจ้งเตือนเด้งทับแอปอื่นได้"
             >
               {notifPerm === "denied"
-                ? "🚫 การแจ้งเตือนถูกบล็อกไว้ — กดเพื่อดูวิธีเปิด (จำเป็นสำหรับเตือนแชทค้าง)"
-                : "🔔 กดเพื่อเปิดการแจ้งเตือนแชทค้างอ่าน (ต้องทำครั้งเดียวต่อเครื่อง)"}
+                ? "การแจ้งเตือนถูกบล็อกไว้ — แตะเพื่อดูวิธีเปิด (จำเป็นสำหรับเตือนแชทค้าง)"
+                : "แตะเพื่อเปิดการแจ้งเตือนแชทค้างอ่าน (ทำครั้งเดียวต่อเครื่อง)"}
             </button>
           )}
         </div>
-        <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
+        <div className="flex-1 overflow-y-auto divide-y divide-night-border-subtle">
           {listError && list === null ? (
             <div className="p-6 text-center space-y-3">
-              <div className="text-sm font-semibold text-rose-600">โหลดแชทไม่สำเร็จ</div>
-              <div className="text-xs text-slate-500 break-words">{listError}</div>
-              <button type="button" onClick={() => loadList()} disabled={loadingList} className="px-4 py-2 rounded-lg bg-amber-400 text-slate-950 text-xs font-semibold hover:bg-amber-300 disabled:opacity-50">
+              <div className="text-sm font-semibold text-rose-400">โหลดแชทไม่สำเร็จ</div>
+              <div className="text-xs text-night-ink-2 break-words">{listError}</div>
+              <button type="button" onClick={() => loadList()} disabled={loadingList} className="px-4 py-2 rounded-lg bg-brand-600 text-white text-xs font-semibold hover:bg-brand-700 disabled:opacity-50">
                 {loadingList ? "กำลังลองใหม่..." : "ลองโหลดใหม่"}
               </button>
             </div>
           ) : list === null ? <div className="p-4"><Spinner label="กำลังโหลด..." /></div>
-            : filtered.length === 0 ? <div className="p-6 text-center text-xs text-slate-400">ไม่มีแชท</div>
+            : filtered.length === 0 ? (
+              // แยกสาเหตุให้ชัด: ค้นหาไม่เจอ / ดูที่บล็อกไว้ / ยังไม่มีแชทเข้ามาเลย
+              // เดิมขึ้นแค่ "ไม่มีแชท" ซึ่งอ่านแล้วไม่รู้ว่าต้องทำอะไรต่อ
+              <div className="p-6 text-center space-y-1.5">
+                <div className="text-[13px] font-medium text-night-ink-2">
+                  {q.trim() ? "ไม่พบแชทที่ตรงกับคำค้น" : showBlocked ? "ไม่มีแชทที่บล็อกไว้" : "ยังไม่มีแชทเข้ามา"}
+                </div>
+                <div className="text-2xs text-night-ink-3 leading-relaxed">
+                  {q.trim()
+                    ? "ลองพิมพ์ชื่อ เบอร์ หรือประเทศแบบสั้นลง"
+                    : showBlocked
+                      ? "แชทที่กดบล็อกว่าเป็นสแปมจะมาอยู่ที่นี่"
+                      : "แชทจะเด้งเข้ามาเองเมื่อลูกค้าทักเพจที่เชื่อมไว้"}
+                </div>
+              </div>
+            )
               : filtered.map((x) => (
-                <button key={x.id} onClick={() => openChat(x)} className={`w-full text-left p-3 hover:bg-slate-50 flex gap-2.5 ${selected?.id === x.id ? "bg-indigo-50 chat-item-active" : ""}`}>
+                <button key={x.id} onClick={() => openChat(x)} className={`w-full text-left p-3 hover:bg-night-surface2 flex gap-2.5 ${selected?.id === x.id ? "bg-night-accent/15 chat-item-active" : ""}`}>
                   <div className="relative shrink-0">
-                    <div className="w-9 h-9 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center text-sm font-semibold relative overflow-hidden">
+                    <div className="w-9 h-9 rounded-full bg-night-surface2 text-night-ink-2 flex items-center justify-center text-sm font-semibold relative overflow-hidden">
                       <span>{initial(x.customer_name)}</span>
                       {x.profile_pic && <img src={x.profile_pic} alt="" className="absolute inset-0 w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display = "none"; }} />}
                     </div>
-                    {x.unread && <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-rose-500 border-2 border-white shadow" />}
-                    {showPageBadge && x.page_id && <img src={pagePic(x.page_id)} alt="" title={x.page_name || ""} referrerPolicy="no-referrer" loading="lazy" decoding="async" className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-white bg-white object-cover shadow" onError={(e) => { e.currentTarget.style.display = "none"; }} />}
+                    {x.unread && <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-rose-500 border-2 border-night-surface shadow" />}
+                    {showPageBadge && x.page_id && <img src={pagePic(x.page_id)} alt="" title={x.page_name || ""} referrerPolicy="no-referrer" loading="lazy" decoding="async" className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-night-surface bg-night-surface object-cover shadow" onError={(e) => { e.currentTarget.style.display = "none"; }} />}
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-2">
                       <span className="flex items-center gap-1.5 min-w-0">
                         {x.unread && <span className="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0" />}
-                        <span className={`text-sm truncate ${x.unread ? "font-bold text-slate-900" : "font-medium text-slate-700"}`}>{x.customer_name || "(ไม่มีชื่อ)"}</span>
+                        <span className={`text-sm truncate ${x.unread ? "font-bold text-night-ink" : "font-medium text-night-ink"}`}>{x.customer_name || "(ไม่มีชื่อ)"}</span>
                       </span>
-                      <span className="text-[10px] text-slate-400 shrink-0">{fmt(x.last_message_at)}</span>
+                      <span className="text-[10px] text-night-ink-3 shrink-0">{fmt(x.last_message_at)}</span>
                     </div>
                     {/* ข้อ 3: ถ้าแอดมินตอบทีหลังลูกค้า ให้โชว์ข้อความแอดมินพร้อมชื่อคนตอบ ไม่งั้นโชว์ข้อความลูกค้า */}
                     {(() => {
                       const replyNewer = x.last_reply_at && (!x.last_message_at || new Date(x.last_reply_at).getTime() >= new Date(x.last_message_at).getTime() - 1000) && x.last_reply_text;
                       if (replyNewer) return (
-                        <div className="text-xs text-slate-500 truncate">
-                          <span className="text-emerald-600 font-medium">{x.last_reply_by ? `${x.last_reply_by}: ` : "เพจ: "}</span>
+                        <div className="text-xs text-night-ink-2 truncate">
+                          <span className="text-emerald-400 font-medium">{x.last_reply_by ? `${x.last_reply_by}: ` : "เพจ: "}</span>
                           {x.last_reply_text}
                         </div>
                       );
-                      return <div className="text-xs text-slate-500 truncate">{x.last_user_text || "-"}</div>;
+                      return <div className="text-xs text-night-ink-2 truncate">{x.last_user_text || "-"}</div>;
                     })()}
                     <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                      {!isCommentChat(x) && x.source !== "line" && (() => {
+                        const st = CHAT_STAGES.find((s) => s.key === (x.stage_manual || x.stage || "new")) || CHAT_STAGES[0];
+                        return <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${st.cls}`}>{st.label}</span>;
+                      })()}
                       {(showPageBadge || isCommentChat(x)) && x.page_name && (
-                        <span className="inline-flex items-center gap-1 text-xs font-semibold px-1.5 py-0.5 rounded-md bg-indigo-100 text-indigo-700 max-w-[160px]">
+                        <span className="inline-flex items-center gap-1 text-xs font-semibold px-1.5 py-0.5 rounded-md bg-night-accent/25 text-night-accent-light max-w-[160px]">
                           <img src={pagePic(x.page_id)} alt="" referrerPolicy="no-referrer" loading="lazy" decoding="async" className="w-4 h-4 rounded-full object-cover shrink-0" onError={(e) => { e.currentTarget.style.display = "none"; }} />
                           <span className="truncate">{x.page_name}</span>
                         </span>
                       )}
-                      {x.country && <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-50 text-sky-600">{x.country}</span>}
+                      {x.country && <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-500/15 text-sky-400">{x.country}</span>}
                       {isCommentChat(x)
                         ? <>
-                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${isInstagramComment(x) ? "bg-fuchsia-100 text-fuchsia-700" : "bg-sky-100 text-sky-700"}`}>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${isInstagramComment(x) ? "bg-fuchsia-500/25 text-fuchsia-400" : "bg-sky-500/25 text-sky-400"}`}>
                               {isInstagramComment(x) ? "◎ IG" : "f Facebook"} · {x.comment_is_ad ? "คอมเมนต์จาก Ads" : "คอมเมนต์จากโพสต์"}
                             </span>
-                            {x.comment_is_ad && <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 max-w-[180px] truncate" title={x.comment_ad_name || x.entry_ad_id || ""}>
+                            {x.comment_is_ad && <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-400 max-w-[180px] truncate" title={x.comment_ad_name || x.entry_ad_id || ""}>
                               {x.comment_ad_name || `Ad ID ${x.entry_ad_id || "-"}`}
                             </span>}
                           </>
                         : x.source === "line"
                           ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#06C755]/15 text-[#009b43] font-semibold">LINE OA</span>
                         : x.source === "instagram"
-                          ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-fuchsia-100 text-fuchsia-700 font-semibold">◎ Instagram</span>
-                          : (x.entry_ad_id || x.source === "ad") && <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-50 text-purple-600">{x.entry_ad_id ? `แอด` : "โฆษณา"}</span>}
+                          ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-fuchsia-500/25 text-fuchsia-400 font-semibold">◎ Instagram</span>
+                          : (x.entry_ad_id || x.source === "ad") && <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-400">{x.entry_ad_id ? `แอด` : "โฆษณา"}</span>}
                     </div>
                   </div>
                 </button>
@@ -1565,112 +1750,127 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
 
       {/* กลาง: หน้าต่างแชท — มือถือ: fixed เต็มจอแบบ Messenger (header ติดบน / ข้อความเลื่อนกลาง / ช่องพิมพ์ติดล่าง)
           เดสก์ท็อป: inline ในการ์ดปกติ */}
-      <div className={`min-w-0 flex-col ${selected
-        ? "flex fixed inset-0 z-40 bg-white h-[100dvh] md:static md:z-auto md:h-auto md:inset-auto md:flex-1"
+      <div className={`chat-conversation-panel min-w-0 flex-col ${selected
+        ? "flex fixed inset-0 z-40 bg-night-surface h-[100dvh] md:static md:z-auto md:h-auto md:inset-auto md:flex-1"
         : "hidden md:flex md:flex-1"}`}>
         {!selected ? (
-          <div className="flex-1 flex items-center justify-center text-sm text-slate-400">เลือกลูกค้าเพื่อเริ่มตอบ</div>
+          <div className="flex-1 flex items-center justify-center text-sm text-night-ink-3">เลือกลูกค้าเพื่อเริ่มตอบ</div>
         ) : (
             <>
               {/* หัวแชท: back(มือถือ) + รูปลูกค้า + ชื่อ + มาจากแอด(กดขยาย) + แฮมเบอร์เกอร์
                   บนมือถือ (fixed เต็มจอ) เว้น safe-area บน กัน header ทับแถบสถานะ/นาฬิกา */}
-              <div className="px-3 py-2.5 border-b border-slate-200 flex items-center gap-2 shrink-0 bg-white" style={{ paddingTop: "calc(0.625rem + env(safe-area-inset-top))" }}>
-                <button className="md:hidden p-1 -ml-1 text-slate-600" onClick={() => { setSelected(null); setInfoOpen(false); setStatusMenuOpen(false); }}><ArrowLeft size={20} /></button>
-                <div className="w-10 h-10 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center text-sm font-semibold shrink-0 relative overflow-hidden">
+              <div className="px-3 py-2.5 border-b border-night-border flex items-center gap-2 shrink-0 bg-night-surface" style={{ paddingTop: "calc(0.625rem + env(safe-area-inset-top))" }}>
+                <button className="chat-mobile-back md:hidden p-1 -ml-1 text-night-ink-2" onClick={() => { setSelected(null); setInfoOpen(false); setStatusMenuOpen(false); }}><ArrowLeft size={20} /></button>
+                <div className="w-10 h-10 rounded-full bg-night-accent/25 text-brand-600 flex items-center justify-center text-sm font-semibold shrink-0 relative overflow-hidden">
                   <span>{initial(selected.customer_name)}</span>
                   {selected.profile_pic && <img src={selected.profile_pic} alt="" className="absolute inset-0 w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display = "none"; }} />}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="font-semibold text-slate-800 truncate">{selected.customer_name || "(ไม่มีชื่อ)"}</div>
+                  <div className="font-semibold text-night-ink truncate">{selected.customer_name || "(ไม่มีชื่อ)"}</div>
                   <div className="flex items-center gap-2 flex-wrap">
                     {selected.page_name && (
-                      <span className="inline-flex items-center gap-1 text-xs font-semibold px-1.5 py-0.5 rounded-md bg-indigo-100 text-indigo-700 max-w-[45vw] sm:max-w-[240px]">
+                      <span className="inline-flex items-center gap-1 text-xs font-semibold px-1.5 py-0.5 rounded-md bg-night-accent/25 text-night-accent-light max-w-[45vw] sm:max-w-[240px]">
                         <img src={pagePic(selected.page_id)} alt="" className="w-4 h-4 rounded-full object-cover shrink-0" onError={(e) => { e.currentTarget.style.display = "none"; }} />
                         <span className="truncate">{selected.page_name}</span>
                       </span>
                     )}
-                    <button onClick={() => setInfoOpen((o) => !o)} className="text-[11px] text-slate-500 flex items-center gap-1 hover:text-indigo-600 shrink-0">
+                    <button onClick={() => setInfoOpen((o) => !o)} className="text-[11px] text-night-ink-2 flex items-center gap-1 hover:text-brand-600 shrink-0">
                       มาจาก {adSources.length ? `แอด ${adSources.length} ตัว` : srcLabel(selected)} <ChevronDown size={12} className={infoOpen ? "rotate-180" : ""} />
                     </button>
                   </div>
                 </div>
-                <button onClick={() => setStatusMenuOpen((o) => !o)} className="p-1.5 text-slate-600 hover:bg-slate-100 rounded md:hidden"><Menu size={20} /></button>
+                <button onClick={() => setStatusMenuOpen((o) => !o)} className="chat-mobile-status p-1.5 text-night-ink-2 hover:bg-night-surface2 rounded md:hidden"><Menu size={20} /></button>
               </div>
 
               {/* แผงรายละเอียดแอด (กดขยายจากหัวแชท) */}
               {infoOpen && (
-                <div className="border-b border-slate-200 p-3 max-h-72 overflow-y-auto bg-slate-50/60 space-y-2">
-                  <div className="text-[11px] text-slate-500">ประเทศ: {selected.country || "ไม่ทราบ"} · ภาษา: {selected.cust_lang || "-"} · {selected.source === "line" ? "LINE User ID" : "FB"} {selected.psid || "-"}</div>
-                  <div className="text-xs text-slate-400">มาจากแอด{adSources.length ? ` (${adSources.length})` : ""}</div>
-                  {adLoading && <div className="text-[11px] text-slate-400">กำลังโหลดข้อมูลแอด...</div>}
-                  {!adLoading && adSources.length === 0 && <div className="text-[11px] text-slate-500">{srcLabel(selected)}</div>}
+                <div className="border-b border-night-border p-3 max-h-72 overflow-y-auto bg-night-surface2/60 space-y-2">
+                  <div className="text-[11px] text-night-ink-2">ประเทศ: {selected.country || "ไม่ทราบ"} · ภาษา: {selected.cust_lang || "-"} · {selected.source === "line" ? "LINE User ID" : "FB"} {selected.psid || "-"}</div>
+                  <div className="text-xs text-night-ink-3">มาจากแอด{adSources.length ? ` (${adSources.length})` : ""}</div>
+                  {adLoading && <div className="text-[11px] text-night-ink-3">กำลังโหลดข้อมูลแอด...</div>}
+                  {!adLoading && adSources.length === 0 && <div className="text-[11px] text-night-ink-2">{srcLabel(selected)}</div>}
                   {adSources.map(renderAd)}
                 </div>
               )}
               {/* แผงปรับสถานะ (แฮมเบอร์เกอร์ — มือถือ) */}
+              {/* แผงปรับสถานะ/ใส่ข้อมูลลูกค้า (มือถือ) — เดิมเป็นแผงที่ดันข้อความแชทลง ต้องเลื่อนไปเลื่อนมา
+                  เปลี่ยนเป็น bottom sheet ลอยทับแชท ปิดแล้วกลับมาที่ตำแหน่งเดิมทันที ไม่เสียตำแหน่งสกอลล์ */}
               {statusMenuOpen && (
-                <div className="border-b border-slate-200 p-3 space-y-2 bg-white md:hidden">
-                  <div className="flex gap-2">
-                    {selected.unread
-                      ? <button onClick={() => setUnread(false)} className="flex-1 text-xs border border-emerald-300 text-emerald-700 rounded-lg px-2 py-1.5">ทำเป็นอ่านแล้ว</button>
-                      : <button onClick={() => setUnread(true)} className="flex-1 text-xs border border-slate-300 text-slate-500 rounded-lg px-2 py-1.5">ทำเป็นยังไม่อ่าน</button>}
+                <div
+                  className="md:hidden fixed inset-0 z-50 bg-black/40 flex items-end"
+                  onMouseDown={(e) => { if (e.target === e.currentTarget) setStatusMenuOpen(false); }}
+                >
+                  <div className="w-full bg-night-surface rounded-t-2xl shadow-2xl max-h-[85vh] overflow-y-auto" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
+                    <div className="sticky top-0 bg-night-surface flex items-center justify-between px-4 py-3 border-b border-night-border">
+                      <span className="font-semibold text-night-ink">ข้อมูล & สถานะลูกค้า</span>
+                      <button onClick={() => setStatusMenuOpen(false)} className="text-night-ink-3 hover:text-night-ink p-1" aria-label="ปิด"><X size={20} /></button>
+                    </div>
+                    <div className="p-3 space-y-2">
+                      <div className="flex gap-2">
+                        {selected.unread
+                          ? <button onClick={() => setUnread(false)} className="flex-1 text-xs border border-emerald-500/40 text-emerald-400 rounded-lg px-2 py-1.5">ทำเป็นอ่านแล้ว</button>
+                          : <button onClick={() => setUnread(true)} className="flex-1 text-xs border border-night-border text-night-ink-2 rounded-lg px-2 py-1.5">ทำเป็นยังไม่อ่าน</button>}
+                      </div>
+                      {/* บันทึกข้อมูลลูกค้าพื้นฐาน (ไอดีเทรด/username/เบอร์/อีเมล) — ทำได้ทุกเพจ
+                          ส่วนเช็คไอดีเทรด + ให้สิทธิ์ TradingView อัตโนมัติ (อยู่ใน CustomerDataForm เอง) ยังทำได้เฉพาะเพจ BeSight
+                          TradeIdChecker (เครื่องมือเช็คไอดีแยกต่างหาก) ก็ผูกกับ BeSight เหมือนเดิม */}
+                      <CustomerDataForm darkMode row={selected} onSaved={(v) => { setSelected((s) => (s ? { ...s, ...v } : s)); setList((l) => (l || []).map((x) => (x.id === selected.id ? { ...x, ...v } : x))); }} />
+                      {isBeSightPage(selected) && <TradeIdChecker darkMode />}
+                      <ConversationInsights />
+                      <button onClick={() => blockCustomer(selected.id, !selected.blocked_at)} disabled={blocking}
+                        className={`w-full text-xs rounded-lg px-2 py-1.5 font-medium flex items-center justify-center gap-1 disabled:opacity-50 ${selected.blocked_at ? "border border-emerald-500/40 text-emerald-400" : "border border-rose-500/40 text-rose-400"}`}>
+                        {blocking ? <Loader2 className="animate-spin" size={13} /> : <AlertTriangle size={13} />} {selected.blocked_at ? "ปลดบล็อก" : "บล็อก (สแปม)"}
+                      </button>
+                    </div>
                   </div>
-                  {isBeSightPage(selected) && <>
-                    <CustomerDataForm row={selected} onSaved={(v) => { setSelected((s) => (s ? { ...s, ...v } : s)); setList((l) => (l || []).map((x) => (x.id === selected.id ? { ...x, ...v } : x))); }} />
-                    <TradeIdChecker />
-                  </>}
-                  <button onClick={() => blockCustomer(selected.id, !selected.blocked_at)} disabled={blocking}
-                    className={`w-full text-xs rounded-lg px-2 py-1.5 font-medium flex items-center justify-center gap-1 disabled:opacity-50 ${selected.blocked_at ? "border border-emerald-300 text-emerald-700" : "border border-rose-200 text-rose-600"}`}>
-                    {blocking ? <Loader2 className="animate-spin" size={13} /> : <AlertTriangle size={13} />} {selected.blocked_at ? "ปลดบล็อก" : "บล็อก (สแปม)"}
-                  </button>
                 </div>
               )}
               {/* แบนเนอร์บอกแพลตฟอร์มและว่าเป็นคอมเมนต์จากโพสต์/แอดไหน */}
               {isCommentChat(selected) && (
-                <div className={`px-3 py-2 border-b text-[11px] shrink-0 ${isInstagramComment(selected) ? "border-fuchsia-200 bg-fuchsia-50" : "border-sky-200 bg-sky-50"}`}>
+                <div className={`px-3 py-2 border-b text-[11px] shrink-0 ${isInstagramComment(selected) ? "border-fuchsia-500/40 bg-fuchsia-500/15" : "border-sky-500/40 bg-sky-500/15"}`}>
                   <div className="flex items-start gap-2">
                     <div className="min-w-0 flex-1 flex flex-wrap items-center gap-1.5">
                       <span className={`px-2 py-0.5 rounded-full text-white font-semibold ${isInstagramComment(selected) ? "bg-gradient-to-r from-fuchsia-600 to-orange-500" : "bg-sky-600"}`}>
                         {isInstagramComment(selected) ? "◎ IG" : "f Facebook"} · {selected.comment_is_ad ? "คอมเมนต์จาก Ads" : "คอมเมนต์จากโพสต์ปกติ"}
                       </span>
-                      <span className="px-2 py-0.5 rounded-full bg-white border border-sky-200 text-sky-800 max-w-full truncate">เพจ: {selected.page_name || selected.page_id}</span>
-                      {selected.comment_is_ad && <span className="px-2 py-0.5 rounded-full bg-white border border-purple-200 text-purple-800 max-w-full truncate">
+                      <span className="px-2 py-0.5 rounded-full bg-night-surface border border-sky-500/40 text-sky-300 max-w-full truncate">เพจ: {selected.page_name || selected.page_id}</span>
+                      {selected.comment_is_ad && <span className="px-2 py-0.5 rounded-full bg-night-surface border border-purple-500/40 text-purple-300 max-w-full truncate">
                         Ads: {(selected.comment_ad_names?.length ? selected.comment_ad_names.join(", ") : selected.comment_ad_name) || "-"}
                       </span>}
-                      {selected.comment_is_ad && <span className="px-2 py-0.5 rounded-full bg-white border border-slate-200 text-slate-600 max-w-full break-all">
+                      {selected.comment_is_ad && <span className="px-2 py-0.5 rounded-full bg-night-surface border border-night-border text-night-ink-2 max-w-full break-all">
                         Ad ID: {(selected.comment_ad_ids?.length ? selected.comment_ad_ids.join(", ") : selected.entry_ad_id) || "-"}
                       </span>}
                     </div>
                   {selected.comment_permalink && (
-                    <a href={selected.comment_permalink} target="_blank" rel="noopener noreferrer" className="shrink-0 text-indigo-600 hover:text-indigo-500 hover:underline inline-flex items-center gap-1 font-medium">
+                    <a href={selected.comment_permalink} target="_blank" rel="noopener noreferrer" className="shrink-0 text-brand-600 hover:text-brand-600 hover:underline inline-flex items-center gap-1 font-medium">
                       {isInstagramComment(selected) ? "Instagram" : "Facebook"} <ArrowUpCircle size={11} className="rotate-45" />
                     </a>
                   )}
                   </div>
-                  <div className="mt-2 inline-flex rounded-lg border border-sky-200 bg-white px-2.5 py-1 font-semibold text-sky-700">ตอบใต้คอมเมนต์</div>
+                  <div className="mt-2 inline-flex rounded-lg border border-sky-500/40 bg-night-surface px-2.5 py-1 font-semibold text-sky-400">ตอบใต้คอมเมนต์</div>
                 </div>
               )}
               {selected.source === "instagram" && (
-                <div className="px-3 py-2 border-b border-fuchsia-200 bg-fuchsia-50 text-[11px] shrink-0 flex items-center gap-2">
+                <div className="px-3 py-2 border-b border-fuchsia-500/40 bg-fuchsia-500/15 text-[11px] shrink-0 flex items-center gap-2">
                   <span className="px-2 py-0.5 rounded-full bg-gradient-to-r from-fuchsia-600 to-orange-500 text-white font-semibold">◎ Instagram DM</span>
-                  <span className="text-fuchsia-800 truncate">บัญชี: {selected.page_name || selected.page_id}</span>
+                  <span className="text-fuchsia-300 truncate">บัญชี: {selected.page_name || selected.page_id}</span>
                 </div>
               )}
               {selected.source === "line" && (
-                <div className="px-3 py-2 border-b border-emerald-200 bg-emerald-50 text-[11px] shrink-0 flex flex-wrap items-center gap-2">
+                <div className="px-3 py-2 border-b border-emerald-500/40 bg-emerald-500/15 text-[11px] shrink-0 flex flex-wrap items-center gap-2">
                   <span className="px-2 py-0.5 rounded-full bg-[#06C755] text-white font-semibold">LINE OA</span>
-                  <span className="text-emerald-800 truncate">บัญชี: {selected.page_name || "LINE Official Account"}</span>
-                  <span className="text-amber-700 md:ml-auto">คำตอบจาก LINE OA Manager ไม่ถูกส่งออกทาง API · ตอบจากแอปนี้เพื่อให้ประวัติครบ</span>
+                  <span className="text-emerald-300 truncate">บัญชี: {selected.page_name || "LINE Official Account"}</span>
+                  <span className="text-amber-400 md:ml-auto">คำตอบจาก LINE OA Manager ไม่ถูกส่งออกทาง API · ตอบจากแอปนี้เพื่อให้ประวัติครบ</span>
                 </div>
               )}
-              <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-slate-50/40">
+              <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-night-surface2/40">
                 {selected.transcript === null ? <Spinner label="กำลังโหลดบทสนทนา..." /> : <>{tItems.map((m, i) => (
                   m.w === "p" ? (
                     <div key={i} data-msg-at={m.at || undefined} data-msg-mid={m.mid || undefined} className={`flex flex-col items-end group ${isHl(m) ? "scroll-mt-20" : ""} ${m.pending ? "opacity-60" : ""}`}>
                       <div className="relative max-w-[80%] flex flex-col items-end">
                         {m.reply_to_text && (
-                          <button type="button" onClick={() => goToReplyTarget(m)} className="mb-1 w-full max-h-32 overflow-y-auto rounded-xl border border-indigo-300/40 bg-slate-900/70 px-3 py-2 text-left text-[11px] leading-relaxed text-slate-300 hover:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-400">
-                            <span className="mb-1 block font-semibold text-indigo-300">↩︎ ตอบกลับ · คลิกเพื่อไปยังข้อความต้นทาง</span>
+                          <button type="button" onClick={() => goToReplyTarget(m)} className="mb-1 w-full max-h-32 overflow-y-auto rounded-xl border border-night-border bg-night-surface px-3 py-2 text-left text-[11px] leading-relaxed text-night-ink-2 hover:border-night-accent/40 focus:outline-none focus:ring-2 focus:ring-brand-500">
+                            <span className="mb-1 block font-semibold text-night-accent-light">↩︎ ตอบกลับ · คลิกเพื่อไปยังข้อความต้นทาง</span>
                             <span className="flex items-start gap-2">
                               {m.reply_to_img && <img src={m.reply_to_img} alt="รูปที่ตอบกลับ" className="h-16 w-16 shrink-0 rounded-lg object-cover" />}
                               <span className="min-w-0 whitespace-pre-wrap break-words">{m.reply_to_text}</span>
@@ -1686,23 +1886,23 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                           : <>
                             <button type="button" onClick={() => openMessageMenu(i, m, "admin")} className="chat-bubble-me block w-full text-left text-white rounded-2xl rounded-br-sm px-3 py-2 text-sm whitespace-pre-wrap break-words shadow-sm focus:outline-none focus:ring-2 focus:ring-amber-300">{m.t}</button>
                             {showTh(m) && (
-                              <div className="text-[11px] text-indigo-300 mt-0.5 px-1 whitespace-pre-wrap break-words text-right">🇹🇭 {thOf(m) || "กำลังแปล..."}</div>
+                              <div className="text-[11px] text-night-accent-light mt-0.5 px-1 whitespace-pre-wrap break-words text-right">🇹🇭 {thOf(m) || "กำลังแปล..."}</div>
                             )}
                           </>}
                         {MSG_REPLY_ENABLED && messageMenu?.index === i && messageMenu?.side === "admin" && (
-                          <div className="absolute right-0 top-full z-30 mt-1 w-52 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
-                            <button onClick={() => { setReplyTo({ text: messageMenu.text, img: messageMenu.img, mid: messageMenu.mid, at: messageMenu.at, side: "admin" }); setMessageMenu(null); }} className="block w-full px-3 py-2.5 text-left text-xs font-medium text-slate-700 hover:bg-slate-50">↩︎ ตอบกลับข้อความนี้</button>
+                          <div className="absolute right-0 top-full z-30 mt-1 w-52 overflow-hidden rounded-xl border border-night-border bg-night-surface shadow-xl">
+                            <button onClick={() => { setReplyTo({ text: messageMenu.text, img: messageMenu.img, mid: messageMenu.mid, at: messageMenu.at, quoteToken: messageMenu.quoteToken, side: "admin" }); setMessageMenu(null); }} className="block w-full px-3 py-2.5 text-left text-xs font-medium text-night-ink hover:bg-night-surface2">↩︎ ตอบกลับข้อความนี้</button>
                           </div>
                         )}
                       </div>
                       {/* ผู้ตอบ: ส่งจากแอปเรารู้อีเมล (m.by) · ตอบจากกล่องข้อความเพจ Meta ไม่ส่งชื่อมา = "ตอบจากเพจ" */}
-                      <div className="text-[10px] text-slate-400 mt-0.5 pr-1 flex items-center gap-1">
-                        <span className="text-emerald-600 font-medium">{m.by || "ตอบจากเพจ"}</span>
+                      <div className="text-[10px] text-night-ink-3 mt-0.5 pr-1 flex items-center gap-1">
+                        <span className="text-emerald-400 font-medium">{m.by || "ตอบจากเพจ"}</span>
                         <span>{fmtMsgTime(m.at)}</span>
                         {m.pending
                           ? <span className="text-amber-500">· กำลังส่ง…</span>
                           : isLastPageMsg(i) && custReadStatus(m) && (
-                            <span className={custReadStatus(m).read ? "text-sky-500" : "text-slate-400"}>· {custReadStatus(m).label}</span>
+                            <span className={custReadStatus(m).read ? "text-sky-500" : "text-night-ink-3"}>· {custReadStatus(m).label}</span>
                           )}
                       </div>
                     </div>
@@ -1710,95 +1910,125 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                     <div key={i} data-msg-at={m.at || undefined} data-msg-mid={m.mid || undefined} className="flex flex-col items-start group scroll-mt-20">
                       {/* ไฮไลต์ข้อความที่ถูกอ้างถึงจากลิสต์หลักฐาน (ตอบช้า/ยังไม่ตอบ) */}
                       {isHl(m) && (
-                        <div className="text-[10px] font-semibold text-amber-600 bg-amber-50 rounded-full px-2 py-0.5 mb-1">
+                        <div className="text-[10px] font-semibold text-amber-400 bg-amber-500/15 rounded-full px-2 py-0.5 mb-1">
                           ⬇ ข้อความนี้คือรอบที่{selected?.awaiting_reply && i === tItems.length - 1 ? "ยังไม่ได้ตอบ" : "ตอบช้า"}
                         </div>
                       )}
                       <div className={`relative max-w-[80%] ${isHl(m) ? "ring-2 ring-amber-400 rounded-2xl" : ""}`}>
                         {m.img
-                          ? <button type="button" onClick={() => setLightbox(m.img)} className="block rounded-2xl focus:outline-none focus:ring-2 focus:ring-indigo-300 cursor-zoom-in" aria-label="ดูรูปขยาย">
+                          ? <button type="button" onClick={() => setLightbox(m.img)} className="block rounded-2xl focus:outline-none focus:ring-2 focus:ring-brand-500 cursor-zoom-in" aria-label="ดูรูปขยาย">
                               {(m.sticker || m.t === "[สติกเกอร์]")
                                 ? <img src={m.img} alt="สติกเกอร์" className="w-40 max-w-full object-contain" />
                                 : <img src={m.img} alt="รูปลูกค้า" className="max-w-full max-h-60 rounded-2xl object-contain" />}
                             </button>
                           : <>
-                              <button type="button" onClick={() => openMessageMenu(i, m, "customer")} className="block w-full text-left bg-white border border-slate-200 rounded-2xl rounded-bl-sm px-3 py-2 text-sm whitespace-pre-wrap break-words text-slate-800 hover:border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-300">{m.t}</button>
+                              <button type="button" onClick={() => openMessageMenu(i, m, "customer")} className="block w-full text-left bg-night-surface border border-night-border rounded-2xl rounded-bl-sm px-3 py-2 text-sm whitespace-pre-wrap break-words text-night-ink hover:border-night-accent/40 focus:outline-none focus:ring-2 focus:ring-brand-500">{m.t}</button>
                               {showTh(m) && (
-                                <div className="text-[11px] text-emerald-700 mt-0.5 px-1 whitespace-pre-wrap break-words">🇹🇭 {thOf(m) || "กำลังแปล..."}</div>
+                                <div className="text-[11px] text-emerald-400 mt-0.5 px-1 whitespace-pre-wrap break-words">🇹🇭 {thOf(m) || "กำลังแปล..."}</div>
                               )}
                             </>}
                         {messageMenu?.index === i && messageMenu?.side === "customer" && (
-                          <div className="absolute left-0 top-full z-30 mt-1 w-56 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl">
-                            {MSG_REPLY_ENABLED && <button onClick={() => { setReplyTo({ text: messageMenu.text, img: messageMenu.img, mid: messageMenu.mid, at: messageMenu.at, side: "customer" }); setMessageMenu(null); }} className="block w-full px-3 py-2.5 text-left text-xs font-medium text-slate-700 hover:bg-slate-50">↩︎ ตอบกลับข้อความนี้</button>}
-                            {!m.img && <button onClick={() => beginKnowledgeCapture(m.t)} className="block w-full border-t border-slate-100 px-3 py-2.5 text-left text-xs font-medium text-indigo-700 hover:bg-indigo-50">บันทึกเข้าคลังคำถาม</button>}
+                          <div className="absolute left-0 top-full z-30 mt-1 w-56 overflow-hidden rounded-xl border border-night-border bg-night-surface shadow-xl">
+                            {MSG_REPLY_ENABLED && <button onClick={() => { setReplyTo({ text: messageMenu.text, img: messageMenu.img, mid: messageMenu.mid, at: messageMenu.at, quoteToken: messageMenu.quoteToken, side: "customer" }); setMessageMenu(null); }} className="block w-full px-3 py-2.5 text-left text-xs font-medium text-night-ink hover:bg-night-surface2">↩︎ ตอบกลับข้อความนี้</button>}
+                            {!m.img && <button onClick={() => beginKnowledgeCapture(m.t)} className="block w-full border-t border-night-border-subtle px-3 py-2.5 text-left text-xs font-medium text-night-accent-light hover:bg-night-accent/15">บันทึกเข้าคลังคำถาม</button>}
                           </div>
                         )}
                       </div>
-                      <div className="text-[10px] text-slate-400 mt-0.5 pl-1">{fmtMsgTime(m.at)}</div>
+                      {/* ชิปบันทึกด่วน — โผล่เมื่อข้อความลูกค้าดูเหมือนไอดีเทรด/username TradingView และยังไม่เคยบันทึกค่านี้ */}
+                      {!m.img && (() => {
+                        const tid = detectTradeIdCandidate(m.t);
+                        const tv = detectTvUsernameCandidate(m.t);
+                        const chips = [];
+                        if (tid && String(selected?.trade_id || "") !== tid) chips.push({ key: `${i}-tid`, field: "trade_id", value: tid, label: `บันทึกเป็นไอดีเทรด: ${tid}` });
+                        if (tv && String(selected?.username || "") !== tv) chips.push({ key: `${i}-tv`, field: "username", value: tv, label: `บันทึกเป็น username TV: ${tv}` });
+                        if (!chips.length) return null;
+                        return (
+                          <div className="flex flex-wrap gap-1.5 mt-1">
+                            {chips.map((c) => {
+                              const st = quickFillState[c.key];
+                              return (
+                                <button
+                                  key={c.key}
+                                  disabled={st === "saving"}
+                                  onClick={() => quickSaveField(c.field, c.value, c.key)}
+                                  className={`text-[11px] font-medium rounded-full px-2.5 py-1 border disabled:opacity-60 ${
+                                    st === "saved" ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-400"
+                                    : st === "error" ? "border-rose-500/40 bg-rose-500/15 text-rose-400"
+                                    : "border-night-accent/40 bg-night-accent/15 text-night-accent-light hover:bg-night-accent/25"
+                                  }`}
+                                >
+                                  {st === "saving" ? "กำลังบันทึก..." : st === "saved" ? `✓ บันทึกแล้ว: ${c.value}` : st === "error" ? "บันทึกไม่สำเร็จ ลองใหม่" : `+ ${c.label}`}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
+                      <div className="text-[10px] text-night-ink-3 mt-0.5 pl-1">{fmtMsgTime(m.at)}</div>
                     </div>
                   )
                 ))}<div ref={bottomRef} /></>}
               </div>
-              {sendMsg && <div className="px-4 py-1.5 text-[11px] text-slate-600 border-t border-slate-100 whitespace-pre-wrap break-words">{sendMsg}</div>}
-              {knowledgeCaptureMsg && !knowledgeCapture && <div className="px-4 py-1.5 text-[11px] font-medium text-emerald-700 border-t border-emerald-100 bg-emerald-50">{knowledgeCaptureMsg}</div>}
-              <div className="p-3 border-t border-slate-200 relative shrink-0" style={{ paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom))" }}>
+              {sendMsg && <div className="px-4 py-1.5 text-[11px] text-night-ink-2 border-t border-night-border-subtle whitespace-pre-wrap break-words">{sendMsg}</div>}
+              {knowledgeCaptureMsg && !knowledgeCapture && <div className="px-4 py-1.5 text-[11px] font-medium text-emerald-400 border-t border-emerald-100 bg-emerald-500/15">{knowledgeCaptureMsg}</div>}
+              <div className="p-3 border-t border-night-border relative shrink-0" style={{ paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom))" }}>
                 <div className="chat-compose-guide flex items-center gap-2 mb-2 flex-wrap rounded-xl px-3 py-2">
                   <div className="text-[11px] font-medium">✦ พิมพ์ไทย — ระบบแปลแล้วส่ง <span className="opacity-60">(Ctrl/⌘+Enter = ส่ง)</span></div>
                   <label className="chat-language-control text-[11px] flex items-center gap-1.5 ml-auto rounded-lg px-2 py-1">
                     <span className="font-semibold">🌐 แปลเป็น</span>
                     <select value={forceLang} onChange={(e) => { setForceLang(e.target.value); if (selected) lsSet(`ui.forceLang.${selected.id}`, e.target.value); }}
-                      className="rounded-md border-0 px-2 py-1 text-[11px] font-semibold bg-white">
+                      className="rounded-md border-0 px-2 py-1 text-[11px] font-semibold bg-night-surface">
                       {LANG_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                     </select>
                   </label>
                   {forceLang === "auto" && selected.cust_lang && <span className="chat-language-hint rounded-full px-2 py-1 text-[10px] font-medium">อ้างอิงภาษาหัวแชท: {selected.cust_lang}</span>}
                 </div>
                 {savedOpen && (
-                  <div className="absolute bottom-full left-3 right-3 mb-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-64 overflow-y-auto z-10 divide-y divide-slate-100">
+                  <div className="absolute bottom-full left-3 right-3 mb-1 bg-night-surface border border-night-border rounded-lg shadow-lg max-h-64 overflow-y-auto z-10 divide-y divide-night-border-subtle">
                     {savedReplies.length === 0 ? (
-                      <div className="px-3 py-3 text-xs text-slate-500">{savedErr ? `ดึงไม่ได้: ${savedErr}` : "เพจนี้ยังไม่มีข้อความตอบกลับที่บันทึกไว้ (หรือ token ยังไม่มีสิทธิ์ pages_messaging)"}</div>
+                      <div className="px-3 py-3 text-xs text-night-ink-2">{savedErr ? `ดึงไม่ได้: ${savedErr}` : "เพจนี้ยังไม่มีข้อความตอบกลับที่บันทึกไว้ (หรือ token ยังไม่มีสิทธิ์ pages_messaging)"}</div>
                     ) : savedReplies.map((s) => (
-                      <button key={s.id} onClick={() => { if (s.message) setReply((r) => (r ? r + "\n" + s.message : s.message)); if (s.image) setPendingFiles((p) => [...p, { url: s.image, name: "saved-image", type: "image", preview: s.image }]); setSavedOpen(false); }} className="w-full text-left px-3 py-2 hover:bg-slate-50 flex gap-2">
-                        {s.image && <img src={s.image} alt="" className="w-9 h-9 rounded object-cover border border-slate-200 shrink-0" />}
+                      <button key={s.id} onClick={() => { if (s.message) setReply((r) => (r ? r + "\n" + s.message : s.message)); if (s.image) setPendingFiles((p) => [...p, { url: s.image, name: "saved-image", type: "image", preview: s.image }]); setSavedOpen(false); }} className="w-full text-left px-3 py-2 hover:bg-night-surface2 flex gap-2">
+                        {s.image && <img src={s.image} alt="" className="w-9 h-9 rounded object-cover border border-night-border shrink-0" />}
                         <div className="min-w-0">
-                          <div className="text-xs font-medium text-slate-700 truncate">{s.title || "(ไม่มีชื่อ)"}</div>
-                          <div className="text-[11px] text-slate-500 line-clamp-2 whitespace-pre-wrap break-words">{s.message}</div>
+                          <div className="text-xs font-medium text-night-ink truncate">{s.title || "(ไม่มีชื่อ)"}</div>
+                          <div className="text-[11px] text-night-ink-2 line-clamp-2 whitespace-pre-wrap break-words">{s.message}</div>
                         </div>
                       </button>
                     ))}
                   </div>
                 )}
                 {knowledgeOpen && (
-                  <div className="absolute bottom-full left-3 right-3 mb-1 bg-white border border-slate-200 rounded-xl shadow-xl max-h-80 overflow-hidden z-20 flex flex-col">
-                    <div className="p-2 border-b border-slate-100 flex gap-2">
-                      <input value={knowledgeQuery} onChange={(e) => setKnowledgeQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") searchKnowledge(); }} placeholder="ค้นหาคำถามหรือคำตอบเก่า..." className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-xs" />
-                      <button onClick={() => searchKnowledge()} disabled={knowledgeLoading} className="rounded-lg bg-slate-900 text-white px-3 text-xs disabled:opacity-50">{knowledgeLoading ? "ค้นหา..." : "ค้นหา"}</button>
-                      <button onClick={() => setKnowledgeOpen(false)} className="text-slate-400 px-1"><X size={16} /></button>
+                  <div className="absolute bottom-full left-3 right-3 mb-1 bg-night-surface border border-night-border rounded-xl shadow-xl max-h-80 overflow-hidden z-20 flex flex-col">
+                    <div className="p-2 border-b border-night-border-subtle flex gap-2">
+                      <input value={knowledgeQuery} onChange={(e) => setKnowledgeQuery(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") searchKnowledge(); }} placeholder="ค้นหาคำถามหรือคำตอบเก่า..." className="flex-1 rounded-lg border border-night-border px-3 py-2 text-xs" />
+                      <button onClick={() => searchKnowledge()} disabled={knowledgeLoading} className="rounded-lg bg-brand-600 text-white px-3 text-xs disabled:opacity-50">{knowledgeLoading ? "ค้นหา..." : "ค้นหา"}</button>
+                      <button onClick={() => setKnowledgeOpen(false)} className="text-night-ink-3 px-1"><X size={16} /></button>
                     </div>
-                    <div className="overflow-y-auto divide-y divide-slate-100">
-                      {knowledgeErr && <div className="p-3 text-xs text-rose-600">{knowledgeErr}</div>}
-                      {!knowledgeLoading && !knowledgeErr && knowledgeResults.length === 0 && <div className="p-4 text-xs text-slate-400 text-center">ยังไม่พบคำตอบที่อนุมัติแล้ว</div>}
+                    <div className="overflow-y-auto divide-y divide-night-border-subtle">
+                      {knowledgeErr && <div className="p-3 text-xs text-rose-400">{knowledgeErr}</div>}
+                      {!knowledgeLoading && !knowledgeErr && knowledgeResults.length === 0 && <div className="p-4 text-xs text-night-ink-3 text-center">ยังไม่พบคำตอบที่อนุมัติแล้ว</div>}
                       {knowledgeResults.map((item) => (
                         <button key={item.id} onClick={() => {
                           setReply((r) => r ? `${r}\n${item.answer}` : item.answer);
                           setKnowledgeOpen(false);
                           supabase.functions.invoke("knowledge-base", { body: { action: "used", page_id: selected.page_id, id: item.id } });
-                        }} className="w-full text-left p-3 hover:bg-slate-50">
-                          <div className="text-xs font-medium text-slate-700 whitespace-pre-wrap">KW: {item.question}</div>
-                          <div className="text-xs text-emerald-700 mt-1 whitespace-pre-wrap">A: {item.answer}</div>
-                          <div className="text-[10px] text-slate-400 mt-1">เคยใช้ {item.use_count || 0} ครั้ง</div>
+                        }} className="w-full text-left p-3 hover:bg-night-surface2">
+                          <div className="text-xs font-medium text-night-ink whitespace-pre-wrap">KW: {item.question}</div>
+                          <div className="text-xs text-emerald-400 mt-1 whitespace-pre-wrap">A: {item.answer}</div>
+                          <div className="text-[10px] text-night-ink-3 mt-1">เคยใช้ {item.use_count || 0} ครั้ง</div>
                         </button>
                       ))}
                     </div>
                   </div>
                 )}
                 {replyTo && (
-                  <div className="flex items-start justify-between gap-2 bg-slate-100 rounded-lg px-3 py-2 mb-1 text-xs">
+                  <div className="flex items-start justify-between gap-2 bg-night-surface2 rounded-lg px-3 py-2 mb-1 text-xs">
                     <div className="min-w-0 flex items-start gap-2">
                       {replyTo.img && <img src={replyTo.img} alt="รูปที่อ้างอิง" className="h-10 w-10 shrink-0 rounded-md object-cover" />}
-                      <span className="text-slate-600 whitespace-pre-wrap break-words line-clamp-3">↩︎ ตอบกลับ: {String(replyTo.text)}</span>
+                      <span className="text-night-ink-2 whitespace-pre-wrap break-words line-clamp-3">↩︎ ตอบกลับ: {String(replyTo.text)}</span>
                     </div>
-                    <button onClick={() => setReplyTo(null)} className="text-slate-400 hover:text-slate-700 shrink-0"><X size={14} /></button>
+                    <button onClick={() => setReplyTo(null)} className="text-night-ink-3 hover:text-night-ink shrink-0"><X size={14} /></button>
                   </div>
                 )}
                 {/* รูป/ไฟล์ที่พักไว้รอส่ง — ลบได้ */}
@@ -1807,78 +2037,81 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                     {pendingFiles.map((pf, idx) => (
                       <div key={idx} className="relative group">
                         {pf.preview
-                          ? <img src={pf.preview} alt="" className="w-16 h-16 rounded-lg object-cover border border-slate-200" />
-                          : <div className="w-16 h-16 rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-center text-[9px] text-slate-500 text-center p-1 break-all">{pf.name}</div>}
+                          ? <img src={pf.preview} alt="" className="w-16 h-16 rounded-lg object-cover border border-night-border" />
+                          : <div className="w-16 h-16 rounded-lg border border-night-border bg-night-surface2 flex items-center justify-center text-[9px] text-night-ink-2 text-center p-1 break-all">{pf.name}</div>}
                         <button onClick={() => removePending(idx)} className="absolute -top-1.5 -right-1.5 bg-rose-500 text-white rounded-full w-5 h-5 flex items-center justify-center shadow" title="ลบ"><X size={12} /></button>
                       </div>
                     ))}
                   </div>
                 )}
-                <div className="chat-tool-row flex flex-wrap items-center gap-1.5 mb-2 relative overflow-visible pb-1">
-                  {MSG_EMOJI_ENABLED && <button onClick={() => setEmojiOpen((o) => !o)} className={`chat-tool-button chat-tool-emoji ${emojiOpen ? "is-active" : ""}`} title="อิโมจิ (แทรกในข้อความ)"><span className="text-base leading-none">😊</span><span>อีโมจิ</span></button>}
-                  <button onClick={() => fileInputRef.current?.click()} disabled={isCommentChat(selected)} className="chat-tool-button chat-tool-attach disabled:opacity-30" title={isCommentChat(selected) ? "การตอบใต้คอมเมนต์ไม่รองรับไฟล์แนบ" : "แนบไฟล์/รูป"}><Paperclip size={16} /><span>แนบไฟล์</span></button>
-                  <input ref={fileInputRef} type="file" multiple className="hidden" onChange={onFile} accept="image/*,video/*,application/pdf" />
-                  <button onClick={() => setSavedOpen((o) => !o)} className={`chat-tool-button chat-tool-saved ${savedOpen ? "is-active" : ""}`} title="ข้อความตอบกลับที่บันทึกไว้"><MessageSquare size={16} /><span>ข้อความบันทึก</span><b>{savedReplies.length}</b></button>
-                  <button onClick={openKnowledgeSearch} className={`chat-tool-button chat-tool-knowledge ${knowledgeOpen ? "is-active" : ""}`} title="ค้นหาคำตอบเก่าที่อนุมัติแล้ว"><Search size={16} /><span>คลังคำตอบ</span></button>
+                <div className="relative">
+                  <div className="flex items-end gap-2 rounded-lg border border-night-border bg-night-surface2 overflow-hidden pr-1.5 py-1.5">
+                    <textarea value={reply} onChange={(e) => { setReply(e.target.value); setSendPreview(null); }} onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) prepareSendPreview(); }} rows={2} placeholder="พิมพ์คำตอบเป็นไทย..." className="flex-1 bg-transparent border-0 px-3 py-1 text-sm resize-none focus:outline-none" />
+                    <button onClick={prepareSendPreview} disabled={sending || (!reply.trim() && pendingFiles.length === 0)} className="bg-night-accent text-white rounded-md px-3.5 py-2 text-sm font-semibold disabled:opacity-50 flex items-center gap-1.5 shrink-0 self-end">
+                      {sending ? <Loader2 className="animate-spin" size={15} /> : (!reply.trim() && pendingFiles.length > 0) ? <ArrowUpCircle size={15} /> : <Send size={15} />} {(!reply.trim() && pendingFiles.length > 0) ? "ส่งรูป" : "ส่ง"}
+                    </button>
+                  </div>
                   {MSG_EMOJI_ENABLED && emojiOpen && (
-                    <div className="absolute bottom-full left-0 z-40 mb-2 w-[min(360px,calc(100vw-2rem))] overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl">
+                    <div className="absolute bottom-full left-0 z-40 mb-2 w-[min(360px,calc(100vw-2rem))] overflow-hidden rounded-xl border border-night-border bg-night-surface shadow-2xl">
                       <React.Suspense fallback={<Spinner label="กำลังโหลดอิโมจิ..." />}>
                         <EmojiPicker theme="dark" emojiStyle="facebook" width="100%" height={390} lazyLoadEmojis searchPlaceHolder="ค้นหาอิโมจิ..." previewConfig={{ showPreview: false }} onEmojiClick={(emojiData) => { setReply((current) => current + emojiData.emoji); setSendPreview(null); }} />
                       </React.Suspense>
                     </div>
                   )}
                 </div>
-                <div className="flex items-end gap-2">
-                  <textarea value={reply} onChange={(e) => { setReply(e.target.value); setSendPreview(null); }} onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) prepareSendPreview(); }} rows={2} placeholder="พิมพ์คำตอบเป็นไทย..." className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm resize-none" />
-                  <button onClick={prepareSendPreview} disabled={sending || (!reply.trim() && pendingFiles.length === 0)} className="ds-btn-primary text-white rounded-xl px-4 py-2 text-sm font-semibold disabled:opacity-50 flex items-center gap-1.5 shrink-0">
-                    {sending ? <Loader2 className="animate-spin" size={15} /> : (!reply.trim() && pendingFiles.length > 0) ? <ArrowUpCircle size={15} /> : <Eye size={15} />} {(!reply.trim() && pendingFiles.length > 0) ? "ส่งรูป" : "ตัวอย่าง"}
-                  </button>
+                <div className="chat-tool-row flex flex-wrap items-center gap-1.5 mt-2 relative overflow-visible">
+                  {MSG_EMOJI_ENABLED && <button onClick={() => setEmojiOpen((o) => !o)} className={`chat-tool-button chat-tool-emoji ${emojiOpen ? "is-active" : ""}`} title="อิโมจิ (แทรกในข้อความ)"><span className="text-base leading-none">😊</span><span>อีโมจิ</span></button>}
+                  <button onClick={() => fileInputRef.current?.click()} disabled={isCommentChat(selected)} className="chat-tool-button chat-tool-attach disabled:opacity-30" title={isCommentChat(selected) ? "การตอบใต้คอมเมนต์ไม่รองรับไฟล์แนบ" : "แนบไฟล์/รูป"}><Paperclip size={16} /><span>แนบไฟล์</span></button>
+                  <input ref={fileInputRef} type="file" multiple className="hidden" onChange={onFile} accept="image/*,video/*,application/pdf" />
+                  <button onClick={() => setSavedOpen((o) => !o)} className={`chat-tool-button chat-tool-saved ${savedOpen ? "is-active" : ""}`} title="ข้อความตอบกลับที่บันทึกไว้"><MessageSquare size={16} /><span>ข้อความบันทึก</span><b>{savedReplies.length}</b></button>
+                  <button onClick={openKnowledgeSearch} className={`chat-tool-button chat-tool-knowledge ${knowledgeOpen ? "is-active" : ""}`} title="ค้นหาคำตอบเก่าที่อนุมัติแล้ว"><Search size={16} /><span>คลังคำตอบ</span></button>
+                  <span className="ml-auto text-[10px] text-night-ink-3 font-mono hidden sm:inline">Ctrl+↵ ส่ง</span>
                 </div>
               </div>
               {knowledgeCapture && (
                 <div className="fixed inset-0 z-[90] bg-black/60 flex items-center justify-center p-4" onMouseDown={(e) => { if (e.target === e.currentTarget && !knowledgeCaptureSaving) setKnowledgeCapture(null); }}>
-                  <div className="w-full max-w-xl max-h-[85dvh] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl flex flex-col">
-                    <div className="flex items-start justify-between gap-3 border-b border-slate-100 p-4">
+                  <div className="w-full max-w-xl max-h-[85dvh] overflow-hidden rounded-2xl border border-night-border bg-night-surface shadow-2xl flex flex-col">
+                    <div className="flex items-start justify-between gap-3 border-b border-night-border-subtle p-4">
                       <div>
-                        <div className="font-semibold text-slate-800">บันทึกเข้าคลังคำถาม</div>
-                        <div className="text-xs text-slate-500 mt-0.5">เพจ: {selected.page_name || selected.page_id} · ขั้นตอน {knowledgeCapture.step === "question" ? "1/2 กำหนดคำค้น" : "2/2 เลือกคำตอบของแอดมิน"}</div>
+                        <div className="font-semibold text-night-ink">บันทึกเข้าคลังคำถาม</div>
+                        <div className="text-xs text-night-ink-2 mt-0.5">เพจ: {selected.page_name || selected.page_id} · ขั้นตอน {knowledgeCapture.step === "question" ? "1/2 กำหนดคำค้น" : "2/2 เลือกคำตอบของแอดมิน"}</div>
                       </div>
-                      <button onClick={() => setKnowledgeCapture(null)} disabled={knowledgeCaptureSaving} className="p-1 text-slate-400 hover:text-slate-700 disabled:opacity-50"><X size={18} /></button>
+                      <button onClick={() => setKnowledgeCapture(null)} disabled={knowledgeCaptureSaving} className="p-1 text-night-ink-3 hover:text-night-ink disabled:opacity-50"><X size={18} /></button>
                     </div>
                     {knowledgeCapture.step === "question" ? (
                       <div className="p-4 space-y-3">
-                        <label className="block text-xs text-slate-600">คำค้น / Keywords
-                          <textarea autoFocus rows={5} value={knowledgeCapture.question} onChange={(e) => setKnowledgeCapture((current) => ({ ...current, question: e.target.value }))} className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-800 resize-y" />
-                          <span className="mt-1 block text-[10px] text-slate-400">ปรับให้เหลือคำหรือวลีสำคัญ เช่น เปิดบัญชีเพิ่ม, เพิ่มบัญชี XM</span>
+                        <label className="block text-xs text-night-ink-2">คำค้น / Keywords
+                          <textarea autoFocus rows={5} value={knowledgeCapture.question} onChange={(e) => setKnowledgeCapture((current) => ({ ...current, question: e.target.value }))} className="mt-1 w-full rounded-xl border border-night-border px-3 py-2 text-sm text-night-ink resize-y" />
+                          <span className="mt-1 block text-[10px] text-night-ink-3">ปรับให้เหลือคำหรือวลีสำคัญ เช่น เปิดบัญชีเพิ่ม, เพิ่มบัญชี XM</span>
                         </label>
                         <div className="flex justify-end gap-2">
-                          <button onClick={() => setKnowledgeCapture(null)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-600">ยกเลิก</button>
-                          <button onClick={() => setKnowledgeCapture((current) => ({ ...current, step: "answer" }))} disabled={!knowledgeCapture.question.trim()} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">ตกลง เลือกคำตอบ</button>
+                          <button onClick={() => setKnowledgeCapture(null)} className="rounded-lg border border-night-border px-4 py-2 text-sm text-night-ink-2">ยกเลิก</button>
+                          <button onClick={() => setKnowledgeCapture((current) => ({ ...current, step: "answer" }))} disabled={!knowledgeCapture.question.trim()} className="rounded-lg bg-night-accent/15 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">ตกลง เลือกคำตอบ</button>
                         </div>
                       </div>
                     ) : (
                       <>
                         <div className="overflow-y-auto p-4 space-y-2">
-                          <div className="rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 text-xs text-indigo-800 whitespace-pre-wrap"><span className="font-semibold">คำค้น:</span> {knowledgeCapture.question}</div>
-                          <div className="text-xs font-medium text-slate-600 pt-1">เลือกข้อความที่แอดมินตอบเพื่อใช้เป็นคำตอบ</div>
-                          {tItems.filter((message) => message.w === "p" && !message.img && String(message.t || "").trim()).length === 0 && <div className="rounded-lg border border-slate-200 p-4 text-center text-xs text-slate-400">ยังไม่มีข้อความคำตอบจากแอดมินในแชทนี้</div>}
+                          <div className="rounded-lg border border-brand-100 bg-night-accent/15 px-3 py-2 text-xs text-brand-800 whitespace-pre-wrap"><span className="font-semibold">คำค้น:</span> {knowledgeCapture.question}</div>
+                          <div className="text-xs font-medium text-night-ink-2 pt-1">เลือกข้อความที่แอดมินตอบเพื่อใช้เป็นคำตอบ</div>
+                          {tItems.filter((message) => message.w === "p" && !message.img && String(message.t || "").trim()).length === 0 && <div className="rounded-lg border border-night-border p-4 text-center text-xs text-night-ink-3">ยังไม่มีข้อความคำตอบจากแอดมินในแชทนี้</div>}
                           {tItems
                             .map((message, index) => ({ message, index }))
                             .filter(({ message }) => message.w === "p" && !message.img && String(message.t || "").trim())
                             .reverse()
                             .map(({ message: answerMessage, index: answerIndex }, displayIndex) => (
-                              <button key={answerIndex} onClick={() => setKnowledgeCapture((current) => ({ ...current, answer: answerMessage.t, answerIndex }))} className={`w-full rounded-xl border p-3 text-left transition-colors ${knowledgeCapture.answerIndex === answerIndex ? "border-emerald-500 bg-emerald-50 ring-1 ring-emerald-400" : "border-slate-200 hover:border-indigo-300 hover:bg-slate-50"}`}>
+                              <button key={answerIndex} onClick={() => setKnowledgeCapture((current) => ({ ...current, answer: answerMessage.t, answerIndex }))} className={`w-full rounded-xl border p-3 text-left transition-colors ${knowledgeCapture.answerIndex === answerIndex ? "border-emerald-500 bg-emerald-500/15 ring-1 ring-emerald-400" : "border-night-border hover:border-night-accent/40 hover:bg-night-surface2"}`}>
                                 <div className="flex items-start justify-between gap-2">
-                                  <div className="text-sm text-slate-800 whitespace-pre-wrap break-words">{answerMessage.t}</div>
-                                  {displayIndex === 0 && <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700">ล่าสุด</span>}
+                                  <div className="text-sm text-night-ink whitespace-pre-wrap break-words">{answerMessage.t}</div>
+                                  {displayIndex === 0 && <span className="shrink-0 rounded-full bg-amber-500/25 px-2 py-0.5 text-[10px] font-semibold text-amber-400">ล่าสุด</span>}
                                 </div>
-                                <div className="mt-1 text-[10px] text-slate-400">{answerMessage.by || "ตอบจากเพจ"} · {fmtMsgTime(answerMessage.at)}</div>
+                                <div className="mt-1 text-[10px] text-night-ink-3">{answerMessage.by || "ตอบจากเพจ"} · {fmtMsgTime(answerMessage.at)}</div>
                               </button>
                             ))}
-                          {knowledgeCaptureMsg && <div className="text-xs text-rose-600">{knowledgeCaptureMsg}</div>}
+                          {knowledgeCaptureMsg && <div className="text-xs text-rose-400">{knowledgeCaptureMsg}</div>}
                         </div>
-                        <div className="flex justify-between gap-2 border-t border-slate-100 p-4">
-                          <button onClick={() => setKnowledgeCapture((current) => ({ ...current, step: "question" }))} disabled={knowledgeCaptureSaving} className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-600 disabled:opacity-50">ย้อนกลับ</button>
+                        <div className="flex justify-between gap-2 border-t border-night-border-subtle p-4">
+                          <button onClick={() => setKnowledgeCapture((current) => ({ ...current, step: "question" }))} disabled={knowledgeCaptureSaving} className="rounded-lg border border-night-border px-4 py-2 text-sm text-night-ink-2 disabled:opacity-50">ย้อนกลับ</button>
                           <button onClick={saveKnowledgeCapture} disabled={knowledgeCaptureSaving || !knowledgeCapture.answer?.trim()} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50 flex items-center gap-1.5">
                             {knowledgeCaptureSaving && <Loader2 className="animate-spin" size={15} />} บันทึกเข้าคลัง
                           </button>
@@ -1890,30 +2123,30 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
               )}
               {sendPreview && (
                 <div className="fixed inset-0 z-[80] bg-black/60 flex items-center justify-center p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) setSendPreview(null); }}>
-                  <div className="w-full max-w-xl rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl space-y-3">
+                  <div className="w-full max-w-xl rounded-2xl border border-night-border bg-night-surface p-4 shadow-2xl space-y-3">
                     <div className="flex items-center justify-between gap-3">
                       <div>
-                        <div className="font-semibold text-slate-800">ตรวจข้อความก่อนส่ง</div>
-                        <div className="text-xs text-slate-500">ภาษาที่จะส่ง: {sendPreview.lang || selected.cust_lang || "-"} · แก้ไขข้อความปลายทางได้</div>
+                        <div className="font-semibold text-night-ink">ตรวจข้อความก่อนส่ง</div>
+                        <div className="text-xs text-night-ink-2">ภาษาที่จะส่ง: {sendPreview.lang || selected.cust_lang || "-"} · แก้ไขข้อความปลายทางได้</div>
                       </div>
-                      <button onClick={() => setSendPreview(null)} className="p-1 text-slate-400 hover:text-slate-700"><X size={18} /></button>
+                      <button onClick={() => setSendPreview(null)} className="p-1 text-night-ink-3 hover:text-night-ink"><X size={18} /></button>
                     </div>
                     {sendPreview.sourceText && sendPreview.sourceText !== sendPreview.text && (
-                      <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-xs text-slate-600 whitespace-pre-wrap"><span className="font-semibold">ต้นฉบับไทย:</span> {sendPreview.sourceText}</div>
+                      <div className="rounded-lg bg-night-surface2 border border-night-border px-3 py-2 text-xs text-night-ink-2 whitespace-pre-wrap"><span className="font-semibold">ต้นฉบับไทย:</span> {sendPreview.sourceText}</div>
                     )}
                     {sendPreview.replyTo && (
-                      <div className="rounded-xl border border-indigo-200 bg-indigo-50/80 px-3 py-2.5">
-                        <div className="mb-1 text-xs font-semibold text-indigo-700">↩︎ ข้อความที่ตอบกลับ</div>
+                      <div className="rounded-xl border border-night-accent/40 bg-night-accent/15/80 px-3 py-2.5">
+                        <div className="mb-1 text-xs font-semibold text-night-accent-light">↩︎ ข้อความที่ตอบกลับ</div>
                         <div className="flex items-start gap-2">
                           {sendPreview.replyTo.img && <img src={sendPreview.replyTo.img} alt="รูปที่ตอบกลับ" className="h-16 w-16 shrink-0 rounded-lg object-cover" />}
-                          <div className="max-h-48 min-w-0 flex-1 overflow-y-auto whitespace-pre-wrap break-words text-xs leading-relaxed text-slate-700">{sendPreview.replyTo.text}</div>
+                          <div className="max-h-48 min-w-0 flex-1 overflow-y-auto whitespace-pre-wrap break-words text-xs leading-relaxed text-night-ink">{sendPreview.replyTo.text}</div>
                         </div>
                       </div>
                     )}
-                    <textarea value={sendPreview.text} onChange={(e) => setSendPreview((p) => ({ ...p, text: e.target.value }))} rows={6} className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm resize-y" autoFocus />
-                    {pendingFiles.length > 0 && <div className="text-xs text-slate-500">ไฟล์แนบที่รอส่ง: {pendingFiles.length} รายการ</div>}
+                    <textarea value={sendPreview.text} onChange={(e) => setSendPreview((p) => ({ ...p, text: e.target.value }))} rows={6} className="w-full rounded-xl border border-night-border px-3 py-2 text-sm resize-y" autoFocus />
+                    {pendingFiles.length > 0 && <div className="text-xs text-night-ink-2">ไฟล์แนบที่รอส่ง: {pendingFiles.length} รายการ</div>}
                     <div className="flex justify-end gap-2">
-                      <button onClick={() => setSendPreview(null)} className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-600">กลับไปแก้ไข</button>
+                      <button onClick={() => setSendPreview(null)} className="rounded-lg border border-night-border px-4 py-2 text-sm text-night-ink-2">กลับไปแก้ไข</button>
                       <button onClick={() => sendReply(sendPreview)} disabled={sending || (!sendPreview.text.trim() && pendingFiles.length === 0)} className="ds-btn-primary rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-50 flex items-center gap-1.5">
                         {sending ? <Loader2 className="animate-spin" size={15} /> : <CheckCircle2 size={15} />} อนุมัติและส่ง
                       </button>
@@ -1927,51 +2160,50 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
 
         {/* ขวา: ข้อมูล + สถานะ (เดสก์ท็อปเท่านั้น — มือถือใช้แผงขยาย/แฮมเบอร์เกอร์) */}
         {selected && (
-          <div className="hidden md:block md:w-64 border-l border-slate-200 p-4 space-y-4 shrink-0 overflow-y-auto">
+          <div className="chat-customer-panel hidden md:block md:w-[280px] xl:w-[320px] border-l border-night-border p-3 space-y-3 shrink-0 overflow-y-auto">
             <div className="flex items-center gap-3">
-              <div className="w-12 h-12 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center text-lg font-semibold shrink-0 relative overflow-hidden">
+              <div className="w-12 h-12 rounded-full bg-night-accent/25 text-brand-600 flex items-center justify-center text-lg font-semibold shrink-0 relative overflow-hidden">
                 <span>{initial(selected.customer_name)}</span>
                 {selected.profile_pic && <img src={selected.profile_pic} alt="" className="absolute inset-0 w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display = "none"; }} />}
               </div>
               <div className="min-w-0">
-                <div className="text-xs text-slate-400">ลูกค้า</div>
-                <div className="font-medium text-slate-800 truncate">{selected.customer_name || "-"}</div>
-                <div className="text-[10px] text-slate-400 break-all">{selected.source === "line" ? "LINE" : "FB"} {selected.psid || "-"}</div>
+                <div className="text-xs text-night-ink-3">ลูกค้า</div>
+                <div className="font-medium text-night-ink truncate">{selected.customer_name || "-"}</div>
+                <div className="text-[10px] text-night-ink-3 break-all">{selected.source === "line" ? "LINE" : "FB"} {selected.psid || "-"}</div>
               </div>
             </div>
             <div className="text-xs space-y-1.5">
-              <div><span className="text-slate-400">ประเทศ:</span> <span className="text-slate-700">{selected.country || "ไม่ทราบ"}</span></div>
-              <div><span className="text-slate-400">ภาษา:</span> <span className="text-slate-700">{selected.cust_lang || "-"}</span></div>
+              <div><span className="text-night-ink-3">ประเทศ:</span> <span className="text-night-ink">{selected.country || "ไม่ทราบ"}</span></div>
+              <div><span className="text-night-ink-3">ภาษา:</span> <span className="text-night-ink">{selected.cust_lang || "-"}</span></div>
             </div>
             {/* มาจากแอด — โชว์ทุกแอดที่ลูกค้าทักเข้ามา พร้อมรายละเอียด + รูป/วิดีโอ */}
             <div className="space-y-2">
-              <div className="text-xs text-slate-400">มาจากแอด{adSources.length ? ` (${adSources.length})` : ""}</div>
-              {adLoading && <div className="text-[11px] text-slate-400">กำลังโหลดข้อมูลแอด...</div>}
-              {!adLoading && adSources.length === 0 && <div className="text-[11px] text-slate-500">{srcLabel(selected)}</div>}
+              <div className="text-xs text-night-ink-3">มาจากแอด{adSources.length ? ` (${adSources.length})` : ""}</div>
+              {adLoading && <div className="text-[11px] text-night-ink-3">กำลังโหลดข้อมูลแอด...</div>}
+              {!adLoading && adSources.length === 0 && <div className="text-[11px] text-night-ink-2">{srcLabel(selected)}</div>}
               {adSources.map((ad) => (
-                <div key={ad.ad_id} className="rounded-lg border border-slate-200 overflow-hidden bg-slate-50/50">
+                <div key={ad.ad_id} className="rounded-lg border border-night-border overflow-hidden bg-night-surface2/50">
                   {ad.media_url && (ad.media_type === "video"
                     ? <video src={ad.media_url} poster={ad.thumb_url || undefined} controls className="w-full max-h-40 object-cover bg-black" />
                     : <img src={ad.media_url} alt="" className="w-full max-h-40 object-cover" />)}
                   <div className="p-2 space-y-0.5">
-                    {ad.error ? <div className="text-[11px] text-slate-400">โหลดรายละเอียดแอดไม่ได้ — แอดอาจถูกลบ หรือไม่มีสิทธิ์เข้าถึงบัญชีโฆษณานี้</div> : (
+                    {ad.error ? <div className="text-[11px] text-night-ink-3">โหลดรายละเอียดแอดไม่ได้ — แอดอาจถูกลบ หรือไม่มีสิทธิ์เข้าถึงบัญชีโฆษณานี้</div> : (
                       <>
-                        <div className="text-[11px] text-slate-500">แคมเปญ: <span className="text-slate-700">{ad.campaign_name || "-"}</span></div>
-                        <div className="text-[11px] text-slate-500">ชุดโฆษณา: <span className="text-slate-700">{ad.adset_name || "-"}</span></div>
-                        <div className="text-[11px] text-slate-500">โฆษณา: <span className="text-slate-700">{ad.name || "-"}</span></div>
+                        <div className="text-[11px] text-night-ink-2">แคมเปญ: <span className="text-night-ink">{ad.campaign_name || "-"}</span></div>
+                        <div className="text-[11px] text-night-ink-2">ชุดโฆษณา: <span className="text-night-ink">{ad.adset_name || "-"}</span></div>
+                        <div className="text-[11px] text-night-ink-2">โฆษณา: <span className="text-night-ink">{ad.name || "-"}</span></div>
                       </>
                     )}
-                    <div className="text-[10px] text-slate-400 break-all">ad_id: {ad.ad_id}</div>
+                    <div className="text-[10px] text-night-ink-3 break-all">ad_id: {ad.ad_id}</div>
                   </div>
                 </div>
               ))}
             </div>
-            {isBeSightPage(selected) && <>
-              <CustomerDataForm row={selected} onSaved={(v) => { setSelected((s) => (s ? { ...s, ...v } : s)); setList((l) => (l || []).map((x) => (x.id === selected.id ? { ...x, ...v } : x))); }} />
-              <TradeIdChecker />
-            </>}
+            <CustomerDataForm darkMode row={selected} onSaved={(v) => { setSelected((s) => (s ? { ...s, ...v } : s)); setList((l) => (l || []).map((x) => (x.id === selected.id ? { ...x, ...v } : x))); }} />
+            {isBeSightPage(selected) && <TradeIdChecker darkMode />}
+            <ConversationInsights />
             <button onClick={() => blockCustomer(selected.id, !selected.blocked_at)} disabled={blocking}
-              className={`w-full rounded-lg px-3 py-2 text-sm font-medium flex items-center justify-center gap-1.5 disabled:opacity-50 ${selected.blocked_at ? "border border-emerald-300 text-emerald-700 hover:bg-emerald-50" : "border border-rose-200 text-rose-600 hover:bg-rose-50"}`}>
+              className={`w-full rounded-lg px-3 py-2 text-sm font-medium flex items-center justify-center gap-1.5 disabled:opacity-50 ${selected.blocked_at ? "border border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/15" : "border border-rose-500/40 text-rose-400 hover:bg-rose-500/15"}`}>
               {blocking ? <Loader2 className="animate-spin" size={14} /> : <AlertTriangle size={14} />} {selected.blocked_at ? "ปลดบล็อก" : "บล็อก (สแปม)"}
             </button>
           </div>

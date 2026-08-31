@@ -1,9 +1,11 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { ImageIcon, Loader2, Sparkles, Wand2, CheckCircle2, XCircle, Trash2 } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { readFunctionErrorMessage } from "@/lib/utils/errors";
+import { Badge, Button, Card, EmptyState, SectionTitle } from "@/components/ui";
 
 // ---------------------------------------------------------------
 // Review (approval) tab
@@ -20,7 +22,7 @@ function CopyCard({ item, selected, onToggle }) {
     <div
       onClick={() => onToggle(item.id)}
       className={`rounded-xl border p-3 cursor-pointer transition ${
-        selected ? "border-slate-900 bg-slate-50 ring-1 ring-slate-900" : "border-slate-200 bg-white hover:border-slate-300"
+        selected ? "border-brand-600 bg-slate-50 ring-1 ring-brand-600" : "border-slate-200 bg-white hover:border-slate-300"
       }`}
     >
       <div className="flex items-start justify-between gap-2">
@@ -39,7 +41,7 @@ function ImageCard({ item, selected, onToggle }) {
     <div
       onClick={() => onToggle(item.id)}
       className={`rounded-xl border overflow-hidden cursor-pointer transition ${
-        selected ? "border-slate-900 ring-1 ring-slate-900" : "border-slate-200 hover:border-slate-300"
+        selected ? "border-brand-600 ring-1 ring-brand-600" : "border-slate-200 hover:border-slate-300"
       }`}
     >
       <div className="aspect-square bg-slate-100 flex items-center justify-center relative">
@@ -226,13 +228,46 @@ function ReviewTab({ adCopies, adImages, onChanged, brandConfig }) {
     handleRejectMany(kind, ids);
   }
 
+  // หัวข้อหน้าต้องอยู่ทั้งตอนมีของและตอนว่าง — ไม่งั้นหน้าว่างจะเหลือแค่ประโยคลอยกลางจอ
+  // ดูเหมือนหน้าพังมากกว่าจะสื่อว่า "เคลียร์หมดแล้ว"
+  const header = (
+    <SectionTitle
+      title="รออนุมัติ"
+      subtitle="ตรวจข้อความและรูปที่ AI สร้างไว้ ก่อนอนุมัติขึ้นโฆษณาจริง"
+      right={
+        totalPending > 0 ? (
+          <Badge tone="gold" dot>{totalPending} รายการ</Badge>
+        ) : (
+          <Badge tone="green" dot>ไม่มีค้าง</Badge>
+        )
+      }
+    />
+  );
+
   if (totalPending === 0) {
-    return <div className="text-sm text-slate-500 py-10 text-center">ยังไม่มีคอนเทนต์รออนุมัติ — ไปสร้างที่แท็บ "สร้างคอนเทนต์" ได้เลย</div>;
+    return (
+      <div className="w-full max-w-[1400px] space-y-5">
+        {header}
+        <Card>
+          <EmptyState
+            icon={CheckCircle2}
+            title="ไม่มีคอนเทนต์รออนุมัติ"
+            hint="เมื่อสร้างข้อความหรือรูปใหม่ รายการจะมารอตรวจที่หน้านี้"
+            action={
+              <Link href="/generate">
+                <Button variant="primary" icon={Sparkles}>สร้างคอนเทนต์</Button>
+              </Link>
+            }
+          />
+        </Card>
+      </div>
+    );
   }
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-center gap-3 bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+    <div className="w-full max-w-[1400px] space-y-5">
+      {header}
+      <div className="flex flex-wrap items-center gap-3 ds-card p-4">
         <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
           แบรนด์ CI
           <select
@@ -265,7 +300,7 @@ function ReviewTab({ adCopies, adImages, onChanged, brandConfig }) {
         <button
           onClick={handleScore}
           disabled={scoring}
-          className="flex items-center gap-1.5 text-sm bg-slate-900 text-white rounded-lg px-4 py-2 font-medium hover:bg-slate-800 disabled:opacity-60"
+          className="flex items-center gap-1.5 text-sm bg-brand-600 text-white rounded-lg px-4 py-2 font-medium hover:bg-brand-700 disabled:opacity-60"
         >
           {scoring ? <Loader2 className="animate-spin" size={15} /> : <Wand2 size={15} />}
           ให้ AI ให้คะแนนทั้งหมด
@@ -349,14 +384,14 @@ function ReviewTab({ adCopies, adImages, onChanged, brandConfig }) {
           <div className="space-y-2">
             {pendingCopies.map((item) => (
               <div key={item.id} className="relative group">
-                <div className="mb-1 px-1 text-[11px] font-medium text-indigo-600">แบรนด์: {brandNameFor(item.brand_id)}</div>
+                <div className="mb-1 px-1 text-[11px] font-medium text-brand-600">แบรนด์: {brandNameFor(item.brand_id)}</div>
                 <CopyCard item={item} selected={selectedCopyIds.includes(item.id)} onToggle={toggleCopy} />
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     handleReject("copy", item.id);
                   }}
-                  className="absolute top-2 right-2 text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition"
+                  className="absolute top-2 right-2 text-slate-400 hover:text-rose-600 opacity-0 group-hover:opacity-100 transition"
                   title="ปฏิเสธ copy นี้"
                 >
                   <XCircle size={16} />
@@ -398,7 +433,7 @@ function ReviewTab({ adCopies, adImages, onChanged, brandConfig }) {
           <div className="grid grid-cols-2 gap-2">
             {pendingImages.map((item) => (
               <div key={item.id} className="relative group">
-                <div className="mb-1 px-1 text-[11px] font-medium text-indigo-600">แบรนด์: {brandNameFor(item.brand_id)}</div>
+                <div className="mb-1 px-1 text-[11px] font-medium text-brand-600">แบรนด์: {brandNameFor(item.brand_id)}</div>
                 <ImageCard item={item} selected={selectedImageIds.includes(item.id)} onToggle={toggleImage} />
                 <button
                   onClick={(e) => {

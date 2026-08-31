@@ -8,6 +8,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getPromptOverride, withOverride } from "../_shared/ai-prompts.ts";
 import { authorizeRequest } from "../_shared/permissions.ts";
+import { getOpenAIKey } from "../_shared/openai.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -44,7 +45,7 @@ async function runClaude(payload: unknown, sys: string = SYS) {
 async function runOpenAI(payload: unknown, sys: string = SYS) {
   const resp = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${Deno.env.get("IMAGE_API_KEY")}` },
+    headers: { "content-type": "application/json", authorization: `Bearer ${await getOpenAIKey()}` },
     body: JSON.stringify({ model: "gpt-5", max_completion_tokens: 8000, reasoning_effort: "low", response_format: { type: "json_object" }, messages: [{ role: "system", content: sys }, { role: "user", content: JSON.stringify(payload) }] }),
   });
   if (!resp.ok) throw new Error(`OpenAI API error: ${resp.status} ${await resp.text()}`);

@@ -12,6 +12,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getPromptOverride, withOverride } from "../_shared/ai-prompts.ts";
 import { authorizeRequest } from "../_shared/permissions.ts";
+import { getOpenAIKey } from "../_shared/openai.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -66,7 +67,7 @@ async function suggestWithOpenAI(payload: unknown, sys: string = SYSTEM_PROMPT) 
     method: "POST",
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${Deno.env.get("IMAGE_API_KEY")}`,
+      authorization: `Bearer ${await getOpenAIKey()}`,
     },
     body: JSON.stringify({
       model: "gpt-5",
@@ -132,7 +133,9 @@ Deno.serve(async (req) => {
     const { data: savedRow, error: saveError } = await supabaseAdmin
       .from("ai_pairing_suggestions")
       .insert({
-        requested_by: userData.user.id,
+        // auth.user มาจาก authorizeRequest ด้านบน — เดิมอ้าง userData ที่ไม่มีการประกาศไว้
+        // ทำให้ throw ReferenceError ตอนบันทึก ซึ่งเกิดหลังเรียก AI ไปแล้ว (เสียโทเคนเปล่าและ request ล้ม)
+        requested_by: auth.user?.id ?? null,
         input_copy_ids: copyIds,
         input_image_ids: imageIds,
         suggested_pairs: result.pairs,

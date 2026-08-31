@@ -11,6 +11,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getPromptOverride, withOverride } from "../_shared/ai-prompts.ts";
 import { authorizeRequest } from "../_shared/permissions.ts";
+import { getOpenAIKey } from "../_shared/openai.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -72,7 +73,7 @@ async function analyzeWithOpenAI(imageUrl: string, sys: string = SYSTEM_PROMPT) 
     method: "POST",
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${Deno.env.get("IMAGE_API_KEY")}`,
+      authorization: `Bearer ${await getOpenAIKey()}`,
     },
     body: JSON.stringify({
       model: "gpt-5",

@@ -80,7 +80,7 @@ export function LaunchConfigCard({ config, currentApplied, onApplied }) {
         <button
           onClick={handleApply}
           disabled={busy}
-          className="bg-slate-900 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-slate-800 disabled:opacity-60 flex items-center gap-2"
+          className="bg-brand-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-brand-700 disabled:opacity-60 flex items-center gap-2"
         >
           {busy ? <Loader2 className="animate-spin" size={16} /> : <Wand2 size={16} />}
           เซ็ต ads ตาม AI
@@ -219,7 +219,7 @@ export function AiAssistPanel({ onApplied, initialAnalysis, initialLaunchConfig,
         <button
           type="submit"
           disabled={loading}
-          className="bg-slate-900 text-white rounded-lg px-5 py-2.5 text-sm font-medium hover:bg-slate-800 disabled:opacity-60 flex items-center gap-2"
+          className="bg-brand-600 text-white rounded-lg px-5 py-2.5 text-sm font-medium hover:bg-brand-700 disabled:opacity-60 flex items-center gap-2"
         >
           {loading ? <Loader2 className="animate-spin" size={16} /> : <Wand2 size={16} />}
           {loading ? "กำลังวิเคราะห์ละเอียด อาจใช้เวลาสักครู่..." : "ให้ AI วิเคราะห์และบันทึกทันที"}
@@ -417,7 +417,7 @@ export function CiStyleUploader({ assets, setAssets }) {
             type="button"
             onClick={handleAnalyze}
             disabled={analyzing || !assets.ci_reference_image_url}
-            className="flex items-center gap-1.5 text-xs bg-slate-900 text-white rounded-lg px-3 py-1.5 font-medium hover:bg-slate-800 disabled:opacity-40"
+            className="flex items-center gap-1.5 text-xs bg-brand-600 text-white rounded-lg px-3 py-1.5 font-medium hover:bg-brand-700 disabled:opacity-40"
           >
             {analyzing ? <Loader2 className="animate-spin" size={13} /> : <Wand2 size={13} />}
             ให้ AI สกัดสไตล์จากภาพ
@@ -514,7 +514,7 @@ export function MetaTokenPanel() {
         autoComplete="off"
       />
       <div className="flex items-center gap-2">
-        <button onClick={save} disabled={busy || !token.trim()} className="bg-slate-900 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-slate-800 disabled:opacity-60 flex items-center gap-2">
+        <button onClick={save} disabled={busy || !token.trim()} className="bg-brand-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-brand-700 disabled:opacity-60 flex items-center gap-2">
           {busy ? <Loader2 className="animate-spin" size={16} /> : null}
           บันทึก token
         </button>
@@ -548,7 +548,7 @@ export function LineOAPanel() {
     if (!data?.ok) { setErr(data?.error || "บันทึกไม่สำเร็จ"); return; }
     setSecret(""); setToken(""); setStatus(data); setMsg("เชื่อมต่อ LINE OA แล้ว");
   }
-  const webhookUrl = status?.webhook_url || "https://zaozcluzvbiwpmubmecu.supabase.co/functions/v1/line-webhook";
+  const webhookUrl = status?.webhook_url || `${process.env.NEXT_PUBLIC_SUPABASE_URL || ""}/functions/v1/line-webhook`;
   return <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-3">
     <div><h3 className="font-semibold text-slate-800">LINE Official Account</h3><p className="text-xs text-slate-500 mt-1">รับแชทแบบเรียลไทม์และตอบกลับจากหน้าตอบแชท โดยเก็บข้อมูลลับไว้เฉพาะระบบหลังบ้าน</p></div>
     {status && <div className={`text-xs ${status.configured && status.valid ? "text-emerald-700" : status.configured ? "text-rose-600" : "text-amber-600"}`}>{status.configured ? status.valid ? `● เชื่อมต่ออยู่${status.bot?.displayName ? " · " + status.bot.displayName : ""}` : `● token มีปัญหา: ${status.error || "ใช้ไม่ได้"}` : "● ยังไม่ได้เชื่อมต่อ"}</div>}
@@ -557,6 +557,40 @@ export function LineOAPanel() {
     <button onClick={save} disabled={busy || !secret.trim() || !token.trim()} className="rounded-lg bg-[#06C755] text-white px-4 py-2 text-sm font-medium disabled:opacity-50 flex items-center gap-2">{busy && <Loader2 size={15} className="animate-spin" />}บันทึกและตรวจสอบ</button>
     {msg && <div className="text-sm text-emerald-700">{msg}</div>}{err && <div className="text-sm text-rose-600 bg-rose-50 rounded-lg px-3 py-2">{err}</div>}
     <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 text-xs space-y-1"><div className="font-medium text-slate-700">Webhook URL</div><code className="block text-[11px] break-all text-slate-600 select-all">{webhookUrl}</code><p className="text-slate-500">นำ URL นี้ไปใส่ใน LINE Developers → Messaging API → Webhook settings จากนั้นกด Verify และเปิด Use webhook</p></div>
+  </div>;
+}
+
+// คีย์ OpenAI ตัวเดียวที่ทุกฟีเจอร์ AI ในระบบใช้ร่วมกัน (แปลภาษา, สร้างคอนเทนต์, วิเคราะห์แคมเปญ ฯลฯ)
+// เก็บใน app_secrets ผ่าน edge function set-openai-key ซึ่งเช็คสิทธิ์ admin เท่านั้น (ไม่เปิดผ่าน allowed_settings)
+export function OpenAIKeyPanel() {
+  const [status, setStatus] = useState(null);
+  const [apiKey, setApiKey] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
+  async function loadStatus() {
+    const { data } = await supabase.functions.invoke("set-openai-key", { body: { action: "status" } });
+    if (data?.ok) setStatus(data);
+  }
+  useEffect(() => { loadStatus(); }, []);
+  async function save() {
+    setBusy(true); setErr(""); setMsg("");
+    const { data, error } = await supabase.functions.invoke("set-openai-key", { body: { api_key: apiKey } });
+    setBusy(false);
+    if (error) { setErr(await readFunctionErrorMessage(error)); return; }
+    if (!data?.ok) { setErr(data?.error || "บันทึกไม่สำเร็จ"); return; }
+    setApiKey(""); setStatus(data); setMsg("บันทึกคีย์แล้ว ✓");
+  }
+  return <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-3">
+    <div><h3 className="font-semibold text-slate-800">OpenAI API Key</h3><p className="text-xs text-slate-500 mt-1">คีย์นี้ใช้ร่วมกันทุกฟีเจอร์ AI ในระบบ (แปลภาษาในหน้าตอบแชท, สร้างคอนเทนต์, วิเคราะห์แคมเปญ ฯลฯ) เห็น/แก้ได้เฉพาะแอดมินสูงสุดเท่านั้น</p></div>
+    {status && (
+      <div className={`text-xs ${status.configured ? "text-emerald-700" : "text-amber-600"}`}>
+        {status.configured ? `● ตั้งค่าแล้ว · ${status.masked}` : "● ยังไม่ได้ตั้งค่า"}
+      </div>
+    )}
+    <PasswordInput value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-..." className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" autoComplete="off" />
+    <button onClick={save} disabled={busy || !apiKey.trim()} className="rounded-lg bg-brand-600 text-white px-4 py-2 text-sm font-medium hover:bg-brand-700 disabled:opacity-50 flex items-center gap-2">{busy && <Loader2 size={15} className="animate-spin" />}บันทึกและตรวจสอบ</button>
+    {msg && <div className="text-sm text-emerald-700">{msg}</div>}{err && <div className="text-sm text-rose-600 bg-rose-50 rounded-lg px-3 py-2">{err}</div>}
   </div>;
 }
 
@@ -635,7 +669,7 @@ export function PermissionsPanel() {
           <h3 className="font-semibold text-slate-800">จัดการสิทธิ์ผู้ใช้</h3>
           <p className="text-xs text-slate-500 mt-0.5">กำหนดว่าใครเห็นทุกเมนู (admin) หรือจำกัดสิทธิ์ — เลือกได้ว่าเข้าถึงเมนูไหน / เพจไหน (ตอบแชท) / บัญชีโฆษณาไหน</p>
         </div>
-        <button onClick={() => setEditing({ email: "", nickname: "", role: "analyze_only", allowed: [], tabs: [], pages: [], settings: [], chatAlert: true, alertMinutes: 3, alertPages: [], alertSound: true, alertNew: true })} className="text-sm bg-slate-900 text-white rounded-lg px-3 py-1.5 font-medium hover:bg-slate-800 shrink-0">+ เพิ่มผู้ใช้</button>
+        <button onClick={() => setEditing({ email: "", nickname: "", role: "analyze_only", allowed: [], tabs: [], pages: [], settings: [], chatAlert: true, alertMinutes: 3, alertPages: [], alertSound: true, alertNew: true })} className="text-sm bg-brand-600 text-white rounded-lg px-3 py-1.5 font-medium hover:bg-brand-700 shrink-0">+ เพิ่มผู้ใช้</button>
       </div>
 
       {error && <div className="text-sm text-rose-600 bg-rose-50 rounded-lg px-3 py-2">{error}</div>}
@@ -655,7 +689,7 @@ export function PermissionsPanel() {
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                <span className={`text-[11px] px-2 py-0.5 rounded-full ${r.role === "admin" ? "bg-indigo-50 text-indigo-700" : "bg-slate-100 text-slate-600"}`}>{r.role === "admin" ? "admin" : "จำกัด"}</span>
+                <span className={`text-[11px] px-2 py-0.5 rounded-full ${r.role === "admin" ? "bg-brand-50 text-brand-700" : "bg-slate-100 text-slate-600"}`}>{r.role === "admin" ? "admin" : "จำกัด"}</span>
                 <button onClick={() => setEditing({ email: r.email, nickname: r.nickname || "", role: r.role, allowed: (r.allowed_ad_accounts || []).map(String), tabs: (r.allowed_tabs || []).map(String), pages: (r.allowed_pages || []).map(String), settings: (r.allowed_settings || []).map(String), chatAlert: r.chat_alert !== false, alertMinutes: r.alert_minutes ?? 3, alertPages: (r.alert_pages || []).map(String), alertSound: r.alert_sound !== false, alertNew: r.alert_new !== false })} className="text-slate-500 hover:text-slate-800 text-xs underline">แก้ไข</button>
                 <button onClick={() => remove(r.email)} className="text-rose-500 hover:text-rose-700"><Trash2 size={15} /></button>
               </div>
@@ -718,7 +752,7 @@ export function PermissionsPanel() {
                     เพจที่ให้เตือน ({(editing.alertPages || []).length === 0 ? "ทุกเพจที่เข้าถึงได้" : `${editing.alertPages.length} เพจ`})
                   </span>
                   <div className="flex gap-2 text-[11px]">
-                    <button onClick={() => setEditing({ ...editing, alertPages: pages.map((p) => p.id) })} className="text-indigo-600 hover:underline">เลือกทุกเพจ</button>
+                    <button onClick={() => setEditing({ ...editing, alertPages: pages.map((p) => p.id) })} className="text-brand-600 hover:underline">เลือกทุกเพจ</button>
                     <button onClick={() => setEditing({ ...editing, alertPages: [] })} className="text-slate-500 hover:underline">ล้าง</button>
                   </div>
                 </div>
@@ -764,7 +798,7 @@ export function PermissionsPanel() {
             </div>
             {/* หัวข้อย่อยในตั้งค่า — โผล่เมื่อมอบสิทธิ์เมนู "ตั้งค่า" */}
             {editing.tabs.includes("settings") && (
-              <div className="rounded-lg border border-indigo-200 bg-indigo-50/40 p-3">
+              <div className="rounded-lg border border-brand-200 bg-brand-50/40 p-3">
                 <div className="flex items-center justify-between">
                   <label className="text-xs text-slate-600">หัวข้อในตั้งค่าที่เข้าถึงได้ ({editing.settings.length || "ทุก"} หัวข้อ)</label>
                   <div className="flex gap-2 text-[11px]">
@@ -824,7 +858,7 @@ export function PermissionsPanel() {
           </>)}
 
           <div className="flex gap-2">
-            <button onClick={save} disabled={saving} className="text-sm bg-slate-900 text-white rounded-lg px-4 py-2 font-medium hover:bg-slate-800 disabled:opacity-60 flex items-center gap-2">
+            <button onClick={save} disabled={saving} className="text-sm bg-brand-600 text-white rounded-lg px-4 py-2 font-medium hover:bg-brand-700 disabled:opacity-60 flex items-center gap-2">
               {saving ? <Loader2 className="animate-spin" size={15} /> : null} บันทึก
             </button>
             <button onClick={() => setEditing(null)} className="text-sm border border-slate-300 text-slate-700 rounded-lg px-4 py-2 font-medium hover:bg-slate-50">ยกเลิก</button>
@@ -903,7 +937,7 @@ export function ActivityPanel() {
         <div className="min-w-0">
           <h3 className="font-semibold text-slate-800 flex items-center gap-2 flex-wrap">
             ประวัติการเข้าใช้งาน
-            {focusEmail && <span className="text-xs font-normal bg-indigo-100 text-indigo-700 rounded-full px-2 py-0.5">เจาะดู: {focusEmail}</span>}
+            {focusEmail && <span className="text-xs font-normal bg-brand-100 text-brand-700 rounded-full px-2 py-0.5">เจาะดู: {focusEmail}</span>}
           </h3>
           <p className="text-xs text-slate-500 mt-0.5">{focusEmail ? "ประวัติ + สรุปการใช้งานของผู้ใช้คนนี้" : "ใครเข้าใช้ เมื่อไหร่ ทำอะไร จาก IP/ตำแหน่ง และอุปกรณ์ใด · คลิกที่ชื่อผู้ใช้เพื่อดูแยกราย user"}</p>
         </div>
@@ -932,7 +966,7 @@ export function ActivityPanel() {
                 {summary.tabs.length === 0 ? <div className="text-[11px] text-slate-400">ไม่มีข้อมูล (เริ่มเก็บหลังอัปเดตนี้)</div> : (
                   <div className="flex flex-wrap gap-1.5">
                     {summary.tabs.map(([t, n]) => (
-                      <span key={t} className="text-[11px] bg-indigo-100 text-indigo-700 rounded-full px-2 py-0.5 font-medium">{TAB_LABEL[t] || t} · {n}</span>
+                      <span key={t} className="text-[11px] bg-brand-100 text-brand-700 rounded-full px-2 py-0.5 font-medium">{TAB_LABEL[t] || t} · {n}</span>
                     ))}
                   </div>
                 )}
@@ -961,7 +995,7 @@ export function ActivityPanel() {
               <div className="space-y-1.5">
                 {active.map((a) => (
                   <div key={a.email} className="flex flex-wrap items-center gap-1.5">
-                    <button onClick={() => setFocusEmail(a.email)} className={`text-xs rounded-full px-2.5 py-1 flex items-center gap-1.5 font-medium hover:ring-2 hover:ring-indigo-300 ${(a.device_count || 1) > 1 ? "bg-amber-100 text-amber-700" : "bg-emerald-50 text-emerald-700"}`}>
+                    <button onClick={() => setFocusEmail(a.email)} className={`text-xs rounded-full px-2.5 py-1 flex items-center gap-1.5 font-medium hover:ring-2 hover:ring-brand-300 ${(a.device_count || 1) > 1 ? "bg-amber-100 text-amber-700" : "bg-emerald-50 text-emerald-700"}`}>
                       <span className={`w-1.5 h-1.5 rounded-full ${(a.device_count || 1) > 1 ? "bg-amber-500" : "bg-emerald-500"}`} />
                       {a.email} · {a.device_count || 1} เครื่อง
                     </button>
@@ -985,7 +1019,7 @@ export function ActivityPanel() {
                   <div className="min-w-0">
                     <div className="text-slate-800 truncate">
                       {r.email
-                        ? <button onClick={() => setFocusEmail(r.email)} className="font-medium hover:text-indigo-600 hover:underline">{r.email}</button>
+                        ? <button onClick={() => setFocusEmail(r.email)} className="font-medium hover:text-brand-600 hover:underline">{r.email}</button>
                         : <span className="font-medium">-</span>}
                       <span className="text-slate-400"> · {actLabel(r)}</span>
                     </div>

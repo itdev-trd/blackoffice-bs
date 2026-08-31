@@ -310,7 +310,7 @@ export default function GameOfficeTab({ allowedPages = null, onOpenChat }) {
         <div className="font-semibold text-slate-800 flex items-center gap-1.5"><Gamepad2 size={16} /> ออฟฟิศจำลอง</div>
         <span className="text-xs text-slate-500 px-2 py-1 rounded-lg bg-slate-100">เพจ: {scopeLabel || "…"}</span>
         <div className="flex items-center gap-2 text-[11px] text-slate-500">
-          <span className="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">คิวรอ {count.waiting}{count.overQ ? ` (+${count.overQ})` : ""}</span>
+          <span className="px-2 py-0.5 rounded-full bg-brand-100 text-brand-700">คิวรอ {count.waiting}{count.overQ ? ` (+${count.overQ})` : ""}</span>
           <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">คุยแล้ว {count.active}{count.overD ? ` (+${count.overD})` : ""}</span>
           <span>รวม {count.total}</span>
         </div>

@@ -354,7 +354,7 @@ export default function TvMembersTab({ active = true }) {
             <div>
               <div className="text-xs text-slate-500 mb-1 flex items-center justify-between">
                 <span>เลือก Indicator ที่จะ export</span>
-                <button onClick={() => setExportSel(exportSel.length === scripts.length ? [] : scripts.map((s) => s.pine_id))} className="text-[11px] text-indigo-600 hover:underline">{exportSel.length === scripts.length ? "ล้าง" : "เลือกทั้งหมด"}</button>
+                <button onClick={() => setExportSel(exportSel.length === scripts.length ? [] : scripts.map((s) => s.pine_id))} className="text-[11px] text-brand-600 hover:underline">{exportSel.length === scripts.length ? "ล้าง" : "เลือกทั้งหมด"}</button>
               </div>
               <div className="rounded-lg border border-slate-300 divide-y divide-slate-100 max-h-56 overflow-y-auto">
                 {scripts.length === 0 && <div className="px-3 py-2 text-sm text-slate-400">ยังไม่มีสคริปต์</div>}
@@ -382,7 +382,7 @@ export default function TvMembersTab({ active = true }) {
             </div>
             <div className="flex justify-end gap-2">
               <button onClick={() => setExportOpen(false)} className="px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-600 hover:bg-slate-50">ยกเลิก</button>
-              <button onClick={() => { exportCsv(exportSel); setExportOpen(false); }} disabled={!exportSel.length} className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50">ดาวน์โหลด</button>
+              <button onClick={() => { exportCsv(exportSel); setExportOpen(false); }} disabled={!exportSel.length} className="px-4 py-2 rounded-lg bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 disabled:opacity-50">ดาวน์โหลด</button>
             </div>
           </div>
         </div>
@@ -421,7 +421,7 @@ export default function TvMembersTab({ active = true }) {
             )}
             <div className="flex justify-end gap-2">
               <button onClick={() => setAdjRow(null)} disabled={adjusting} className="px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-50">ยกเลิก</button>
-              <button onClick={applyExpiry} disabled={adjusting} className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50">{adjusting ? "กำลังบันทึก..." : "บันทึก"}</button>
+              <button onClick={applyExpiry} disabled={adjusting} className="px-4 py-2 rounded-lg bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 disabled:opacity-50">{adjusting ? "กำลังบันทึก..." : "บันทึก"}</button>
             </div>
           </div>
         </div>
@@ -445,16 +445,17 @@ export default function TvMembersTab({ active = true }) {
             )}
             <div className="flex justify-end gap-2">
               <button onClick={() => setEditRow(null)} disabled={editSaving} className="px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-50">ยกเลิก</button>
-              <button onClick={saveEdit} disabled={editSaving} className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50">{editSaving ? "กำลังบันทึก..." : "บันทึก"}</button>
+              <button onClick={saveEdit} disabled={editSaving} className="px-4 py-2 rounded-lg bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 disabled:opacity-50">{editSaving ? "กำลังบันทึก..." : "บันทึก"}</button>
             </div>
           </div>
         </div>
       )}
-      {/* หัว */}
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div>
-          <div className="text-[11px] uppercase tracking-widest text-slate-400">· Live Member Feed ·</div>
-          <h2 className="text-2xl font-bold text-slate-800">Access Console</h2>
+      {/* หัว — เดิมเป็น "Access Console" + ป้าย "· Live Member Feed ·" ภาษาอังกฤษ
+          ซึ่งไม่เข้าชุดกับทุกหน้าที่เป็นไทย และไม่ได้บอกว่าหน้านี้ทำอะไร */}
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <h2 className="ds-title text-[22px] sm:text-[26px]">สมาชิก TradingView</h2>
+          <p className="mt-1.5 text-[13.5px] text-slate-500">ให้สิทธิ์ ต่ออายุ และถอนสิทธิ์อินดิเคเตอร์ของลูกค้า</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs text-slate-500 flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-emerald-500" /> อัปเดต {updatedAt ? updatedAt.toLocaleTimeString("th-TH") : "—"}</span>
@@ -501,7 +502,7 @@ export default function TvMembersTab({ active = true }) {
                 const on = pineIds.includes(s.pine_id);
                 const d = getDur(s.pine_id);
                 return (
-                  <div key={s.pine_id} className={on ? "bg-indigo-50/40" : ""}>
+                  <div key={s.pine_id} className={on ? "bg-brand-50/40" : ""}>
                     <label className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-slate-50">
                       <input type="checkbox" checked={on} onChange={() => toggleScript(s.pine_id, on)} />
                       <span className="truncate flex-1">{s.name}</span>
@@ -524,7 +525,7 @@ export default function TvMembersTab({ active = true }) {
             </div>
             {pineIds.length > 0 && <div className="text-[11px] text-slate-400 mt-1">เลือกแล้ว {pineIds.length} สคริปต์</div>}
           </div>
-          <button onClick={grant} disabled={granting} className="w-full rounded-lg bg-indigo-600 text-white py-2.5 text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50">
+          <button onClick={grant} disabled={granting} className="w-full rounded-lg bg-brand-600 text-white py-2.5 text-sm font-semibold hover:bg-brand-700 disabled:opacity-50">
             {granting ? "กำลังเพิ่ม..." : "เพิ่มสิทธิ์"}
           </button>
         </div>
@@ -535,7 +536,7 @@ export default function TvMembersTab({ active = true }) {
           <div className="bg-white rounded-2xl border border-slate-200 p-3 flex flex-wrap items-center gap-2">
             <span className="text-xs text-slate-500 mr-1">ช่วงวันที่:</span>
             {RANGE_PRESETS.map(([key, label]) => (
-              <button key={key} onClick={() => setRangeKey(key)} className={`px-2.5 py-1 rounded-lg text-xs font-medium ${rangeKey === key ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-100 border border-slate-200"}`}>{label}</button>
+              <button key={key} onClick={() => setRangeKey(key)} className={`px-2.5 py-1 rounded-lg text-xs font-medium ${rangeKey === key ? "bg-brand-600 text-white" : "text-slate-600 hover:bg-slate-100 border border-slate-200"}`}>{label}</button>
             ))}
             {rangeKey === "custom" && (
               <div className="flex items-center gap-1.5">
@@ -581,7 +582,7 @@ export default function TvMembersTab({ active = true }) {
                     </div>
                     {open && (
                       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
-                        <SumCard label="ทั้งหมด" value={ss.total} unit="สมาชิก" icon={<Users size={16} className="text-indigo-400" />} />
+                        <SumCard label="ทั้งหมด" value={ss.total} unit="สมาชิก" icon={<Users size={16} className="text-brand-600" />} />
                         <SumCard label="Active" value={ss.active} unit="สมาชิก" tone="text-emerald-600" icon={<span className="w-2 h-2 rounded-full bg-emerald-500 inline-block mt-1.5" />} />
                         <SumCard label="หมดอายุภายใน 7 วัน" value={ss.soon} unit="สมาชิก" tone="text-amber-500" icon={<Clock size={16} className="text-amber-400" />} />
                         <SumCard label="หมดอายุแล้ว" value={ss.expired} unit="สมาชิก" tone="text-rose-500" icon={<CalendarX2 size={16} className="text-rose-400" />} />
@@ -616,13 +617,13 @@ export default function TvMembersTab({ active = true }) {
                     <div className="grid gap-2 px-4 py-2 text-[11px] text-slate-400" style={{ gridTemplateColumns: COLS }}>
                       <H k="name">ชื่อลูกค้า</H><H k="user">User TV</H>{canSeeNewTv && <H k="email">อีเมล</H>}<H k="status">สถานะ</H><H k="trade">Trade ID</H><H k="exp">หมดอายุ</H><H k="tvGranted">เพิ่มสิทธิ์บน TV</H><H k="create">Create</H><H k="by">คนเพิ่ม</H><H k="editby">แก้ไขโดย</H><span></span>
                     </div>
-                    {pageRows.length === 0 ? <div className="px-4 py-6 text-center text-xs text-slate-400">ยังไม่มีสมาชิกในสคริปต์นี้</div> : pageRows.map((a) => {
+                    {pageRows.length === 0 ? <div className="px-4 py-6 text-center text-xs text-slate-500">ยังไม่มีสมาชิกในสคริปต์นี้</div> : pageRows.map((a) => {
                       const st = statusInfo(a);
                       const nearExp = a.expiration && new Date(a.expiration).getTime() - now < 7 * 86400000 && new Date(a.expiration).getTime() > now;
                       return (
                       <div key={a.id} className="grid gap-2 px-4 py-2.5 text-sm items-center" style={{ gridTemplateColumns: COLS }}>
                         {a.display_name && (a.trade_id || a.username)
-                          ? <a href={`${window.location.pathname}?tab=inbox&${a.trade_id ? `open_trade=${encodeURIComponent(a.trade_id)}` : `open_tv=${encodeURIComponent(a.username)}`}`} target="_blank" rel="noopener noreferrer" className="min-w-0 font-medium text-indigo-600 hover:text-indigo-700 hover:underline truncate" title={`เปิดแชทของ ${a.display_name}`}>{a.display_name}</a>
+                          ? <a href={`${window.location.pathname}?tab=inbox&${a.trade_id ? `open_trade=${encodeURIComponent(a.trade_id)}` : `open_tv=${encodeURIComponent(a.username)}`}`} target="_blank" rel="noopener noreferrer" className="min-w-0 font-medium text-brand-600 hover:text-brand-700 hover:underline truncate" title={`เปิดแชทของ ${a.display_name}`}>{a.display_name}</a>
                           : <span className="min-w-0 font-medium text-slate-800 truncate" title={a.display_name || ""}>{a.display_name || "—"}</span>}
                         <span className="min-w-0 text-slate-600 truncate" title={a.username}>{a.username}</span>
                         {canSeeNewTv && <span className="min-w-0 text-slate-500 truncate text-xs" title={a.email || ""}>{a.email || "—"}</span>}
@@ -645,7 +646,7 @@ export default function TvMembersTab({ active = true }) {
                             {checkingAccess[a.id] ? <Loader2 size={14} className="animate-spin" /> : <Eye size={14} />}
                           </button>
                           <button onClick={() => openEdit(a)} className="text-slate-400 hover:text-slate-700" title="แก้ไขข้อมูล"><Pencil size={14} /></button>
-                          <button onClick={() => openExpiry(a)} className="text-slate-400 hover:text-indigo-600" title="ตั้งวันหมดอายุ"><Clock size={15} /></button>
+                          <button onClick={() => openExpiry(a)} className="text-slate-400 hover:text-brand-600" title="ตั้งวันหมดอายุ"><Clock size={15} /></button>
                           <button onClick={() => revoke(a)} className="text-slate-400 hover:text-rose-600" title="ถอนสิทธิ์ (ออกจาก TV อย่างเดียว)"><X size={16} /></button>
                         </span>
                       </div>

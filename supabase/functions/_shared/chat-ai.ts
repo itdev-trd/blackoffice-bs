@@ -3,6 +3,7 @@
 // ใช้โดย function "chat-ai" (แยกจาก sync-conversations เพื่อไม่แย่งทรัพยากรกับงานซิงก์)
 
 import { stripLinks, evidenceOf, normalizePhone } from "./chat-extract.ts";
+import { getOpenAIKey } from "./openai.ts";
 
 // prompt ค่าเริ่มต้น (ผู้ใช้ override ได้จากหน้าตั้งค่า → cfg.ai_prompt) — ส่วนนี้คือ "เนื้อหาคำสั่ง" ที่แก้ได้
 export const AI_SYS_DEFAULT = `คุณคือผู้ช่วยวิเคราะห์บทสนทนาแชทเพจ (ฟอเร็กซ์/เทรด)
@@ -86,7 +87,7 @@ export function cleanField(v: any, kind: "phone" | "email" | "trade_id" | "user"
 }
 
 async function callOpenAi(model: string, sys: string, userContent: string, maxTokens: number, tag: string): Promise<any> {
-  const key = Deno.env.get("IMAGE_API_KEY");
+  const key = await getOpenAIKey();
   const resp = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${key}` },

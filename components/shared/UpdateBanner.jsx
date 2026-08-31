@@ -79,9 +79,9 @@ export default function UpdateBanner() {
   }, []);
   if (!ready) return null;
   return (
-    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[100] bg-indigo-600 text-white rounded-full shadow-lg px-4 py-2.5 flex items-center gap-3">
+    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[100] bg-brand-600 text-white rounded-full shadow-lg px-4 py-2.5 flex items-center gap-3">
       <span className="text-sm font-medium">มีเวอร์ชันใหม่ของแอป</span>
-      <button onClick={hardReload} className="bg-white text-indigo-700 rounded-full px-3 py-1 text-xs font-semibold hover:bg-indigo-50">
+      <button onClick={hardReload} className="bg-white text-brand-700 rounded-full px-3 py-1 text-xs font-semibold hover:bg-brand-50">
         อัปเดตเลย
       </button>
     </div>

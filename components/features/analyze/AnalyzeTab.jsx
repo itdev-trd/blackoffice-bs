@@ -25,10 +25,10 @@ import { readFunctionErrorMessage } from "@/lib/utils/errors";
 import { calculateVatInclusiveBudget } from "@/lib/budget-vat";
 import { exportPageNavHtml } from "@/lib/utils/export";
 import HomeButton from "@/components/shared/HomeButton";
-import ThemeToggle from "@/components/shared/ThemeToggle";
 import Spinner from "@/components/shared/Spinner";
 import StatusBadge from "@/components/shared/StatusBadge";
 import { GhostAlert, useArchive, ArchiveBar } from "@/components/features/campaigns/CampaignsTab";
+import { SectionTitle } from "@/components/ui";
 
 const VERDICT_META = {
   underperform: { label: "ต่ำกว่าเป้า", cls: "bg-rose-100 text-rose-700", Icon: ArrowDownCircle },
@@ -198,7 +198,7 @@ function GenderDonut({ gender, valueKey = "impressions" }) {
             <span className="w-2.5 h-2.5 rounded-sm" style={{ background: colors[g.key] || "#94a3b8" }} />
             <span className="text-slate-600">{labels[g.key] || g.key}</span>
             <span className="text-slate-400">{Math.round(((g[valueKey] || 0) / total) * 100)}%</span>
-            <span className="text-slate-300">· {fmtNum(g[valueKey] || 0)}</span>
+            <span className="text-slate-500">· {fmtNum(g[valueKey] || 0)}</span>
           </div>
         ))}
       </div>
@@ -209,7 +209,7 @@ function GenderDonut({ gender, valueKey = "impressions" }) {
 // กราฟเทรนด์รายวัน — มีแกน X (วันที่) / แกน Y (ค่า) + เส้นกริด, รองรับหลายเส้นพร้อมกัน
 function DailyMultiChart({ points, series }) {
   const data = points || [];
-  if (data.length === 0) return <div className="text-xs text-slate-400 py-6 text-center">ไม่มีข้อมูลรายวัน</div>;
+  if (data.length === 0) return <div className="text-xs text-slate-500 py-6 text-center">ไม่มีข้อมูลรายวัน</div>;
   const list = (series || []).length ? series : [{ key: "spend", label: "ค่าใช้จ่าย", color: "#9D6BFF" }];
   const single = list.length === 1;
   const W = 640, H = 220, mL = 46, mR = 14, mT = 12, mB = 28;
@@ -395,7 +395,7 @@ function DrillCard({ node, level, range, onDash }) {
   const isAdset = level === "adsets";
   const m = node.metrics || {};
   return (
-    <div className={`rounded-lg border ${isAdset ? "border-indigo-100 bg-indigo-50/40" : "border-slate-200 bg-white"} p-3 space-y-2`}>
+    <div className={`rounded-lg border ${isAdset ? "border-brand-100 bg-brand-50/40" : "border-slate-200 bg-white"} p-3 space-y-2`}>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex items-start gap-2">
           {isAdset ? (
@@ -434,7 +434,7 @@ function DrillCard({ node, level, range, onDash }) {
         {m.reply_rate != null && <span className={m.reply_rate < 0.4 ? "text-rose-600" : ""}>อัตราตอบ: {Math.min(100, Math.round(m.reply_rate * 100))}%</span>}
       </div>
       {isAdset && expanded && (
-        <div className="pl-3 border-l-2 border-indigo-200 mt-2">
+        <div className="pl-3 border-l-2 border-brand-200 mt-2">
           <ChildrenList parentId={node.id} level="ads" range={range} onDash={onDash} />
         </div>
       )}
@@ -642,7 +642,7 @@ function FullConfigPanel({ adId, level, onNavigate }) {
     <div className="rounded-xl border border-slate-200 bg-white p-4">
       <div className="font-medium text-slate-800 text-sm mb-2">รายละเอียดการตั้งค่าทั้งหมด</div>
       {err && <div className="text-xs text-rose-600 bg-rose-50 rounded-lg px-2.5 py-1.5 mb-2">{err}</div>}
-      <button onClick={load} className="text-xs bg-slate-900 text-white rounded-lg px-3 py-2 font-medium flex items-center gap-1.5 hover:bg-slate-800">
+      <button onClick={load} className="text-xs bg-brand-600 text-white rounded-lg px-3 py-2 font-medium flex items-center gap-1.5 hover:bg-brand-700">
         <RefreshCw size={13} /> ดึงรายละเอียดการตั้งค่า
       </button>
       <div className="text-[11px] text-slate-400 mt-1.5">กดเพื่อดึงจาก Meta (ไม่ดึงอัตโนมัติ เพื่อลดการยิง API)</div>
@@ -671,7 +671,7 @@ function FullConfigPanel({ adId, level, onNavigate }) {
       )}
 
       {(data.adsets || []).map((a, idx) => (
-        <div key={a.id || idx} className="rounded-lg border border-indigo-100 bg-indigo-50/30 p-3">
+        <div key={a.id || idx} className="rounded-lg border border-brand-100 bg-brand-50/30 p-3">
           <div className="flex items-center justify-between gap-2 mb-1">
             <div className="text-xs font-semibold text-slate-700">ชุดโฆษณา{data.adsets.length > 1 ? ` #${idx + 1}` : ""}</div>
             {onNavigate && a.id && (
@@ -924,11 +924,10 @@ function AdDashboardModal({ ad, ai, onClose, onNavigate }) {
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap sm:shrink-0 sm:justify-end">
-            <ThemeToggle />
             <button
               onClick={runDashboardAI}
               disabled={!data || aiBusy}
-              className="text-xs bg-slate-900 text-white rounded-lg px-3 py-1.5 font-medium hover:bg-slate-800 disabled:opacity-50 flex items-center gap-1.5"
+              className="text-xs bg-brand-600 text-white rounded-lg px-3 py-1.5 font-medium hover:bg-brand-700 disabled:opacity-50 flex items-center gap-1.5"
             >
               {aiBusy ? <Loader2 className="animate-spin" size={14} /> : <Sparkles size={14} />} AI วิเคราะห์
             </button>
@@ -1036,7 +1035,7 @@ function AdDashboardModal({ ad, ai, onClose, onNavigate }) {
                       <span className="text-slate-500 text-sm">฿</span>
                     </div>
                     <div className="flex items-center gap-2 mt-2 flex-wrap">
-                      <button onClick={saveBudget} disabled={budgetSaving} className="text-xs bg-slate-900 text-white rounded-lg px-3 py-1.5 font-medium hover:bg-slate-800 disabled:opacity-50">{budgetSaving ? "กำลังบันทึก..." : "บันทึก"}</button>
+                      <button onClick={saveBudget} disabled={budgetSaving} className="text-xs bg-brand-600 text-white rounded-lg px-3 py-1.5 font-medium hover:bg-brand-700 disabled:opacity-50">{budgetSaving ? "กำลังบันทึก..." : "บันทึก"}</button>
                       {budgetMsg
                         ? <span className={`text-[11px] ${budgetMsg.includes("✓") ? "text-emerald-600" : "text-rose-600"}`}>{budgetMsg}</span>
                         : (budgetSaved != null && <span className="text-[11px] text-slate-400">บันทึกงบรวมไว้ {fmtNum(budgetSaved, 2)}฿</span>)}
@@ -1090,13 +1089,13 @@ function AdDashboardModal({ ad, ai, onClose, onNavigate }) {
                   <div className="font-medium text-slate-800 text-sm">เทรนด์รายวัน</div>
                   <div className="flex gap-1 flex-wrap">
                     {Object.keys(metricLabels).map((m) => (
-                      <button key={m} onClick={() => toggleDaily(m)} className={`text-[11px] px-2 py-1 rounded-full ${dailyKeys.includes(m) ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600"}`}>
+                      <button key={m} onClick={() => toggleDaily(m)} className={`text-[11px] px-2 py-1 rounded-full ${dailyKeys.includes(m) ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-600"}`}>
                         {metricLabels[m]}
                       </button>
                     ))}
                     <button
                       onClick={() => setDailyKeys(dailyKeys.length === Object.keys(metricLabels).length ? ["spend"] : Object.keys(metricLabels))}
-                      className={`text-[11px] px-2 py-1 rounded-full ${dailyKeys.length === Object.keys(metricLabels).length ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-600"}`}
+                      className={`text-[11px] px-2 py-1 rounded-full ${dailyKeys.length === Object.keys(metricLabels).length ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-600"}`}
                     >
                       ทั้งหมด
                     </button>
@@ -1115,7 +1114,7 @@ function AdDashboardModal({ ad, ai, onClose, onNavigate }) {
                     <button
                       key={k}
                       onClick={() => toggleBd(k)}
-                      className={`text-[11px] px-2 py-1 rounded-full flex items-center gap-1 ${bdMetrics.includes(k) ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600"}`}
+                      className={`text-[11px] px-2 py-1 rounded-full flex items-center gap-1 ${bdMetrics.includes(k) ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-600"}`}
                     >
                       <span className="w-2 h-2 rounded-sm" style={{ background: BD_METRIC_META[k].color }} />
                       {BD_METRIC_META[k].label}
@@ -1123,14 +1122,14 @@ function AdDashboardModal({ ad, ai, onClose, onNavigate }) {
                   ))}
                   <button
                     onClick={() => setBdMetrics(bdMetrics.length === BD_KEYS.length ? ["impressions"] : [...BD_KEYS])}
-                    className={`text-[11px] px-2 py-1 rounded-full ${bdMetrics.length === BD_KEYS.length ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-600"}`}
+                    className={`text-[11px] px-2 py-1 rounded-full ${bdMetrics.length === BD_KEYS.length ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-600"}`}
                   >
                     ทั้งหมด
                   </button>
                 </div>
               </div>
               {bdMetrics.includes("replies") && (
-                <div className="text-[11px] text-slate-500 bg-indigo-50 rounded-lg px-2.5 py-1.5">
+                <div className="text-[11px] text-slate-500 bg-brand-50 rounded-lg px-2.5 py-1.5">
                   "ตอบกลับจริง" = บทสนทนาที่ลูกค้าส่งข้อความ ≥2 ครั้ง (ตัดคนกดปุ่มแล้วเงียบ) — ใช้ดูว่าลีดจริงมาจากกลุ่ม/พื้นที่/ตำแหน่งไหน
                 </div>
               )}
@@ -1257,8 +1256,7 @@ function CompareView({ items, onClose, aiModel }) {
             <div className="font-semibold text-slate-800 truncate">เปรียบเทียบ {items.length} รายการ</div>
           </div>
           <div className="flex items-center gap-2 flex-wrap sm:justify-end">
-            <ThemeToggle />
-            <button onClick={analyzeAI} disabled={loading || aiBusy} className="text-xs bg-slate-900 text-white rounded-lg px-3 py-1.5 font-medium hover:bg-slate-800 disabled:opacity-50 flex items-center gap-1.5">
+            <button onClick={analyzeAI} disabled={loading || aiBusy} className="text-xs bg-brand-600 text-white rounded-lg px-3 py-1.5 font-medium hover:bg-brand-700 disabled:opacity-50 flex items-center gap-1.5">
               {aiBusy ? <Loader2 className="animate-spin" size={14} /> : <Sparkles size={14} />} AI วิเคราะห์
             </button>
             <button onClick={() => exportComparePdf(rows, range)} disabled={loading} className="text-xs border border-slate-300 rounded-lg px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1.5">
@@ -1466,7 +1464,7 @@ function ApplyChangeButton({ change, onDone, label, tone = "slate" }) {
   const [done, setDone] = useState(false);
   const [error, setError] = useState("");
   const tones = {
-    slate: "bg-slate-900 text-white hover:bg-slate-800",
+    slate: "bg-brand-600 text-white hover:bg-brand-700",
     rose: "bg-rose-600 text-white hover:bg-rose-700",
     emerald: "bg-emerald-600 text-white hover:bg-emerald-700",
     blue: "bg-blue-600 text-white hover:bg-blue-700",
@@ -1630,7 +1628,7 @@ function MetaBrowsePanel({ settings, restricted = false, allowedAccounts = [] })
           <p className="text-xs text-slate-500 mt-0.5">เลือกบัญชีโฆษณาที่เข้าถึงได้ แล้วเลือกแคมเปญเพื่อวิเคราะห์/เปรียบเทียบ/ดูแดชบอร์ด</p>
         </div>
         {!open && (
-          <button onClick={() => loadAccounts()} className="bg-slate-900 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-slate-800 shrink-0">
+          <button onClick={() => loadAccounts()} className="bg-brand-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-brand-700 shrink-0">
             เปิด
           </button>
         )}
@@ -1738,7 +1736,7 @@ function MetaBrowsePanel({ settings, restricted = false, allowedAccounts = [] })
 
           {selected.length > 0 && (
             <div className="flex flex-wrap gap-2">
-              <button onClick={pullReport} disabled={analyzing} className="bg-slate-900 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-slate-800 disabled:opacity-60 flex items-center gap-2">
+              <button onClick={pullReport} disabled={analyzing} className="bg-brand-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-brand-700 disabled:opacity-60 flex items-center gap-2">
                 {analyzing ? <Loader2 className="animate-spin" size={16} /> : <BarChart3 size={16} />}
                 ดึงรายงาน ({selected.length})
               </button>
@@ -1807,8 +1805,7 @@ function CampaignOverviewView({ initialResult, campaignIds, range, textModel, on
             <div className="font-semibold text-slate-800 truncate">รายงานแคมเปญ ({result.campaigns.length}) · {rangeLabel(range)}</div>
           </div>
           <div className="flex items-center gap-2 flex-wrap sm:justify-end">
-            <ThemeToggle />
-            <button onClick={runAI} disabled={aiBusy} className="text-xs bg-slate-900 text-white rounded-lg px-3 py-1.5 font-medium hover:bg-slate-800 disabled:opacity-60 flex items-center gap-1.5">
+            <button onClick={runAI} disabled={aiBusy} className="text-xs bg-brand-600 text-white rounded-lg px-3 py-1.5 font-medium hover:bg-brand-700 disabled:opacity-60 flex items-center gap-1.5">
               {aiBusy ? <Loader2 className="animate-spin" size={14} /> : <Sparkles size={14} />} AI วิเคราะห์
             </button>
             <button onClick={() => exportCampaignAnalysisPdf(result)} className="text-xs border border-slate-300 rounded-lg px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-1.5">
@@ -1985,7 +1982,11 @@ function AnalyzeTab({ adContent, metricsHistoryByAd, settings, onChanged, restri
   }
 
   return (
-    <div className="space-y-4">
+    <div className="w-full max-w-[1600px] space-y-5">
+      <SectionTitle
+        title="วิเคราะห์"
+        subtitle="ดูผลโฆษณาจริงจาก Meta เทียบแคมเปญ และให้ AI สรุปว่าอะไรควรหยุดหรือขยายงบ"
+      />
       <MetaBrowsePanel settings={settings} restricted={restricted} allowedAccounts={allowedAccounts} />
 
       {false && !restricted && (<>   {/* ซ่อนส่วน "วิเคราะห์ผลโฆษณา" ออกจากหน้านี้ทั้งหมด */}
@@ -2018,7 +2019,7 @@ function AnalyzeTab({ adContent, metricsHistoryByAd, settings, onChanged, restri
             <button
               onClick={handleAnalyzeNow}
               disabled={busy || launched.length === 0}
-              className="bg-slate-900 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-slate-800 disabled:opacity-60 flex items-center gap-2"
+              className="bg-brand-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-brand-700 disabled:opacity-60 flex items-center gap-2"
             >
               {busy ? <Loader2 className="animate-spin" size={16} /> : <BarChart3 size={16} />}
               {busy ? "กำลังวิเคราะห์..." : "วิเคราะห์ตอนนี้"}
@@ -2115,12 +2116,12 @@ function AnalyzeTab({ adContent, metricsHistoryByAd, settings, onChanged, restri
 
       {/* แถบเปรียบเทียบลอยด้านล่างเมื่อเลือก >= 2 */}
       {compareSet.length >= 2 && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 bg-slate-900 text-white rounded-full shadow-lg px-4 py-2.5 flex items-center gap-3">
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 bg-brand-600 text-white rounded-full shadow-lg px-4 py-2.5 flex items-center gap-3">
           <span className="text-sm">เลือกเปรียบเทียบ {compareSet.length} รายการ</span>
           <button onClick={() => setShowCompare(true)} className="bg-white text-slate-900 rounded-full px-3 py-1 text-xs font-medium flex items-center gap-1.5">
             <GitCompare size={14} /> เปรียบเทียบ
           </button>
-          <button onClick={() => setCompareSet([])} className="text-slate-300 hover:text-white text-xs">ล้าง</button>
+          <button onClick={() => setCompareSet([])} className="text-slate-500 hover:text-slate-800 text-xs">ล้าง</button>
         </div>
       )}
       {showCompare && <CompareView items={compareSet} onClose={() => setShowCompare(false)} aiModel={textModel} />}
@@ -2195,7 +2196,7 @@ function AnalysisReport({ analysis }) {
             {recs.map((r, i) => (
               <div key={i} className="rounded-xl border border-slate-200 p-3">
                 <div className="flex items-center gap-2 mb-1.5">
-                  <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-slate-900 text-white text-xs font-semibold">
+                  <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-brand-600 text-white text-xs font-semibold">
                     {r.rank ?? i + 1}
                   </span>
                   <span className="font-medium text-slate-800 text-sm">{r.objective_th || r.meta_objective}</span>
@@ -2750,7 +2751,7 @@ async function exportTrackerExcel(campaignName, rows) {
   // โหลด ExcelJS เฉพาะตอนกด Export เพื่อไม่เพิ่มภาระให้หน้า Analyze ตอนเปิดใช้งานปกติ
   const { default: ExcelJS } = await import("exceljs");
   const wb = new ExcelJS.Workbook();
-  wb.creator = "AI Ads Automation";
+  wb.creator = "AdFlow OS";
   wb.created = new Date();
   wb.calcProperties.fullCalcOnLoad = true;
 

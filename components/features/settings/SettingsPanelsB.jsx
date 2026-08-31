@@ -46,7 +46,7 @@ export function AiPromptsPanel() {
                 <div className="text-sm font-medium text-slate-800">{f.label}</div>
                 <p className="text-[11px] text-slate-500">{f.desc} · <span className="font-mono text-slate-400">{f.key}</span></p>
               </div>
-              <span className={`text-[11px] px-2 py-0.5 rounded ${prompts[f.key]?.trim() ? "bg-indigo-50 text-indigo-600" : "bg-slate-100 text-slate-500"}`}>{prompts[f.key]?.trim() ? "ใช้ prompt ของคุณ" : "ค่าเริ่มต้น"}</span>
+              <span className={`text-[11px] px-2 py-0.5 rounded ${prompts[f.key]?.trim() ? "bg-brand-50 text-brand-600" : "bg-slate-100 text-slate-500"}`}>{prompts[f.key]?.trim() ? "ใช้ prompt ของคุณ" : "ค่าเริ่มต้น"}</span>
             </div>
             <textarea rows={4} value={prompts[f.key] || ""} onChange={(e) => setOne(f.key, e.target.value)} placeholder="(เว้นว่าง = ใช้ค่าเริ่มต้นของระบบ)" className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs font-mono leading-relaxed" />
             {prompts[f.key] ? <button type="button" onClick={() => setOne(f.key, "")} className="text-[11px] text-rose-600 hover:underline">ล้าง (กลับไปใช้ค่าเริ่มต้น)</button> : null}
@@ -54,7 +54,7 @@ export function AiPromptsPanel() {
         ))}
       </div>
       <div className="flex items-center gap-3">
-        <button onClick={save} disabled={saving} className="bg-slate-900 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-slate-800 disabled:opacity-60">{saving ? "กำลังบันทึก..." : "บันทึกทั้งหมด"}</button>
+        <button onClick={save} disabled={saving} className="bg-brand-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-brand-700 disabled:opacity-60">{saving ? "กำลังบันทึก..." : "บันทึกทั้งหมด"}</button>
         {saved && <span className="text-sm text-emerald-600">บันทึกแล้ว ✓</span>}
         {saveError && <span className="text-sm text-rose-600">{saveError}</span>}
       </div>
@@ -131,7 +131,7 @@ export function ChatSyncConfigPanel() {
       </div>
 
       {/* Dataset ของ Conversion Leads — Meta กำหนดว่า 1 เพจ = 1 dataset จึงต้องดึงแยกรายเพจ */}
-      <div className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-4 space-y-2">
+      <div className="rounded-xl border border-brand-200 bg-brand-50/40 p-4 space-y-2">
         <div className="text-sm font-medium text-slate-800">Dataset สำหรับส่งสถานะไป Meta (Conversion Leads)</div>
         <p className="text-[11px] text-slate-500">
           Meta กำหนดให้ 1 เพจผูกกับ 1 ชุดข้อมูลเท่านั้น — กดปุ่มนี้ให้ระบบดึง Dataset ID ของแต่ละเพจมาเก็บอัตโนมัติ
@@ -139,7 +139,7 @@ export function ChatSyncConfigPanel() {
         </p>
         <div className="flex items-center gap-2 flex-wrap">
           <button onClick={fetchDatasets} disabled={dsLoading}
-            className="rounded-lg bg-indigo-600 text-white px-3 py-1.5 text-xs font-medium hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-1.5">
+            className="rounded-lg bg-brand-600 text-white px-3 py-1.5 text-xs font-medium hover:bg-brand-700 disabled:opacity-50 flex items-center gap-1.5">
             {dsLoading ? <Loader2 className="animate-spin" size={13} /> : <RefreshCw size={13} />} ดึง Dataset ของทุกเพจ
           </button>
           {dsResult && (
@@ -225,7 +225,7 @@ export function ChatSyncConfigPanel() {
                 {labelPages.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
             )}
-            <button onClick={testLabels} disabled={labelTesting} className="bg-slate-900 text-white rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-slate-800 disabled:opacity-60 flex items-center gap-1.5">
+            <button onClick={testLabels} disabled={labelTesting} className="bg-brand-600 text-white rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-brand-700 disabled:opacity-60 flex items-center gap-1.5">
               {labelTesting ? <Loader2 className="animate-spin" size={14} /> : <RefreshCw size={14} />} ทดสอบดึงป้าย
             </button>
           </div>
@@ -278,7 +278,7 @@ export function ChatSyncConfigPanel() {
         ระบบจะเก็บเฉพาะข้อมูลที่แอดมินป้อนเองหรือ Import จาก Excel เท่านั้น ไม่มีการอ่านแชทเพื่อกรอกข้อมูลลูกค้าอัตโนมัติ
       </div>
       <div className="flex items-center gap-3">
-        <button onClick={save} disabled={saving} className="bg-slate-900 text-white rounded-lg px-5 py-2.5 text-sm font-medium hover:bg-slate-800 disabled:opacity-60 flex items-center gap-2">
+        <button onClick={save} disabled={saving} className="bg-brand-600 text-white rounded-lg px-5 py-2.5 text-sm font-medium hover:bg-brand-700 disabled:opacity-60 flex items-center gap-2">
           {saving ? <Loader2 className="animate-spin" size={15} /> : null} บันทึก
         </button>
         {saved && <span className="text-sm text-emerald-700 bg-emerald-50 rounded-lg px-3 py-2">บันทึกแล้ว</span>}
@@ -455,7 +455,7 @@ export function HolidayCalendar({ holidays = [], onToggle }) {
               key={ds}
               onClick={() => onToggle(ds)}
               title={on ? "คลิกเพื่อลบวันหยุดนี้" : "คลิกเพื่อตั้งเป็นวันหยุด"}
-              className={`aspect-square rounded-lg text-xs flex items-center justify-center transition ${on ? "text-white font-semibold shadow-sm" : isToday ? "text-indigo-600 font-semibold ring-1 ring-slate-300" : "text-slate-600 hover:bg-slate-100"}`}
+              className={`aspect-square rounded-lg text-xs flex items-center justify-center transition ${on ? "text-white font-semibold shadow-sm" : isToday ? "text-brand-600 font-semibold ring-1 ring-slate-300" : "text-slate-600 hover:bg-slate-100"}`}
               style={on ? { backgroundImage: "linear-gradient(135deg,#9D6BFF,#7C4DFF)" } : undefined}
             >
               {d}
@@ -835,7 +835,7 @@ export function ReplyStatsPanel({ onOpenChat }) {
             <div className="text-[11px] text-slate-400 mb-1">วันทำงาน</div>
             <div className="grid grid-cols-7 gap-1">
               {DAYS.map(([d, l]) => (
-                <label key={d} className={`py-2 rounded-lg border cursor-pointer text-xs text-center select-none ${cfg.days?.includes(Number(d)) ? "bg-indigo-100 border-indigo-300 text-indigo-700 font-semibold" : "border-slate-200 text-slate-500"}`}>
+                <label key={d} className={`py-2 rounded-lg border cursor-pointer text-xs text-center select-none ${cfg.days?.includes(Number(d)) ? "bg-brand-100 border-brand-300 text-brand-700 font-semibold" : "border-slate-200 text-slate-500"}`}>
                   <input type="checkbox" className="hidden" checked={cfg.days?.includes(Number(d)) || false}
                     onChange={(e) => setCfg({ ...cfg, days: e.target.checked ? [...(cfg.days || []), Number(d)] : (cfg.days || []).filter((x) => x !== Number(d)) })} />{l}
                 </label>
@@ -868,7 +868,7 @@ export function ReplyStatsPanel({ onOpenChat }) {
               <div className="text-[11px] text-slate-400 mb-1">ถือว่าช้าเมื่อเกิน (นาที)</div>
               <NumInput min={1} value={cfg.slow_min ?? 5} onChange={(n) => setCfg({ ...cfg, slow_min: n })} className="w-full sm:w-24 rounded-lg border border-slate-300 px-2 py-1.5" />
             </div>
-            <button onClick={saveCfg} disabled={saving} className="bg-slate-900 text-white rounded-lg px-4 py-1.5 font-medium disabled:opacity-60 shrink-0">{saving ? "..." : "บันทึก"}</button>
+            <button onClick={saveCfg} disabled={saving} className="bg-brand-600 text-white rounded-lg px-4 py-1.5 font-medium disabled:opacity-60 shrink-0">{saving ? "..." : "บันทึก"}</button>
           </div>
 
           {/* วันหยุดพิเศษ — วันที่ในนี้จะถูกตัดออกจากการคำนวณทั้งหมด (เหมือนวันหยุดประจำสัปดาห์) · ไม่ใช้ในโหมด 24 ชม. */}
@@ -893,7 +893,7 @@ export function ReplyStatsPanel({ onOpenChat }) {
                   setNewHoliday("");
                 }}
                 disabled={!newHoliday}
-                className="rounded-lg bg-indigo-600 text-white px-2.5 py-1 font-medium hover:bg-indigo-700 disabled:opacity-40"
+                className="rounded-lg bg-brand-600 text-white px-2.5 py-1 font-medium hover:bg-brand-700 disabled:opacity-40"
               >
                 + เพิ่มวันหยุด
               </button>
@@ -939,7 +939,7 @@ export function ReplyStatsPanel({ onOpenChat }) {
                 className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-xs"
               />
               <datalist id="reply-stats-customer-names">{customerNameOptions.map((name) => <option key={name} value={name} />)}</datalist>
-              <button type="button" onClick={addExcludedName} disabled={!excludeInput.trim()} className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-40">เพิ่มและบันทึก</button>
+              <button type="button" onClick={addExcludedName} disabled={!excludeInput.trim()} className="rounded-lg bg-brand-600 px-4 py-2 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-40">เพิ่มและบันทึก</button>
             </div>
             {(cfg.exclude || []).length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">
               {(cfg.exclude || []).map((name) => <span key={name} className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-700">
@@ -982,7 +982,7 @@ export function ReplyStatsPanel({ onOpenChat }) {
             <button
               key={label}
               onClick={() => { setSince(s); setUntil(u); load(s, u); }}
-              className={`text-[11px] rounded-full px-2.5 py-1 font-medium border transition ${active ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"}`}
+              className={`text-[11px] rounded-full px-2.5 py-1 font-medium border transition ${active ? "bg-brand-600 text-white border-brand-600" : "bg-white text-slate-600 border-slate-200 hover:border-slate-300"}`}
             >
               {label}
             </button>
@@ -1008,7 +1008,7 @@ export function ReplyStatsPanel({ onOpenChat }) {
             <div className="flex items-center justify-between mb-1.5 px-1">
               <span className="text-[10px] text-slate-400">ไม่ติ๊กเลย = ทุกเพจ</span>
               <div className="flex gap-2 text-[11px]">
-                <button onClick={() => setSelPages(pageOpts.map((p) => p.id))} className="text-indigo-600 hover:underline">เลือกทั้งหมด</button>
+                <button onClick={() => setSelPages(pageOpts.map((p) => p.id))} className="text-brand-600 hover:underline">เลือกทั้งหมด</button>
                 <button onClick={() => setSelPages([])} className="text-slate-500 hover:underline">ล้าง</button>
               </div>
             </div>
@@ -1026,7 +1026,7 @@ export function ReplyStatsPanel({ onOpenChat }) {
                 </label>
               ))}
             </div>
-            <button onClick={() => { setPageMenu(false); load(); }} className="w-full mt-2 bg-slate-900 text-white rounded-lg px-2 py-1.5 text-[11px] font-medium hover:bg-slate-800">
+            <button onClick={() => { setPageMenu(false); load(); }} className="w-full mt-2 bg-brand-600 text-white rounded-lg px-2 py-1.5 text-[11px] font-medium hover:bg-brand-700">
               ใช้ตัวกรองนี้
             </button>
           </div>
@@ -1034,7 +1034,7 @@ export function ReplyStatsPanel({ onOpenChat }) {
         <button onClick={load} disabled={busy} className="border border-slate-300 text-slate-700 rounded-lg px-3 py-1.5 font-medium hover:bg-slate-50 disabled:opacity-60 flex items-center gap-1">
           {busy ? <Loader2 className="animate-spin" size={13} /> : <RefreshCw size={13} />} ดูสถิติ
         </button>
-        <button onClick={rebuild} disabled={rebuilding || busy} className="bg-indigo-600 text-white rounded-lg px-3 py-1.5 font-medium hover:bg-indigo-700 disabled:opacity-60 flex items-center gap-1">
+        <button onClick={rebuild} disabled={rebuilding || busy} className="bg-brand-600 text-white rounded-lg px-3 py-1.5 font-medium hover:bg-brand-700 disabled:opacity-60 flex items-center gap-1">
           {rebuilding ? <Loader2 className="animate-spin" size={13} /> : <RefreshCw size={13} />} ดึงจากแชทจริง
         </button>
         {res && <span className="text-slate-400">ตอบแล้ว {res.counted} · ยังไม่ตอบ {res.unanswered ?? 0} · ข้ามนอกเวลาทำการ {res.skipped}</span>}
@@ -1065,7 +1065,7 @@ export function ReplyStatsPanel({ onOpenChat }) {
             </span>
             <div className="flex gap-1 ml-auto text-[11px]">
               {[["summary", "รวมทั้งช่วง"], ["daily", "แยกรายวัน"]].map(([k, l]) => (
-                <button key={k} onClick={() => setViewMode(k)} className={`rounded-full px-2.5 py-1 font-medium ${viewMode === k ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>{l}</button>
+                <button key={k} onClick={() => setViewMode(k)} className={`rounded-full px-2.5 py-1 font-medium ${viewMode === k ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>{l}</button>
               ))}
               <button onClick={exportPdf} className="rounded-lg border border-slate-300 px-2 py-1 text-slate-600 hover:bg-slate-50 flex items-center gap-1">📄 PDF</button>
               <button onClick={exportSummaryCsv} className="rounded-lg border border-slate-300 px-2 py-1 text-slate-600 hover:bg-slate-50">⤓ CSV</button>
@@ -1135,7 +1135,7 @@ export function ReplyStatsPanel({ onOpenChat }) {
           {showEvidence && (<>
             <div className="flex gap-1 px-3 py-2 border-b border-slate-200 text-[11px]">
               {[["slow", `ช้าเกินเกณฑ์ + ยังไม่ตอบ`], ["unanswered", "เฉพาะยังไม่ตอบ"], ["all", "ทั้งหมด"]].map(([k, l]) => (
-                <button key={k} onClick={() => { setEvFilter(k); setEvLimit(300); }} className={`rounded-full px-2.5 py-1 font-medium ${evFilter === k ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>{l}</button>
+                <button key={k} onClick={() => { setEvFilter(k); setEvLimit(300); }} className={`rounded-full px-2.5 py-1 font-medium ${evFilter === k ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>{l}</button>
               ))}
               <button
                 onClick={() => {
@@ -1180,7 +1180,7 @@ export function ReplyStatsPanel({ onOpenChat }) {
                         {onOpenChat ? (
                           <button
                             onClick={() => onOpenChat(e.conversation_id, e.msg_at)}
-                            className="text-indigo-600 hover:text-indigo-500 hover:underline font-medium truncate max-w-full text-left flex items-center gap-1"
+                            className="text-brand-600 hover:text-brand-500 hover:underline font-medium truncate max-w-full text-left flex items-center gap-1"
                             title="เปิดแชทนี้และเลื่อนไปยังข้อความที่ตอบช้า/ยังไม่ตอบ"
                           >
                             <span className="truncate">{e.customer_name || e.conversation_id}</span>
@@ -1310,7 +1310,7 @@ export function ReplyStatsPanel({ onOpenChat }) {
                   <tr key={i}>
                     <td className="px-3 py-2 text-slate-800 font-medium">{i === 0 ? "🥇 " : i === 1 ? "🥈 " : i === 2 ? "🥉 " : ""}{p.email}</td>
                     <td className="px-3 py-2 text-center"><span className="font-bold text-[13px] text-amber-600 tabular-nums">{p.points}</span></td>
-                    <td className="px-3 py-2 text-center text-slate-300 tabular-nums">{p.count}</td>
+                    <td className="px-3 py-2 text-center text-slate-500 tabular-nums">{p.count}</td>
                     <td className="px-3 py-2 text-center text-emerald-600 font-medium tabular-nums">{p.in_time}</td>
                     <td className="px-3 py-2 text-center text-slate-500 tabular-nums">{p.slow}</td>
                   </tr>
@@ -1356,7 +1356,7 @@ export function ReplyStatsPanel({ onOpenChat }) {
             <span className="text-xs font-medium text-slate-600">ลูกค้าทักตามช่วงเวลา &amp; สัดส่วนที่ตอบช้า (เวลาไทย)</span>
             <div className="flex gap-1 ml-auto text-[11px]">
               {[["chart", "กราฟ"], ["table", "ตาราง"]].map(([k, l]) => (
-                <button key={k} onClick={() => setHourView(k)} className={`rounded-full px-2.5 py-1 font-medium ${hourView === k ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>{l}</button>
+                <button key={k} onClick={() => setHourView(k)} className={`rounded-full px-2.5 py-1 font-medium ${hourView === k ? "bg-brand-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>{l}</button>
               ))}
             </div>
           </div>

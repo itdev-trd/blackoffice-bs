@@ -20,6 +20,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getMetaToken } from "../_shared/meta.ts";
 import { getPromptOverride, withOverride } from "../_shared/ai-prompts.ts";
 import { authorizeRequest } from "../_shared/permissions.ts";
+import { getOpenAIKey } from "../_shared/openai.ts";
 
 let META_TOKEN = "";
 const corsHeaders = {
@@ -82,7 +83,7 @@ async function getKeywordsFromOpenAI(audienceDesc: string, sys: string = KEYWORD
     method: "POST",
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${Deno.env.get("IMAGE_API_KEY")}`,
+      authorization: `Bearer ${await getOpenAIKey()}`,
     },
     body: JSON.stringify({
       model: "gpt-5",
