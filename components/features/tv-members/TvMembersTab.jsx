@@ -3,9 +3,10 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { beToCe } from "@/lib/utils/date";
-import { X, Clock, Pencil, Users, CalendarX2, CalendarPlus, ChevronDown, ChevronUp, Trash2, Loader2, Eye } from "lucide-react";
+import { X, Clock, Pencil, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Loader2, Eye, Users, CheckCircle2, AlertTriangle, Tv } from "lucide-react";
+import { Button, SectionTitle, StatCard } from "@/components/ui";
 
-export default function TvMembersTab({ active = true }) {
+export default function TvMembersTab({ active = true, embedded = false }) {
   const [scripts, setScripts] = useState([]);
   const [access, setAccess] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -58,6 +59,11 @@ export default function TvMembersTab({ active = true }) {
   const [rangeKey, setRangeKey] = useState("today");
   const [customFrom, setCustomFrom] = useState(thToday);
   const [customTo, setCustomTo] = useState(thToday);
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
+  const [datePickerField, setDatePickerField] = useState("from");
+  const [draftFrom, setDraftFrom] = useState(thToday);
+  const [draftTo, setDraftTo] = useState(thToday);
+  const [pickerMonth, setPickerMonth] = useState(() => new Date(`${thToday}T12:00:00+07:00`));
   // export: เลือก indicator ที่จะดาวน์โหลด
   const [exportOpen, setExportOpen] = useState(false);
   const [exportSel, setExportSel] = useState([]);
@@ -173,16 +179,54 @@ export default function TvMembersTab({ active = true }) {
   const inRange = (a) => { const cm = new Date(memberGrantedAt(a) || 0).getTime(); return cm >= rb.startMs && cm <= rb.endMs; };
   const fmtDMY2 = (s) => { const [y, m, d] = String(s).split("-"); return `${Number(d)}/${Number(m)}/${String(y).slice(2)}`; };
   const rangeLabel = rb.from === rb.to ? fmtDMY2(rb.from) : `${fmtDMY2(rb.from)} – ${fmtDMY2(rb.to)}`;
-  // สรุปตัวเลขต่อสคริปต์ (ใช้ในการ์ดสรุปด้านบน) — กรองตามช่วงวันที่ที่เลือก
+  const openDatePicker = () => {
+    setDraftFrom(customFrom);
+    setDraftTo(customTo);
+    setDatePickerField("from");
+    setPickerMonth(new Date(`${customFrom}T12:00:00+07:00`));
+    setDatePickerOpen(true);
+  };
+  const pickerDate = (year, month, day) => {
+    const value = new Date(year, month, day);
+    return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+  };
+  const calendarDays = (() => {
+    const year = pickerMonth.getFullYear();
+    const month = pickerMonth.getMonth();
+    const firstDay = (new Date(year, month, 1).getDay() + 6) % 7;
+    const totalDays = new Date(year, month + 1, 0).getDate();
+    const previousTotal = new Date(year, month, 0).getDate();
+    const days = [];
+    for (let i = firstDay - 1; i >= 0; i--) days.push({ day: previousTotal - i, date: pickerDate(year, month - 1, previousTotal - i), current: false });
+    for (let day = 1; day <= totalDays; day++) days.push({ day, date: pickerDate(year, month, day), current: true });
+    let nextDay = 1;
+    while (days.length < 42) days.push({ day: nextDay, date: pickerDate(year, month + 1, nextDay++), current: false });
+    return days;
+  })();
+  const selectPickerDate = (date) => {
+    if (date > thToday) return;
+    if (datePickerField === "from") {
+      setDraftFrom(date);
+      if (draftTo && date > draftTo) setDraftTo("");
+      setDatePickerField("to");
+    } else {
+      if (draftFrom && date < draftFrom) setDraftFrom(date);
+      setDraftTo(date);
+    }
+  };
+  const applyDateRange = () => {
+    if (!draftFrom || !draftTo || draftFrom > draftTo) return;
+    setCustomFrom(draftFrom);
+    setCustomTo(draftTo);
+    setRangeKey("custom");
+    setDatePickerOpen(false);
+  };
   const scriptStat = (s) => {
     const rows = access.filter((a) => a.pine_id === s.pine_id && inRange(a));
-    const isActive = (a) => statusInfo(a).label === "active";
     const soon = rows.filter((a) => a.status !== "revoked" && a.expiration && new Date(a.expiration).getTime() > now && new Date(a.expiration).getTime() - now < 7 * 86400000).length;
     const expired = rows.filter((a) => statusInfo(a).label === "Expired").length;
-    const latest = rows.slice().sort((x, y) => new Date(memberGrantedAt(y) || 0) - new Date(memberGrantedAt(x) || 0))[0];
-    return { total: rows.length, active: rows.filter(isActive).length, soon, expired, latest };
+    return { total: rows.length, active: rows.filter((a) => statusInfo(a).label === "active").length, soon, expired };
   };
-
   // ป้ายสรุประยะเวลาต่อสคริปต์
   const durLabel = (d) => d.mode === "lifetime" ? "ตลอดชีพ"
     : d.mode === "date" ? `ถึง ${d.expDate ? new Date(`${d.expDate}T00:00:00+07:00`).toLocaleDateString("th-TH", { day: "2-digit", month: "short", year: "2-digit" }) : "—"}`
@@ -322,26 +366,64 @@ export default function TvMembersTab({ active = true }) {
     const a = document.createElement("a"); a.href = url; a.download = `tv-members-${rb.from}${rb.from !== rb.to ? `_${rb.to}` : ""}.csv`; a.click(); URL.revokeObjectURL(url);
   }
 
-  const St = ({ label, value, tone }) => (
-    <div className="flex-1 bg-white rounded-2xl border border-slate-200 p-4">
-      <div className="text-[11px] uppercase tracking-wide text-slate-400">{label}</div>
-      <div className={`text-3xl font-bold mt-1 ${tone || "text-slate-800"}`}>{value}</div>
-    </div>
-  );
-  // การ์ดสรุปย่อย (ในการ์ดสรุปต่อสคริปต์)
-  const SumCard = ({ label, value, unit, tone, icon, small }) => (
-    <div className="bg-slate-50/60 rounded-xl border border-slate-200 p-3">
-      <div className="flex items-start justify-between gap-2">
-        <div className="text-[11px] text-slate-400 leading-tight">{label}</div>
-        <span className="shrink-0">{icon}</span>
-      </div>
-      <div className={`${small ? "text-lg" : "text-2xl"} font-bold mt-1 ${tone || "text-slate-800"} truncate`}>{value}</div>
-      {unit && <div className="text-[11px] text-slate-400 truncate">{unit}</div>}
-    </div>
-  );
-
   return (
-    <div className="space-y-4">
+    <div className="tv-members-shell space-y-4">
+      <style>{`
+        /* TradingView manager ใช้โทนเดียวกับหน้าแชท — ไม่แยกเป็นการ์ดขาว/เทา */
+        .tv-members-shell .bg-white,
+        .tv-members-shell [class*="bg-slate-50"] {
+          background-color: #151C25 !important;
+        }
+        .tv-members-shell .border-slate-200,
+        .tv-members-shell .border-slate-300 {
+          border-color: rgba(148,163,184,.2) !important;
+        }
+        .tv-members-shell .divide-slate-100 > :not([hidden]) ~ :not([hidden]) {
+          border-color: rgba(148,163,184,.14) !important;
+        }
+        .tv-members-shell .text-slate-800 { color: #F8FAFC !important; }
+        .tv-members-shell .text-slate-700 { color: #D6DEE9 !important; }
+        .tv-members-shell .text-slate-600 { color: #A5B4C7 !important; }
+        .tv-members-shell .text-slate-500 { color: #8795A8 !important; }
+        .tv-members-shell .text-slate-400 { color: #718096 !important; }
+        .tv-members-shell input:not([type="checkbox"]):not([type="radio"]),
+        .tv-members-shell select {
+          background-color: #10161F !important;
+          color: #E5ECF5 !important;
+          border-color: rgba(148,163,184,.24) !important;
+        }
+        .tv-members-shell input::placeholder { color: #718096 !important; }
+        .tv-members-shell button:hover:not(:disabled) { border-color: rgba(96,165,250,.55); }
+        .tv-members-shell [class*="hover\\:bg-slate-50"]:hover { background-color: rgba(148,163,184,.08) !important; }
+        .tv-members-shell .bg-brand-50\\/40 { background-color: rgba(52,82,224,.16) !important; }
+        .tv-members-shell .bg-slate-100 { background-color: #202A37 !important; }
+        .tv-members-shell .tv-members-header { padding-bottom: 18px; border-bottom: 1px solid rgba(148,163,184,.14); }
+        .tv-members-shell .tv-members-form { background: linear-gradient(180deg, #192231 0%, #151C25 100%) !important; border-color: rgba(52,82,224,.42) !important; box-shadow: 0 18px 40px -30px rgba(31,111,235,.6); }
+        .tv-members-shell .tv-members-toolbar { background: #151C25 !important; box-shadow: 0 10px 30px -28px rgba(0,0,0,.8); }
+        .tv-members-shell .tv-members-search input { min-height: 42px; border-radius: 12px; }
+        .tv-members-shell .tv-date-picker { background: #182231 !important; border-color: rgba(148,163,184,.24) !important; }
+        .tv-members-shell .tv-date-trigger { background: #10161F !important; }
+        .tv-members-shell .tv-date-select { background: #10161F !important; color: #E5ECF5 !important; border: 1px solid rgba(148,163,184,.2); }
+        .tv-members-shell .tv-member-table { background: #151C25 !important; }
+        .tv-members-shell .tv-brand-heading { background: rgba(21,28,37,.72); border: 1px solid rgba(148,163,184,.12); border-radius: 14px; padding: 10px 12px; }
+        .tv-members-shell .tv-members-overview { background: #151C25 !important; border-color: rgba(148,163,184,.16) !important; }
+        .tv-members-shell .tv-members-summary { background: #151C25 !important; border-color: rgba(148,163,184,.16) !important; }
+        .tv-members-shell .tv-members-summary > summary::-webkit-details-marker { display: none; }
+        .tv-members-shell .tv-add-member-panel { transition: width .18s ease, border-color .18s ease; }
+        .tv-members-shell .tv-add-member-panel:not([open]) { width: 250px !important; }
+        .tv-members-shell .tv-add-member-panel > summary::-webkit-details-marker { display: none; }
+        .tv-members-shell .tv-add-member-panel[open] > summary .tv-add-member-chevron { transform: rotate(45deg); }
+        .tv-members-shell .tv-add-member-chevron { transition: transform .18s ease; }
+        .tv-members-shell .tv-form-section { border-top: 1px solid rgba(148,163,184,.14); padding-top: 14px; margin-top: 14px; }
+        .tv-members-shell .tv-form-section-title { color: #D6DEE9; font-size: 12px; font-weight: 700; letter-spacing: .02em; }
+        .tv-members-shell .tv-form-section-title span { color: #60A5FA; margin-right: 6px; }
+        @media (max-width: 1023px) {
+          .tv-members-shell > .flex.flex-col.lg\\:flex-row > .lg\\:w-80 { width: 100% !important; }
+          .tv-members-shell .tv-add-member-panel:not([open]) { width: 100% !important; }
+          .tv-members-shell .tv-members-form { position: static; }
+        }
+        @media (min-width: 1024px) { .tv-members-shell .tv-members-form { position: sticky; top: 20px; } }
+      `}</style>
       {/* modal เลือก Indicator ที่จะ export */}
       {exportOpen && (
         <div className="fixed inset-0 z-[200] bg-black/60 flex items-center justify-center p-4" onClick={() => setExportOpen(false)}>
@@ -452,23 +534,73 @@ export default function TvMembersTab({ active = true }) {
       )}
       {/* หัว — เดิมเป็น "Access Console" + ป้าย "· Live Member Feed ·" ภาษาอังกฤษ
           ซึ่งไม่เข้าชุดกับทุกหน้าที่เป็นไทย และไม่ได้บอกว่าหน้านี้ทำอะไร */}
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div className="min-w-0">
-          <h2 className="ds-title text-[22px] sm:text-[26px]">สมาชิก TradingView</h2>
-          <p className="mt-1.5 text-[13.5px] text-slate-500">ให้สิทธิ์ ต่ออายุ และถอนสิทธิ์อินดิเคเตอร์ของลูกค้า</p>
+      {/* embedded = ถูกฝังอยู่ในหน้าที่มีหัวเพจของตัวเองแล้ว (ศูนย์จัดการลูกค้า)
+          จึงไม่แสดงหัวซ้ำ เหลือแค่แถบรีเฟรช/เวลาอัปเดตแบบกะทัดรัด */}
+      {embedded ? (
+        <div className="flex items-center justify-end gap-3">
+          <span className="hidden sm:flex items-center gap-1.5 text-2xs text-slate-400">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+            อัปเดต {updatedAt ? updatedAt.toLocaleTimeString("th-TH") : "—"}
+          </span>
+          <Button size="sm" onClick={load} loading={loading}>รีเฟรช</Button>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs text-slate-500 flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-emerald-500" /> อัปเดต {updatedAt ? updatedAt.toLocaleTimeString("th-TH") : "—"}</span>
-          <button onClick={load} disabled={loading} className="px-3 py-1.5 rounded-lg border border-slate-300 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50">รีเฟรช</button>
-        </div>
+      ) : (
+        <SectionTitle
+          title="สมาชิก TradingView"
+          subtitle="ให้สิทธิ์ ต่ออายุ และถอนสิทธิ์อินดิเคเตอร์ของลูกค้า"
+          right={
+            <div className="flex items-center gap-3">
+              <span className="hidden sm:flex items-center gap-1.5 text-2xs text-slate-400">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                อัปเดต {updatedAt ? updatedAt.toLocaleTimeString("th-TH") : "—"}
+              </span>
+              <Button onClick={load} loading={loading}>รีเฟรช</Button>
+            </div>
+          }
+        />
+      )}
+
+      {msg && <div className="text-sm rounded-control bg-slate-100 border border-slate-200 px-3 py-2 text-slate-700">{msg}</div>}
+
+      {/* ตัวเลขสรุป — เดิมเป็นข้อความเรียงต่อกันในแถบเดียว อ่านยากและไม่เข้าชุดกับหน้าอื่น
+          เปลี่ยนเป็นการ์ดตัวเลขชุดเดียวกับหน้าภาพรวม กวาดตาเห็นตัวเลขได้ทันที */}
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <StatCard icon={Users} label="สมาชิกทั้งหมด" value={stats.total.toLocaleString()} tone="brand" />
+        <StatCard icon={CheckCircle2} label="กำลังใช้งาน" value={stats.activeCount.toLocaleString()} tone="green" />
+        <StatCard icon={AlertTriangle} label="ใกล้หมดอายุ" value={stats.soon.toLocaleString()} tone="gold" />
+        <StatCard icon={Tv} label="อินดิเคเตอร์" value={stats.scripts.toLocaleString()} tone="purple" />
       </div>
 
-      {msg && <div className="text-sm rounded-lg bg-slate-100 border border-slate-200 px-3 py-2 text-slate-700">{msg}</div>}
+      <details className="tv-members-summary ds-card">
+        <summary className="px-4 py-3 cursor-pointer list-none flex items-center justify-between gap-3 text-sm font-semibold text-slate-200">
+          <span>สรุปตามอินดิเคเตอร์</span>
+          <span className="text-xs font-normal text-slate-500">ช่วง {rangeLabel} · กดเพื่อดูรายละเอียด</span>
+        </summary>
+        <div className="overflow-x-auto border-t border-slate-700/50">
+          <div className="min-w-[620px] grid grid-cols-[1.8fr_repeat(4,1fr)] gap-3 px-4 py-2 text-[11px] text-slate-500">
+            <span>อินดิเคเตอร์</span><span>ทั้งหมด</span><span>ใช้งานอยู่</span><span>ใกล้หมดอายุ</span><span>หมดอายุแล้ว</span>
+          </div>
+          {scripts.length === 0 ? <div className="px-4 py-4 text-xs text-slate-500">ยังไม่มีอินดิเคเตอร์</div> : scripts.map((s) => {
+            const ss = scriptStat(s);
+            return <div key={"stat-" + s.pine_id} className="min-w-[620px] grid grid-cols-[1.8fr_repeat(4,1fr)] gap-3 px-4 py-2.5 text-sm border-t border-slate-800/70">
+              <span className="truncate text-slate-200">{s.name}</span><span className="text-slate-300">{ss.total}</span><span className="text-emerald-400">{ss.active}</span><span className="text-amber-400">{ss.soon}</span><span className="text-rose-400">{ss.expired}</span>
+            </div>;
+          })}
+        </div>
+      </details>
 
       <div className="flex flex-col lg:flex-row gap-4">
         {/* ซ้าย: ฟอร์มเพิ่มสมาชิก */}
-        <div className="lg:w-80 shrink-0 bg-white rounded-2xl border border-slate-200 p-5 space-y-3 h-fit">
-          <h3 className="font-semibold text-slate-800">เพิ่มสมาชิกใหม่</h3>
+        <details className="tv-members-form tv-add-member-panel lg:w-80 shrink-0 bg-white rounded-2xl border border-slate-200 p-5 h-fit">
+          <summary className="flex items-center justify-between gap-3 cursor-pointer list-none">
+            <span>
+              <strong className="block font-semibold text-slate-100">เพิ่มสมาชิกใหม่</strong>
+              <span className="block text-[11px] text-slate-500 mt-1">กรอกข้อมูล ตรวจสอบ แล้วจึงให้สิทธิ์</span>
+            </span>
+            <span className="tv-add-member-chevron text-slate-400 text-lg leading-none">+</span>
+          </summary>
+          <div className="tv-add-member-fields space-y-3 mt-4 pt-4 border-t border-slate-700/50">
+          <div className="tv-form-section-title"><span>1</span>ข้อมูลลูกค้า</div>
           <div>
             <label className="text-xs text-slate-500">TradingView username</label>
             <input value={uname} onChange={(e) => setUname(e.target.value)} placeholder="username TV" className="w-full mt-1 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
@@ -487,6 +619,7 @@ export default function TvMembersTab({ active = true }) {
             <label className="text-xs text-slate-500">ไอดีเทรด (XM)</label>
             <input value={tradeId} onChange={(e) => setTradeId(e.target.value)} placeholder="เลขไอดีเทรด — ต้องผ่านก่อนถึงเพิ่มได้" className="w-full mt-1 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
           </div>
+          <div className="tv-form-section-title tv-form-section"><span>2</span>เลือกแบรนด์และอินดิเคเตอร์</div>
           <div>
             <label className="text-xs text-slate-500">แบรนด์</label>
             <select value={brandSel ?? ""} onChange={(e) => setBrandSel(Number(e.target.value) || null)} className="w-full mt-1 rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white">
@@ -525,29 +658,61 @@ export default function TvMembersTab({ active = true }) {
             </div>
             {pineIds.length > 0 && <div className="text-[11px] text-slate-400 mt-1">เลือกแล้ว {pineIds.length} สคริปต์</div>}
           </div>
+          <div className="tv-form-section-title tv-form-section"><span>3</span>ตรวจสอบข้อมูลและยืนยัน</div>
           <button onClick={grant} disabled={granting} className="w-full rounded-lg bg-brand-600 text-white py-2.5 text-sm font-semibold hover:bg-brand-700 disabled:opacity-50">
             {granting ? "กำลังเพิ่ม..." : "เพิ่มสิทธิ์"}
           </button>
-        </div>
+          </div>
+        </details>
 
         {/* ขวา: ค้นหา + รายชื่อต่อสคริปต์ */}
         <div className="flex-1 min-w-0 space-y-3">
+          <div className="flex items-end justify-between gap-3 px-1">
+            <div>
+              <h3 className="text-sm font-semibold text-slate-200">รายการสิทธิ์ TradingView</h3>
+              <p className="text-[11px] text-slate-500 mt-0.5">ค้นหาและจัดการสมาชิกแยกตามแบรนด์</p>
+            </div>
+            <span className="text-[11px] text-slate-500 shrink-0">{access.length.toLocaleString()} รายการ</span>
+          </div>
           {/* ช่วงวันที่ดูข้อมูล (กรองตามวันที่เพิ่มสมาชิก) */}
-          <div className="bg-white rounded-2xl border border-slate-200 p-3 flex flex-wrap items-center gap-2">
+          <div className="tv-members-toolbar relative bg-white rounded-2xl border border-slate-200 p-3 flex flex-wrap items-center gap-2">
             <span className="text-xs text-slate-500 mr-1">ช่วงวันที่:</span>
             {RANGE_PRESETS.map(([key, label]) => (
-              <button key={key} onClick={() => setRangeKey(key)} className={`px-2.5 py-1 rounded-lg text-xs font-medium ${rangeKey === key ? "bg-brand-600 text-white" : "text-slate-600 hover:bg-slate-100 border border-slate-200"}`}>{label}</button>
+              <button key={key} onClick={() => key === "custom" ? openDatePicker() : setRangeKey(key)} className={`px-2.5 py-1 rounded-lg text-xs font-medium ${rangeKey === key ? "bg-brand-600 text-white" : "text-slate-600 hover:bg-slate-100 border border-slate-200"}`}>{label}</button>
             ))}
-            {rangeKey === "custom" && (
-              <div className="flex items-center gap-1.5">
-                <input type="date" value={customFrom} max={thToday} onChange={(e) => setCustomFrom(e.target.value)} className="rounded-lg border border-slate-300 px-2 py-1 text-xs" />
-                <span className="text-slate-400 text-xs">ถึง</span>
-                <input type="date" value={customTo} max={thToday} onChange={(e) => setCustomTo(e.target.value)} className="rounded-lg border border-slate-300 px-2 py-1 text-xs" />
+            {rangeKey === "custom" && <button onClick={openDatePicker} className="tv-date-trigger rounded-lg border border-slate-300 px-3 py-1 text-xs text-slate-200">{fmtDMY2(customFrom)} ถึง {fmtDMY2(customTo)}</button>}
+            <span className="ml-auto text-xs text-slate-400">แสดง: {rangeLabel}</span>
+            {datePickerOpen && (
+              <div className="tv-date-picker absolute z-30 top-full left-0 mt-2 w-[min(340px,calc(100vw-32px))] rounded-2xl border p-4 shadow-2xl">
+                <div className="flex items-center justify-between gap-2 mb-3">
+                  <button onClick={() => setPickerMonth((d) => new Date(d.getFullYear(), d.getMonth() - 1, 1))} className="p-1.5 rounded-lg text-slate-300 hover:bg-slate-700"><ChevronLeft size={18} /></button>
+                  <div className="flex items-center gap-1.5">
+                    <select value={pickerMonth.getMonth()} onChange={(e) => setPickerMonth(new Date(pickerMonth.getFullYear(), Number(e.target.value), 1))} className="tv-date-select rounded-lg px-2 py-1 text-sm font-semibold">
+                      {Array.from({ length: 12 }, (_, month) => <option key={month} value={month}>{new Date(2020, month, 1).toLocaleDateString("th-TH", { month: "long" })}</option>)}
+                    </select>
+                    <select value={pickerMonth.getFullYear()} onChange={(e) => setPickerMonth(new Date(Number(e.target.value), pickerMonth.getMonth(), 1))} className="tv-date-select rounded-lg px-2 py-1 text-sm font-semibold">
+                      {Array.from({ length: 8 }, (_, i) => pickerMonth.getFullYear() - 5 + i).map((year) => <option key={year} value={year}>{year + 543}</option>)}
+                    </select>
+                  </div>
+                  <button onClick={() => setPickerMonth((d) => new Date(d.getFullYear(), d.getMonth() + 1, 1))} className="p-1.5 rounded-lg text-slate-300 hover:bg-slate-700"><ChevronRight size={18} /></button>
+                </div>
+                <div className="grid grid-cols-7 gap-1 text-center text-[11px] text-slate-500 mb-1">{["จ", "อ", "พ", "พฤ", "ศ", "ส", "อา"].map((day) => <span key={day}>{day}</span>)}</div>
+                <div className="grid grid-cols-7 gap-1">
+                  {calendarDays.map((item) => {
+                    const disabled = item.date > thToday;
+                    const selected = item.date === draftFrom || item.date === draftTo;
+                    const between = draftFrom && draftTo && item.date > draftFrom && item.date < draftTo;
+                    return <button key={item.date} disabled={disabled} onClick={() => selectPickerDate(item.date)} className={`h-8 rounded-lg text-xs ${selected ? "bg-brand-600 text-white font-semibold" : between ? "bg-brand-600/20 text-brand-200" : item.current ? "text-slate-200 hover:bg-slate-700" : "text-slate-600"} ${disabled ? "opacity-30 cursor-not-allowed" : ""}`}>{item.day}</button>;
+                  })}
+                </div>
+                <div className="flex items-center justify-between gap-2 mt-4 pt-3 border-t border-slate-700/60">
+                  <span className="text-[11px] text-slate-500">{draftFrom ? fmtDMY2(draftFrom) : "เริ่มต้น"} → {draftTo ? fmtDMY2(draftTo) : "วันสิ้นสุด"}</span>
+                  <button onClick={applyDateRange} disabled={!draftFrom || !draftTo || draftFrom > draftTo} className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">ใช้ช่วงวันที่</button>
+                </div>
               </div>
             )}
-            <span className="ml-auto text-xs text-slate-400">แสดง: {rangeLabel}</span>
           </div>
-          <div className="flex gap-2">
+          <div className="tv-members-search flex gap-2">
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหา username, ชื่อ, หรือเลข trade id" className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
           </div>
           {/* จัดกลุ่มตามแบรนด์ (เฉพาะแบรนด์ที่โชว์ในหน้าจัดการ) — นับ/แสดง/export แยกกัน ไม่ปน */}
@@ -557,7 +722,7 @@ export default function TvMembersTab({ active = true }) {
             const brCollapsed = collapsed["brand:" + b.id];
             return (
             <div key={"brand-" + b.id} className="space-y-3">
-              <div className="flex items-center justify-between gap-2 px-1 pt-1">
+              <div className="tv-brand-heading flex items-center justify-between gap-2">
                 <button onClick={() => setCollapsed((c) => ({ ...c, ["brand:" + b.id]: !brCollapsed }))} className="flex items-center gap-2 min-w-0">
                   {brCollapsed ? <ChevronDown size={18} className="text-slate-400 shrink-0" /> : <ChevronUp size={18} className="text-slate-400 shrink-0" />}
                   <h2 className="text-lg font-bold text-slate-800 truncate">{b.name}</h2>
@@ -569,37 +734,13 @@ export default function TvMembersTab({ active = true }) {
               </div>
               {!brCollapsed && brScripts.length === 0 && <div className="bg-white rounded-2xl border border-slate-200 p-4 text-center text-xs text-slate-400">แบรนด์นี้ยังไม่มีสคริปต์ — เพิ่มที่ ตั้งค่า → ตั้งค่า TV</div>}
               {!brCollapsed && brScripts.map((s) => {
-                const ss = scriptStat(s);
-                const open = !collapsed["sum:" + s.pine_id];
-                return (
-                  <div key={"sum-" + s.pine_id} className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <h3 className="font-bold text-slate-800 truncate">{s.name}</h3>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span className="text-xs text-slate-400">{ss.total} สมาชิก</span>
-                        <button onClick={() => setCollapsed((c) => ({ ...c, ["sum:" + s.pine_id]: open }))} className="text-slate-400 hover:text-slate-600">{open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>
-                      </div>
-                    </div>
-                    {open && (
-                      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
-                        <SumCard label="ทั้งหมด" value={ss.total} unit="สมาชิก" icon={<Users size={16} className="text-brand-600" />} />
-                        <SumCard label="Active" value={ss.active} unit="สมาชิก" tone="text-emerald-600" icon={<span className="w-2 h-2 rounded-full bg-emerald-500 inline-block mt-1.5" />} />
-                        <SumCard label="หมดอายุภายใน 7 วัน" value={ss.soon} unit="สมาชิก" tone="text-amber-500" icon={<Clock size={16} className="text-amber-400" />} />
-                        <SumCard label="หมดอายุแล้ว" value={ss.expired} unit="สมาชิก" tone="text-rose-500" icon={<CalendarX2 size={16} className="text-rose-400" />} />
-                        <SumCard label="เพิ่มล่าสุด" value={ss.latest ? createLabel(ss.latest) : "—"} unit={ss.latest?.username || "—"} small icon={<CalendarPlus size={16} className="text-violet-400" />} />
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-              {!brCollapsed && brScripts.map((s) => {
             const allRows = sortRows(access.filter((a) => a.pine_id === s.pine_id && filtered(a) && inRange(a)));
             const open = !collapsed[s.pine_id];
             const totalPages = Math.max(1, Math.ceil(allRows.length / pageSize));
             const page = Math.min(pageBy[s.pine_id] || 1, totalPages);
             const pageRows = allRows.slice((page - 1) * pageSize, page * pageSize);
             return (
-              <div key={s.pine_id} className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+              <div key={s.pine_id} className="tv-member-table bg-white rounded-2xl border border-slate-200 overflow-hidden">
                 <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between gap-2">
                   <div className="min-w-0">
                     <div className="font-semibold text-slate-800 truncate">{s.name}</div>

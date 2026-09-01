@@ -27,9 +27,11 @@ export const TABS = [
   { key: "campaigns", label: "แคมเปญ", icon: TrendingUp },
   { key: "analyze", label: "วิเคราะห์", icon: BarChart3 },
   { key: "inbox", label: "ตอบแชท", icon: Inbox },
-  { key: "customerdb", label: "ลูกค้า + TradingView", icon: UsersRound },
+  { key: "customerdb", label: "จัดการลูกค้า", icon: UsersRound },
   { key: "leaderboard", label: "กระดานแต้ม", icon: Trophy },
-  { key: "tv_members", label: "จัดการสมาชิก TV", icon: Tv },
+  // tv_members ไม่อยู่ในเมนูแล้ว — เนื้อหาเดียวกันเป๊ะกับแท็บ TradingView ในหน้า "ลูกค้า + TradingView"
+  // แต่ "คีย์สิทธิ์" tv_members ยังต้องคงไว้ เพราะ edge function tradingview และ RLS ของ tv_external_snapshot
+  // เช็คสิทธิ์ด้วยคีย์นี้ (ดู supabase/functions/tradingview/index.ts) — ลบคีย์เมื่อไหร่พนักงานที่ไม่ใช่แอดมินใช้ TV ไม่ได้ทันที
   { key: "settings", label: "ตั้งค่า", icon: SettingsIcon },
 ];
 

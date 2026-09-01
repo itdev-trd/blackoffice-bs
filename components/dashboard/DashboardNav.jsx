@@ -3,11 +3,12 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { ExternalLink, LogOut, Menu, RefreshCw, Sparkles, X } from "lucide-react";
+import { ExternalLink, LogOut, Menu, RefreshCw, X } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { logActivity } from "@/lib/utils/activity";
 import { clearCustomerDatabaseCaches } from "@/lib/customerdb-cache";
 import { useDashboard, ROUTE_PATH } from "@/components/dashboard/DashboardContext";
+import BrandMark from "@/components/shared/BrandMark";
 
 // แถบเมนูล่างมือถือ — เข้าถึง 5 หน้าที่ใช้บ่อยที่สุดได้ในแตะเดียว แบบแอปมือถือทั่วไป
 // (label ย่อกว่าเมนูเต็มด้านข้าง เพราะพื้นที่จำกัด)
@@ -25,6 +26,9 @@ export default function DashboardNav({ children }) {
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const isInboxRoute = pathname.startsWith(ROUTE_PATH.inbox);
+  // หน้าตอบแชทมี 3 คอลัมน์ (ลิสต์ + ห้องแชท + พาเนลลูกค้า) จึงยุบเมนูเหลือไอคอนเพื่อสงวนพื้นที่แนวนอน
+  // หน้าอื่นแสดงชื่อเมนูเต็ม เพราะไอคอนล้วนอ่านยากสำหรับคนที่ไม่ได้ใช้ทุกวัน
+  const navCollapsed = isInboxRoute;
   const tabByKey = Object.fromEntries((visibleTabs || []).map((t) => [t.key, t]));
   const mobileNavItems = MOBILE_PRIMARY_TABS
     .map((m) => (tabByKey[m.key] ? { ...tabByKey[m.key], navLabel: m.navLabel } : null))
@@ -66,49 +70,85 @@ export default function DashboardNav({ children }) {
   return (
     <div className="min-h-screen md:flex">
       {/* Sidebar ซ้าย — เดสก์ท็อป/แท็บเล็ต */}
-      <aside className="hidden md:flex md:w-[88px] md:flex-col md:shrink-0 md:h-screen md:sticky md:top-0 bg-night-surface border-r border-night-border z-30 py-3 gap-1 items-center">
+      {/* Sidebar มีสองโหมด:
+          - ปกติ = กว้าง มีชื่อเมนูกำกับทุกอัน (ไอคอนล้วนต้องอาศัยการจำ/hover ทีละอัน
+            ซึ่งเป็นปัญหากับไอคอนที่หน้าตาใกล้กันอย่าง รออนุมัติ/แคมเปญ/วิเคราะห์)
+          - หน้าตอบแชท = ยุบเหลือไอคอน เพราะหน้านั้นมี 3 คอลัมน์อยู่แล้ว ต้องสงวนพื้นที่แนวนอน
+          โหมดยุบยังมี title ให้ hover อ่านชื่อได้ */}
+      <aside
+        className={`hidden md:flex md:flex-col md:shrink-0 md:h-screen md:sticky md:top-0 bg-night-surface border-r border-night-border z-30 py-3 gap-1 transition-[width] duration-200 ease-ui ${
+          // 168px = พอดีกับเมนูที่ยาวที่สุด ("สร้างคอนเทนต์" 85px + ไอคอน + ระยะขอบ) โดยไม่มีชื่อไหนโดนตัด
+          navCollapsed ? "md:w-[88px] items-center" : "md:w-[168px]"
+        }`}
+      >
         <Link
           href={ROUTE_PATH.overview}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-control bg-night-accent text-white mb-3"
-          title="AdFlow OS — กลับหน้าแรก"
+          className={`flex shrink-0 items-center gap-2.5 rounded-control mb-3 ${navCollapsed ? "h-8 w-8 justify-center" : "px-3 h-10 mx-2"}`}
+          title="Besight — กลับหน้าแรก"
         >
-          <Sparkles size={17} />
+          <BrandMark className="h-8 w-8 shrink-0" />
+          {!navCollapsed && <span className="truncate text-[15px] font-bold tracking-tight text-night-ink">Besight</span>}
         </Link>
-        <nav className="flex-1 overflow-y-auto flex flex-col gap-1 w-full items-center px-2">
+        <nav className={`flex-1 overflow-y-auto flex flex-col gap-1 w-full px-2 ${navCollapsed ? "items-center" : ""}`}>
           {perm && visibleTabs.map((t) =>
             t.href ? (
               <a key={t.key} href={t.href} target="_blank" rel="noopener noreferrer"
                 title={t.label}
-                className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-control text-night-ink-2 hover:text-night-ink hover:bg-night-surface2">
-                <t.icon size={18} />
+                className={`relative flex shrink-0 items-center rounded-control text-night-ink-2 hover:text-night-ink hover:bg-night-surface2 ${
+                  navCollapsed ? "h-10 w-10 justify-center" : "h-11 w-full gap-3 px-3"
+                }`}>
+                <t.icon size={18} className="shrink-0" />
+                {!navCollapsed && <span className="truncate text-sm font-medium">{t.label}</span>}
               </a>
             ) : (
               <Link key={t.key} href={ROUTE_PATH[t.key]} title={t.label}
-                className={`relative flex h-10 w-10 shrink-0 items-center justify-center rounded-control ${
+                className={`relative flex shrink-0 items-center rounded-control ${
+                  navCollapsed ? "h-10 w-10 justify-center" : "h-11 w-full gap-3 px-3"
+                } ${
                   tab === t.key ? "bg-night-accent/15 text-night-accent-light" : "text-night-ink-2 hover:text-night-ink hover:bg-night-surface2"
                 }`}>
-                {tab === t.key && <span className="absolute left-[-8px] top-1/2 -translate-y-1/2 h-5 w-[3px] rounded-r bg-night-accent" />}
-                <t.icon size={18} />
+                {tab === t.key && <span className={`absolute top-1/2 -translate-y-1/2 h-5 w-[3px] rounded-r bg-night-accent ${navCollapsed ? "left-[-8px]" : "left-[-8px]"}`} />}
+                <t.icon size={18} className="shrink-0" />
+                {!navCollapsed && <span className="truncate text-sm font-medium">{t.label}</span>}
               </Link>
             )
           )}
         </nav>
-        {/* ท้าย sidebar: รีเฟรช/ออกจากระบบ/อีเมลผู้ใช้ — ไอคอนล้วน มี tooltip (title) บอกรายละเอียดตอน hover
-            สำคัญเพราะพนักงานหลายคนใช้เครื่องร่วมกัน ต้องรู้ว่ากำลังใช้งานด้วยบัญชีไหน */}
-        <div className="shrink-0 flex flex-col items-center gap-1 pt-2 mt-1 border-t border-night-border w-full px-2">
-          <button onClick={loadAll} className="flex h-9 w-9 items-center justify-center rounded-control text-night-ink-3 hover:bg-night-surface2 hover:text-night-ink" title="รีเฟรชข้อมูล">
-            <RefreshCw size={16} />
+        {/* ท้าย sidebar: รีเฟรช/ออกจากระบบ/อีเมลผู้ใช้
+            อีเมลสำคัญเพราะพนักงานหลายคนใช้เครื่องร่วมกัน ต้องรู้ว่ากำลังใช้งานด้วยบัญชีไหน */}
+        <div className={`shrink-0 flex pt-3 mt-1 border-t border-night-border w-full px-2 ${navCollapsed ? "flex-col items-center gap-1.5" : "flex-col gap-1.5"}`}>
+          <button
+            onClick={loadAll}
+            className={`flex items-center rounded-lg border border-sky-400/30 bg-sky-400/10 text-sky-300 transition-colors hover:border-sky-300/60 hover:bg-sky-400/20 ${
+              navCollapsed ? "h-11 w-16 flex-col justify-center gap-0.5" : "h-10 w-full gap-2.5 px-3"
+            }`}
+            title="รีเฟรชข้อมูล"
+            aria-label="รีเฟรชข้อมูล"
+          >
+            <RefreshCw size={17} className="shrink-0" />
+            <span className={navCollapsed ? "text-[10px] font-semibold leading-none" : "text-[13px] font-semibold"}>รีเฟรช</span>
           </button>
-          <button onClick={handleLogout} className="flex h-9 w-9 items-center justify-center rounded-control text-night-ink-3 hover:bg-night-surface2 hover:text-night-ink" title="ออกจากระบบ">
-            <LogOut size={16} />
+          <button
+            onClick={handleLogout}
+            className={`flex items-center rounded-lg border border-rose-400/30 bg-rose-400/10 text-rose-300 transition-colors hover:border-rose-300/60 hover:bg-rose-400/20 ${
+              navCollapsed ? "h-11 w-16 flex-col justify-center gap-0.5" : "h-10 w-full gap-2.5 px-3"
+            }`}
+            title="ออกจากระบบ"
+            aria-label="ออกจากระบบ"
+          >
+            <LogOut size={17} className="shrink-0" />
+            <span className={navCollapsed ? "text-[10px] font-semibold leading-none" : "text-[13px] font-semibold"}>ออกจากระบบ</span>
           </button>
           {perm?.email && (
-            <span
-              className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-night-accent/15 text-2xs font-bold uppercase text-night-accent-light"
+            <div
+              className={`mt-1 flex items-center gap-2 min-w-0 ${navCollapsed ? "justify-center" : "px-1 pb-1"}`}
               title={perm.email}
             >
-              {String(perm.email).slice(0, 1)}
-            </span>
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-night-accent/15 text-2xs font-bold uppercase text-night-accent-light">
+                {String(perm.email).slice(0, 1)}
+              </span>
+              {!navCollapsed && <span className="min-w-0 flex-1 truncate text-2xs text-night-ink-2">{perm.email}</span>}
+            </div>
           )}
         </div>
       </aside>
@@ -118,15 +158,28 @@ export default function DashboardNav({ children }) {
         <header className="md:hidden app-header bg-night-surface border-b border-night-border sticky top-0 z-30">
           <div className="w-full px-4 sm:px-6 py-3 flex items-center justify-between gap-2">
             <Link href={ROUTE_PATH.overview} className="flex items-center gap-2 font-semibold text-night-ink hover:opacity-80 min-w-0" title="กลับหน้าแรก">
-              <Sparkles size={20} className="shrink-0" />
-              <span className="truncate">AdFlow OS</span>
+              <BrandMark className="h-7 w-7" />
+              <span className="truncate">Besight</span>
             </Link>
             {/* เว้นระยะห่างรีเฟรช/ออกจากระบบให้มากพอ กันกดผิด (เดิมชิดกันเกินไป) */}
-            <div className="flex items-center gap-6 shrink-0">
-              <button onClick={loadAll} className="text-night-ink-3 hover:text-night-ink p-1" title="รีเฟรช"><RefreshCw size={18} /></button>
-              <button onClick={handleLogout} className="text-night-ink-3 hover:text-night-ink flex items-center gap-1 text-sm p-1" title="ออกจากระบบ">
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={loadAll}
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-sky-400/40 bg-sky-400/10 px-2.5 text-xs font-semibold text-sky-300 transition-colors hover:border-sky-300/70 hover:bg-sky-400/20"
+                title="รีเฟรชข้อมูล"
+                aria-label="รีเฟรชข้อมูล"
+              >
+                <RefreshCw size={16} />
+                <span>รีเฟรช</span>
+              </button>
+              <button
+                onClick={handleLogout}
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-rose-400/40 bg-rose-400/10 px-2.5 text-xs font-semibold text-rose-300 transition-colors hover:border-rose-300/70 hover:bg-rose-400/20"
+                title="ออกจากระบบ"
+                aria-label="ออกจากระบบ"
+              >
                 <LogOut size={16} />
-                <span className="hidden sm:inline">ออกจากระบบ</span>
+                <span>ออก</span>
               </button>
             </div>
           </div>

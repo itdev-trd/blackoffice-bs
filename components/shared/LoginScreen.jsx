@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Sparkles } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import PasswordInput from "@/components/shared/PasswordInput";
+import BrandMark from "@/components/shared/BrandMark";
 
 // ข้อความ error จาก Supabase Auth เป็นภาษาอังกฤษเชิงเทคนิค
 // ผู้ใช้เป็นพนักงานไทย จึงแปลงเป็นข้อความที่บอกว่าต้องทำอะไรต่อ
@@ -44,9 +45,9 @@ export default function LoginScreen() {
       <form onSubmit={handleSubmit} className="ds-card w-full max-w-sm p-7 space-y-4 shadow-card">
         <div className="text-center">
           <div className="inline-flex items-center justify-center w-11 h-11 rounded-card bg-brand-600 text-white mb-3">
-            <Sparkles size={20} />
+            <BrandMark className="h-11 w-11" />
           </div>
-          <h1 className="ds-title text-[17px]">AdFlow OS</h1>
+          <h1 className="ds-title text-[17px]">Besight</h1>
           <p className="mt-1 text-[13.5px] text-slate-500">เข้าสู่ระบบเพื่อจัดการโฆษณาและตอบแชท</p>
         </div>
 

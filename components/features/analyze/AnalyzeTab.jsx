@@ -2751,7 +2751,7 @@ async function exportTrackerExcel(campaignName, rows) {
   // โหลด ExcelJS เฉพาะตอนกด Export เพื่อไม่เพิ่มภาระให้หน้า Analyze ตอนเปิดใช้งานปกติ
   const { default: ExcelJS } = await import("exceljs");
   const wb = new ExcelJS.Workbook();
-  wb.creator = "AdFlow OS";
+  wb.creator = "Besight";
   wb.created = new Date();
   wb.calcProperties.fullCalcOnLoad = true;
 

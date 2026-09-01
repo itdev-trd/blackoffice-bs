@@ -69,7 +69,7 @@ export default function OverviewTab({ adContent = [], adCopies = [], adImages = 
       />
 
       {/* ตัวเลขสรุป — ค่าโฆษณามาก่อน เพราะเป็นตัวเดียวที่เป็นเงินไหลออกจริง */}
-      <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard
           icon={BarChart3}
           label="ค่าโฆษณาวันนี้"
@@ -101,7 +101,7 @@ export default function OverviewTab({ adContent = [], adCopies = [], adImages = 
         />
       </div>
 
-      <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,1fr)]">
+      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(320px,1fr)]">
         {/* เงินไปลงที่แอดตัวไหน */}
         <Card className="overflow-hidden">
           <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">

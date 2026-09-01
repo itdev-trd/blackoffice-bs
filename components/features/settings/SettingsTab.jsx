@@ -33,6 +33,8 @@ import Spinner from "@/components/shared/Spinner";
 import NumInput from "@/components/shared/NumInput";
 import { normalizeBrandConfig } from "@/components/features/generate/GenerateTab";
 import { SETTINGS_SECTIONS } from "@/lib/constants/settings";
+import AdTargetingCard from "@/components/features/settings/AdTargetingCard";
+import ChatMenuPanel from "@/components/features/settings/ChatMenuPanel";
 import { EmptyState, SectionTitle } from "@/components/ui";
 import {
   AiAssistPanel,
@@ -779,11 +781,16 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
     : SETTINGS_SECTIONS;
   const [section, setSection] = useState(() => visibleSections[0]?.key || "general");
   const [sectionQuery, setSectionQuery] = useState("");
+  const [openSettingsGroups, setOpenSettingsGroups] = useState({});
   const [secMenuOpen, setSecMenuOpen] = useState(false);   // (เดิม) มือถือ: กางรายการหัวข้อตั้งค่า
   const [mobileDetail, setMobileDetail] = useState(false);  // มือถือ: false = โชว์ลิสต์เมนู (แบบหน้าโฮม), true = เข้าไปดูเนื้อหาหัวข้อ
   // ถ้าหัวข้อปัจจุบันไม่มีสิทธิ์เข้า → เด้งไปหัวข้อแรกที่เข้าได้
   useEffect(() => { if (visibleSections.length && !visibleSections.some((s) => s.key === section)) setSection(visibleSections[0].key); }, [allowedSettings]);
   const [campaignDefaults, setCampaignDefaults] = useState(settings.campaign_defaults || {});
+  const [launchCfg, setLaunchCfg] = useState(settings.launch_config || {});
+  // launch_config ถูกเขียนจากสองที่: การ์ดนี้ กับ LaunchConfigCard ในหัวข้อ "ทั่วไป" (ที่ upsert ตรงเข้า DB เอง)
+  // ถ้าไม่ sync กลับ แอดมินที่กด "ใช้ค่าที่ AI แนะนำ" แล้วมาเซฟหัวข้อแคมเปญ จะเขียนทับค่าเก่าที่ค้างใน state
+  useEffect(() => { setLaunchCfg(settings.launch_config || {}); }, [settings.launch_config]);
   const [thresholds, setThresholds] = useState(settings.optimization_thresholds || {});
   const [brandVoice, setBrandVoice] = useState(settings.brand_voice || {});
   const [brandConfig, setBrandConfig] = useState(() => normalizeBrandConfig(settings.brand_assets));
@@ -803,7 +810,10 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
     setSaveError("");
     const now = new Date().toISOString();
     const rowsBySection = {
-      campaign: [{ key: "campaign_defaults", value: campaignDefaults, updated_at: now }],
+      campaign: [
+        { key: "campaign_defaults", value: campaignDefaults, updated_at: now },
+        { key: "launch_config", value: launchCfg, updated_at: now },
+      ],
       decision: [{ key: "optimization_thresholds", value: thresholds, updated_at: now }],
       brand: [
         { key: "brand_voice", value: brandVoice, updated_at: now },
@@ -825,6 +835,7 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
     // Edge Function เซฟลง DB ให้เรียบร้อยแล้ว — ตรงนี้แค่ sync state ฝั่งหน้าเว็บให้ตรงกับสิ่งที่บันทึกไปจริง
     // เพื่อให้แอดมินเห็นค่าที่ AI ตั้งให้ทันที และแก้ต่อแบบ custom ได้ถ้าต้องการ
     if (applied?.campaign_defaults) setCampaignDefaults(applied.campaign_defaults);
+    if (applied?.launch_config) setLaunchCfg(applied.launch_config);
     if (applied?.optimization_thresholds) setThresholds(applied.optimization_thresholds);
     if (applied?.brand_voice) setBrandVoice(applied.brand_voice);
     onSaved?.();
@@ -889,9 +900,13 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
   const cur = visibleSections.find((s) => s.key === section) || visibleSections[0];
   const filteredSections = visibleSections.filter((s) => s.label.toLowerCase().includes(sectionQuery.trim().toLowerCase()));
   const settingsGroups = [
-    { label: "วางแผนและ AI", keys: ["general", "campaign", "decision", "brand", "ai_models", "ai_prompts"] },
-    { label: "แชทและลูกค้า", keys: ["ghost", "leadfields", "synccfg", "savedreplies", "knowledge", "replystats"] },
-    { label: "ระบบและการเชื่อมต่อ", keys: ["notifications", "jobs", "prefetch", "meta", "openai_key", "line", "permissions", "tv_settings", "leaderboard", "activity"] },
+    { label: "การเชื่อมต่อและ API", keys: ["meta", "openai_key", "line"] },
+    { label: "แชทและการตอบกลับ", keys: ["leadfields", "synccfg", "ghost", "savedreplies", "chatmenu", "knowledge"] },
+    { label: "AI และคอนเทนต์", keys: ["general", "ai_models", "ai_prompts", "brand"] },
+    { label: "แคมเปญและการวิเคราะห์", keys: ["campaign", "decision", "prefetch", "replystats"] },
+    { label: "งานอัตโนมัติและแจ้งเตือน", keys: ["jobs", "notifications"] },
+    { label: "ทีมและความปลอดภัย", keys: ["permissions", "activity"] },
+    { label: "TradingView และแต้มทีม", keys: ["tv_settings", "leaderboard"] },
   ];
   const groupedSections = settingsGroups.map((group) => ({
     ...group,
@@ -923,30 +938,50 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
       {/* แถบเมนูตั้งค่า — มือถือ: โชว์เป็นลิสต์เหมือนหน้าโฮม (ซ่อนเมื่อเข้าไปดูหัวข้อ) */}
       <div className={`settings-page-nav md:w-56 shrink-0 ${mobileDetail ? "hidden md:block" : "block"}`}>
         {/* มือถือ: ลิสต์หัวข้อแนวตั้งแบบเมนูหน้าโฮม แตะเพื่อเข้าไปดูเนื้อหา */}
-        <nav className="md:hidden flex flex-col gap-0.5 bg-white rounded-2xl border border-slate-200 p-2">
-          {filteredSections.map((s) => (
-            <button
-              key={s.key}
-              onClick={() => { setSection(s.key); setMobileDetail(true); window.scrollTo({ top: 0, behavior: "smooth" }); }}
-              className="flex items-center gap-2.5 px-3 py-3 rounded-xl text-sm font-medium text-left text-slate-700 hover:bg-slate-100"
-            >
-              <s.icon size={18} className="shrink-0 text-slate-500" />
-              <span className="truncate flex-1">{s.label}</span>
-              <ChevronDown size={16} className="-rotate-90 text-slate-300 shrink-0" />
-            </button>
+        <nav className="md:hidden flex flex-col gap-2 bg-white rounded-2xl border border-slate-200 p-2">
+          {groupedSections.map((group) => (
+            <div key={group.label} className="settings-nav-group rounded-xl border border-slate-100 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setOpenSettingsGroups((open) => ({ ...open, [group.label]: !(open[group.label] ?? group.items.some((s) => s.key === section)) }))}
+                className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left hover:bg-slate-50"
+              >
+                <span className="text-sm font-bold text-slate-300">{group.label}</span>
+                <ChevronDown size={15} className={`text-slate-400 transition-transform ${(openSettingsGroups[group.label] ?? group.items.some((s) => s.key === section)) ? "" : "-rotate-90"}`} />
+              </button>
+              {(openSettingsGroups[group.label] ?? group.items.some((s) => s.key === section)) && group.items.map((s) => (
+                <button
+                  key={s.key}
+                  onClick={() => { setSection(s.key); setOpenSettingsGroups((open) => ({ ...open, [group.label]: true })); setMobileDetail(true); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+                  className={`flex w-full items-center gap-2 px-4 py-2 text-xs font-medium text-left ${section === s.key ? "bg-brand-50 text-brand-700" : "text-slate-700 hover:bg-slate-50"}`}
+                >
+                  <s.icon size={15} className="shrink-0 text-slate-500" />
+                  <span className="truncate flex-1">{s.label}</span>
+                  <ChevronDown size={15} className="-rotate-90 text-slate-300 shrink-0" />
+                </button>
+              ))}
+            </div>
           ))}
+          {filteredSections.length === 0 && <div className="p-3 text-center text-xs text-slate-400">ไม่พบหัวข้อนี้</div>}
         </nav>
 
         {/* เดสก์ท็อป: รายการแนวตั้งติดขอบจอ */}
         <div className="settings-page-nav-desktop hidden md:flex md:flex-col gap-1 bg-white rounded-2xl border border-slate-200 p-2 md:sticky md:top-24">
           {groupedSections.map((group) => (
             <div key={group.label} className="settings-nav-group">
-              <div className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400">{group.label}</div>
-              {group.items.map((s) => (
+              <button
+                type="button"
+                onClick={() => setOpenSettingsGroups((open) => ({ ...open, [group.label]: !(open[group.label] ?? group.items.some((s) => s.key === section)) }))}
+                className="flex w-full items-center justify-between gap-2 px-3 pb-1 pt-2 text-left hover:text-slate-600"
+              >
+                <span className="text-xs font-bold text-slate-300">{group.label}</span>
+                <ChevronDown size={14} className={`text-slate-400 transition-transform ${(openSettingsGroups[group.label] ?? group.items.some((s) => s.key === section)) ? "" : "-rotate-90"}`} />
+              </button>
+              {(openSettingsGroups[group.label] ?? group.items.some((s) => s.key === section)) && group.items.map((s) => (
                 <button
                   key={s.key}
-                  onClick={() => setSection(s.key)}
-                  className={`flex w-full items-center gap-2 px-3 py-2 rounded-control text-sm font-medium whitespace-nowrap text-left shrink-0 border-l-[3px] ${
+                  onClick={() => { setSection(s.key); setOpenSettingsGroups((open) => ({ ...open, [group.label]: true })); }}
+                  className={`flex w-full items-center gap-2 px-3 py-1.5 rounded-control text-xs font-medium whitespace-nowrap text-left shrink-0 border-l-[3px] ${
                     section === s.key
                       ? "border-brand-600 bg-brand-50 text-brand-700"
                       : "border-transparent text-slate-600 hover:bg-slate-50"
@@ -988,6 +1023,7 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
       {section === "jobs" && <ScheduledJobsPanel />}
       {section === "prefetch" && <InsightsPrefetchPanel />}
       {section === "savedreplies" && <SavedRepliesPanel allowedPages={allowedPages} />}
+      {section === "chatmenu" && <ChatMenuPanel allowedPages={allowedPages} />}
       {section === "knowledge" && <KnowledgeBasePanel allowedPages={allowedPages} />}
       {section === "ai_prompts" && <AiPromptsPanel />}
       {section === "meta" && <MetaTokenPanel />}
@@ -999,7 +1035,7 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
       {section === "leaderboard" && <LeaderboardSettingsPanel />}
       {section === "activity" && <ActivityPanel />}
 
-      {section === "campaign" && (
+      {section === "campaign" && (<>
       <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
         <h3 className="font-semibold text-slate-800">ค่าเริ่มต้นแคมเปญ (Meta)</h3>
         {field(campaignDefaults, setCampaignDefaults, "ad_account_id", "Ad Account ID (ไม่ต้องมี act_ นำหน้า)")}
@@ -1027,6 +1063,8 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
         {field(campaignDefaults, setCampaignDefaults, "landing_url", "Landing Page URL")}
         {field(campaignDefaults, setCampaignDefaults, "daily_budget_thb", "งบเริ่มต้น/วัน (บาท)", "number")}
       </div>
+      <AdTargetingCard value={launchCfg} onChange={setLaunchCfg} />
+      </>
       )}
 
       {section === "decision" && (

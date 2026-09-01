@@ -234,7 +234,9 @@ function GenerateTab({ settings, onGenerated }) {
       />
       {/* แยกสองคอลัมน์: ซ้ายคือบรีฟที่ต้องคิดใหม่ทุกครั้ง ขวาคือค่าตั้งที่ตั้งครั้งเดียวแล้วใช้ซ้ำ
           เดิมเป็นคอลัมน์แคบยาวเดียว ต้องเลื่อนหาปุ่มสร้าง และทิ้งพื้นที่ขวาว่างทั้งจอ */}
-      <form onSubmit={handleGenerate} className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.5fr)_minmax(330px,1fr)]">
+      {/* จุดตัดสองคอลัมน์เดิมอยู่ที่ xl (1280px) จอ 1024–1280 จึงยุบเป็นคอลัมน์เดียว
+          ทำให้ปุ่ม "สร้างคอนเทนต์" ตกไปอยู่ใต้ฟอร์มยาวมาก ต้องเลื่อนหา — ลดมาที่ lg */}
+      <form onSubmit={handleGenerate} className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(330px,1fr)]">
         <div className="ds-card p-5 space-y-4">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <span className="text-xs text-slate-400">กรอกด้วยตัวเอง หรือดึงค่าจากหน้า "ตั้งค่า" มาเติมให้อัตโนมัติ</span>
@@ -370,7 +372,8 @@ function GenerateTab({ settings, onGenerated }) {
         </div>
         </div>
 
-        <div className="ds-card p-5 space-y-4">
+        {/* ติดหนึบตอนเลื่อน — ปุ่มสร้างคอนเทนต์คือปุ่มหลักของหน้านี้ ต้องกดได้ตลอดโดยไม่ต้องเลื่อนกลับขึ้นมา */}
+        <div className="ds-card p-5 space-y-4 lg:sticky lg:top-6">
         <div className="text-[12.5px] font-semibold text-slate-500">ตั้งค่าผลลัพธ์</div>
         <div className="grid grid-cols-2 gap-x-4 gap-y-3">
           <div>

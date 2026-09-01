@@ -19,6 +19,7 @@ import {
 import { supabase } from "@/lib/supabase/client";
 import { beToCe, bangkokDate } from "@/lib/utils/date";
 import { logActivity } from "@/lib/utils/activity";
+import { lsGet, lsSet } from "@/lib/utils/storage";
 import { readFunctionErrorMessage } from "@/lib/utils/errors";
 import { getCustomerDateRange } from "@/lib/customer-date-filter";
 import Spinner from "@/components/shared/Spinner";
@@ -31,7 +32,12 @@ import {
   setCustomerDatabaseViewCache,
 } from "@/lib/customerdb-cache";
 
-export function TradeIdChecker({ darkMode = false }) {
+// คีย์จำ "เพจ + ช่วงเวลา" ที่ดึงรายงานล่าสุด เพื่อโหลดให้อัตโนมัติในรอบถัดไป
+const LAST_REPORT_KEY = "ui.customerdb.lastReport";
+
+// standalone = อยู่ในการ์ดของตัวเอง จึงไม่ต้องมีเส้นคั่นด้านบน
+// (เส้นนั้นมีไว้ตอนถูกวางต่อท้ายพาเนลข้อมูลลูกค้าในหน้าตอบแชท ถ้าติดมาด้วยจะกลายเป็นเส้นลอยไร้ที่มา)
+export function TradeIdChecker({ darkMode = false, standalone = false }) {
   const [tid, setTid] = useState("");
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState(null);
@@ -46,7 +52,7 @@ export function TradeIdChecker({ darkMode = false }) {
     logActivity("check_trade_id", { trade_id: id, pass: !!data.pass, via: data.via });
   }
   return (
-    <div className={`${darkMode ? "chat-trade-checker" : ""} border-t border-slate-200 pt-3 mt-1 space-y-1.5`}>
+    <div className={`${darkMode ? "chat-trade-checker" : ""} ${standalone ? "" : "border-t border-slate-200 pt-3 mt-1"} space-y-1.5`}>
       <label className="text-xs text-slate-400 flex items-center gap-1"><CheckCircle2 size={13} /> เช็คไอดีเทรด (XM)</label>
       <div className="flex gap-1.5">
         <input
@@ -352,6 +358,30 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
     })();
   }, []);
 
+  // จำเพจ/ช่วงเวลาที่เลือกล่าสุด แล้วรอบหน้าเปิดหน้ามาโหลดให้เลย ไม่ต้องกด "ดึงรายงาน" ซ้ำทุกครั้ง
+  // (ใช้ได้แม้มีหลายเพจ ต่างจากการเช็คว่ามีเพจเดียว)
+  // ทำครั้งเดียวต่อการเปิดหน้า และข้ามถ้าผู้ใช้เลือกเองแล้ว/กู้ค่าจาก cache มาแล้ว
+  const autoPulledRef = useRef(false);
+  useEffect(() => {
+    if (autoPulledRef.current) return;
+    if (!pageOpts.length) return;
+    if (pageFilter || reportPageId) return;
+    const last = lsGet(LAST_REPORT_KEY, null);
+    if (!last?.pageId) return;
+    if (!pageOpts.some((p) => p.id === last.pageId)) return;   // เพจถูกลบ/เปลี่ยนสิทธิ์ไปแล้ว
+    autoPulledRef.current = true;
+    setPageFilter(last.pageId);
+    setDateFilter(last.dateFilter || "30");
+    if (last.dateFilter === "custom") { setDateFrom(last.dateFrom || ""); setDateTo(last.dateTo || ""); }
+    setReportPageId(last.pageId);              // ตัวนี้เป็นตัวจุดชนวนให้ effect โหลดข้อมูลทำงาน
+  }, [pageOpts, pageFilter, reportPageId]);
+
+  // บันทึกตัวเลือกล่าสุดทุกครั้งที่ดึงรายงานสำเร็จ
+  useEffect(() => {
+    if (!reportPageId || reportPageId !== pageFilter || !dateFilter) return;
+    lsSet(LAST_REPORT_KEY, { pageId: pageFilter, dateFilter, dateFrom, dateTo });
+  }, [reportPageId, pageFilter, dateFilter, dateFrom, dateTo]);
+
   // หน่วงช่องค้นหา
   useEffect(() => { const t = setTimeout(() => setQDeb(q), 350); return () => clearTimeout(t); }, [q]);
 
@@ -643,7 +673,11 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
           ))}
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        {/* แยกเป็นสองกลุ่มให้ชัด — เดิมปุ่มที่ "ดึงข้อมูลใหม่" กับตัวกรองที่ "กรองผลที่ดึงมาแล้ว"
+            วางปนกันในแถวเดียว ผู้ใช้ใหม่แยกไม่ออกว่ากดอะไรแล้วระบบจะไปโหลดข้อมูลใหม่ */}
+        <div className="rounded-card border border-slate-200 bg-slate-50 p-3 space-y-2">
+          <div className="text-2xs font-semibold uppercase tracking-wide text-slate-400">1 · เลือกข้อมูลที่จะดึง</div>
+          <div className="flex flex-wrap gap-2">
           <select value={pageFilter} onChange={(e) => setPageFilter(e.target.value)} className={selCls} title="เพจ">
             <option value="">— เลือกเพจ —</option>
             {pages.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -672,9 +706,16 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
               <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className={selCls} title="ถึงวันที่" />
             </div>
           )}
-          <button onClick={pullReport} disabled={!pageFilter || !hasCompleteDateRange(dateFilter, dateFrom, dateTo) || loading} className="bg-brand-600 text-white rounded-control hover:bg-brand-700 px-4 py-2 text-sm font-semibold hover:bg-amber-300 disabled:opacity-50 flex items-center gap-1.5">
+          {/* เดิมมี hover:bg-brand-700 กับ hover:bg-amber-300 อยู่ในคลาสเดียวกัน ตัวหลังชนะ
+              ปุ่มหลักสีน้ำเงินจึงเปลี่ยนเป็นสีเหลืองตอนชี้เมาส์ ผิดจากปุ่มหลักที่อื่นทั้งระบบ */}
+          <button onClick={pullReport} disabled={!pageFilter || !hasCompleteDateRange(dateFilter, dateFrom, dateTo) || loading} className="ds-btn ds-btn-primary px-4 py-2 text-sm disabled:opacity-50 flex items-center gap-1.5">
             {loading ? <Loader2 className="animate-spin" size={15} /> : <FileDown size={15} />} ดึงรายงาน
           </button>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-2xs font-semibold uppercase tracking-wide text-slate-400">2 · กรองผลลัพธ์</span>
           <select value={dataFilter} onChange={(e) => setDataFilter(e.target.value)} className={selCls} title="ข้อมูลติดต่อ">
             <option value="all">ข้อมูลติดต่อ: ทั้งหมด</option>
             <option value="has">มีข้อมูลติดต่อ</option>

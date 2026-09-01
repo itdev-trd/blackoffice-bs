@@ -1,18 +1,33 @@
 import "./globals.css";
+import { Noto_Sans_Thai, Roboto } from "next/font/google";
 import UpdateBanner from "@/components/shared/UpdateBanner";
 import AuthListener from "@/components/shared/AuthListener";
 
+const notoSansThai = Noto_Sans_Thai({
+  variable: "--font-noto-sans-thai",
+  subsets: ["thai"],
+  weight: ["400", "500", "600", "700"],
+  display: "swap",
+});
+
+const roboto = Roboto({
+  variable: "--font-roboto",
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  display: "swap",
+});
+
 export const metadata = {
-  title: "AdFlow OS — ระบบยิงโฆษณาและตอบแชทอัตโนมัติ",
+  title: "Besight — ระบบยิงโฆษณาและตอบแชทอัตโนมัติ",
   manifest: "/manifest.webmanifest",
   icons: {
-    icon: "/favicon-64.png",
+    icon: "/besight-logo.svg",
     apple: "/apple-touch-icon.png",
   },
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "AdFlow",
+    title: "Besight",
   },
 };
 
@@ -25,17 +40,7 @@ export const viewport = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="th" suppressHydrationWarning className="dark">
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        {/* IBM Plex Sans Thai = ตัวอักษรทั้งระบบ (ครอบไทย+ละตินในตระกูลเดียว)
-            IBM Plex Mono = ตัวเลขที่ต้องเทียบกันเป็นคอลัมน์ (ยอดเงิน สถิติ วันเวลา) */}
-        <link
-          href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap"
-          rel="stylesheet"
-        />
-      </head>
+    <html lang="th" suppressHydrationWarning className={`dark ${notoSansThai.variable} ${roboto.variable}`}>
       <body>
         <AuthListener />
         {children}

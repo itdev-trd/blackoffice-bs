@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase/client";
 import { readFunctionErrorMessage } from "@/lib/utils/errors";
 import StatusBadge from "@/components/shared/StatusBadge";
 import { Badge, Card, EmptyState, SectionTitle } from "@/components/ui";
+import AdsTable from "@/components/features/campaigns/AdsTable";
 
 // ---------------------------------------------------------------
 // Campaigns (monitor) tab
@@ -193,6 +194,7 @@ export function ArchiveBar({ a, visibleIds, archivedCount }) {
 }
 
 function CampaignsTab({ adContent, metricsByAdId, onChanged, filter = "all", onFilterChange }) {
+  const [view, setView] = useState("all"); // "all" = ทั้งบัญชีจาก Meta, "mine" = เฉพาะที่ระบบยิง
   const arch = useArchive(onChanged);
   // แยกรายการที่ถูกซ่อนออกจากรายการปกติ — สลับดูได้จากปุ่ม "ดูที่ซ่อนไว้"
   const archivedAll = adContent.filter((a) => a.archived_at);
@@ -218,9 +220,28 @@ function CampaignsTab({ adContent, metricsByAdId, onChanged, filter = "all", onF
     <div className="w-full max-w-[1400px] space-y-4">
       <SectionTitle
         title="แคมเปญ"
-        subtitle="โฆษณาที่ยิงจริงแล้ว พร้อมสถานะและผลล่าสุดจาก Meta"
-        right={<Badge tone={launched.length ? "brand" : "slate"}>ยิงแล้ว {launched.length} ชิ้น</Badge>}
+        subtitle="ดูผลโฆษณาทั้งบัญชีแบบ Ads Manager หรือดูเฉพาะชิ้นที่ระบบยิงพร้อมคำแนะนำ AI"
+        right={<Badge tone={launched.length ? "brand" : "slate"}>ระบบยิงแล้ว {launched.length} ชิ้น</Badge>}
       />
+      {/* สองมุมมอง: ทั้งบัญชี (ดึงสดจาก Meta) กับเฉพาะที่ระบบยิง (มี AI แนะนำ/แจ้งแชทผี ซึ่ง Ads Manager ไม่มี) */}
+      <div className="inline-flex flex-wrap gap-1 rounded-card border border-slate-200 bg-slate-100 p-1">
+        {[
+          ["all", "ทั้งบัญชี (แบบ Ads Manager)"],
+          ["mine", "ที่ระบบยิง + คำแนะนำ AI"],
+        ].map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => setView(key)}
+            className={`rounded-control px-4 py-2 text-[13.5px] font-semibold transition ${
+              view === key ? "bg-brand-600 text-white shadow-card" : "text-slate-500 hover:text-slate-700"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {view === "all" && <AdsTable />}
+      {view === "all" ? null : (<>
       <ArchiveBar a={arch} visibleIds={campaigns.map((c) => c.id)} archivedCount={archivedAll.length} />
       <div className="flex flex-wrap gap-2">
         {filters.map((f) => (
@@ -265,6 +286,7 @@ function CampaignsTab({ adContent, metricsByAdId, onChanged, filter = "all", onF
           </div>
         ))
       )}
+      </>)}
     </div>
   );
 }

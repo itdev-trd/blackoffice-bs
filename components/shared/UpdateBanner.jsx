@@ -77,11 +77,27 @@ export default function UpdateBanner() {
       document.removeEventListener("visibilitychange", onVis);
     };
   }, []);
+  // ตั้งความสูงแบนเนอร์เป็นตัวแปร CSS ให้ body เว้นที่ด้านบน และให้ .chat-shell หักความสูงนี้ออกจาก 100dvh
+  // ไม่งั้นแบนเนอร์จะทับหัวจอ (ปัญหาเดิม) หรือดันจอแชทล้นออกไปด้านล่าง
+  useEffect(() => {
+    const root = document.documentElement;
+    if (ready) root.style.setProperty("--update-banner-h", "44px");
+    else root.style.removeProperty("--update-banner-h");
+    return () => root.style.removeProperty("--update-banner-h");
+  }, [ready]);
+
   if (!ready) return null;
   return (
-    <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[100] bg-brand-600 text-white rounded-full shadow-lg px-4 py-2.5 flex items-center gap-3">
-      <span className="text-sm font-medium">มีเวอร์ชันใหม่ของแอป</span>
-      <button onClick={hardReload} className="bg-white text-brand-700 rounded-full px-3 py-1 text-xs font-semibold hover:bg-brand-50">
+    // แถบบนสุดเต็มความกว้าง — body เว้นที่ให้ด้วย --update-banner-h จึงไม่ทับโลโก้/ปุ่มบนหัวจอ
+    <div
+      role="status"
+      className="fixed inset-x-0 top-0 z-[100] flex h-11 items-center justify-center gap-3 border-b border-brand-400/40 bg-brand-600 px-3 text-white shadow-lg"
+    >
+      <span className="truncate text-[13px] font-semibold sm:text-sm">มีเวอร์ชันใหม่ของแอป</span>
+      <button
+        onClick={hardReload}
+        className="shrink-0 rounded-full bg-white px-3.5 py-1 text-xs font-semibold text-brand-700 hover:bg-brand-50"
+      >
         อัปเดตเลย
       </button>
     </div>

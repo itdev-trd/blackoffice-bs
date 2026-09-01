@@ -15,6 +15,7 @@ import {
   Paperclip,
   Eye,
   Send,
+  Instagram,
 } from "lucide-react";
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from "@/lib/supabase/client";
 import { lsGet, lsSet } from "@/lib/utils/storage";
@@ -29,6 +30,9 @@ import { CHAT_STAGES } from "@/lib/constants/settings";
 const EmojiPicker = React.lazy(() => import("emoji-picker-react").then((module) => ({ default: module.default })));
 
 const INBOX_LINE_OA_ENABLED = true; // เปิดใช้งาน LINE OA ในหน้าตอบแชท
+// Instagram DM: ฝั่งหลังบ้านรองรับครบอยู่แล้ว (meta-webhook รับ, messenger-reply ส่ง, sync-instagram-recent ดึงย้อนหลัง)
+// แต่เดิมไม่มีแท็บของตัวเอง แชท IG จึงตกไปรวมอยู่ในแท็บ Messenger แยกไม่ออก
+const INBOX_INSTAGRAM_ENABLED = true;
 const INBOX_COMMENTS_ENABLED = false; // พักระบบ "ความคิดเห็น" (ซ่อนแท็บ + หยุดดึงความคิดเห็น) โดยไม่ลบข้อมูลเดิม
 const MSG_REPLY_ENABLED = true;
 const MSG_EMOJI_ENABLED = false;      // ซ่อนปุ่มอีโมจิในช่องตอบแชท ชั่วคราว (ไม่ลบโค้ด)
@@ -68,9 +72,13 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   const savedCacheRef = useRef({});
   const [listTab, setListTab] = useState("everything");    // everything | all(=Messenger) | line | comments
   const [unreadOnly, setUnreadOnly] = useState(false);   // กรองดูเฉพาะแชทที่ยังไม่อ่าน
+  const [tagFilter, setTagFilter] = useState(null);      // กรองดูเฉพาะแชทที่ติดแท็กนี้ (null = ไม่กรอง)
+  const [countryFilter, setCountryFilter] = useState(null); // กรองตามประเทศลูกค้า (null = ทุกประเทศ)
+  const [adFilter, setAdFilter] = useState(null);           // กรองตามแอดที่ลูกค้าทักมาจาก (entry_ad_id)
   const [messengerUnreadCount, setMessengerUnreadCount] = useState(0);
   const [commentUnreadCount, setCommentUnreadCount] = useState(0);
   const [lineUnreadCount, setLineUnreadCount] = useState(0);
+  const [instagramUnreadCount, setInstagramUnreadCount] = useState(0);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [pendingFiles, setPendingFiles] = useState([]);   // ไฟล์ที่พักไว้รอกดส่ง [{file,name,type,preview}]
@@ -103,6 +111,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   const openRequestRef = useRef({ seq: 0, controller: null });
   const adSourceCacheRef = useRef(new Map());
   const [labelMsg, setLabelMsg] = useState(null);   // ผลการส่งป้ายไป Meta {type: loading|ok|err, text}
+  const [tagMsg, setTagMsg] = useState("");
   const [overdueAlert, setOverdueAlert] = useState(null);   // { count, pages: [ชื่อเพจ] } → โชว์ popup
   // แจ้งเตือนระดับระบบปฏิบัติการ (เด้งทับแอปอื่น) — บังคับเปิดเสมอ ผู้ใช้ปิดเองไม่ได้
   // เหลืออย่างเดียวที่ต้องให้ผู้ใช้กดคือ "อนุญาต" ตอนแรก เพราะเบราว์เซอร์บังคับว่าต้องมาจากการคลิกของผู้ใช้
@@ -267,7 +276,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   }
   // เช็คจาก DB ตรงทุก 30 วิ (ไม่ผูกกับฟิลเตอร์หน้าจอ): แชท "ยังไม่อ่าน" ค้างเกินเกณฑ์ ในเพจที่เลือกเตือน
   useEffect(() => {
-    if (!alertAllowed) { setOverdueAlert(null); document.title = "AdFlow OS"; return; }
+    if (!alertAllowed) { setOverdueAlert(null); document.title = "Besight"; return; }
     let stop = false;
     async function check() {
       const cutoff = new Date(Date.now() - alertMin * 60 * 1000).toISOString();
@@ -285,7 +294,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
       if (viewing.length) pageScope = viewing.filter((p) => !allowedPages || allowedPages.includes(p));
       else pageScope = alertPages.length ? alertPages.filter((p) => !allowedPages || allowedPages.includes(p)) : allowedPages;
       if (pageScope && pageScope.length === 0) {
-        if (!stop) { setOverdueAlert(null); document.title = "AdFlow OS"; }
+        if (!stop) { setOverdueAlert(null); document.title = "Besight"; }
         return;
       }
       if (pageScope) q = q.in("page_id", pageScope);
@@ -321,13 +330,13 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
         }
       } else {
         setOverdueAlert(null);
-        document.title = "AdFlow OS";
+        document.title = "Besight";
         notifiedRef.current = { ids: "", at: 0 };   // เคลียร์หมดแล้ว → รอบหน้าถือเป็นเรื่องใหม่
       }
     }
     check();
     const iv = setInterval(check, 30 * 1000);
-    return () => { stop = true; clearInterval(iv); document.title = "AdFlow OS"; };
+    return () => { stop = true; clearInterval(iv); document.title = "Besight"; };
   }, [alertAllowed, alertMin, alertPages.join(","), allowedPages ? allowedPages.join(",") : "", pageSel.mode, pageSel.single, pageSel.multi.join(",")]);
   const [infoOpen, setInfoOpen] = useState(false);         // มือถือ: ขยายรายละเอียดแอด
   const [statusMenuOpen, setStatusMenuOpen] = useState(false); // มือถือ: เมนูแฮมเบอร์เกอร์ปรับสถานะ
@@ -431,8 +440,10 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     if (filters.listTab !== "everything" && selectedPages.length && !selectedPages.includes(String(row.page_id || ""))) return false;
     if (filters.listTab === "comments") return isCommentChat(row);
     if (filters.listTab === "line") return row.source === "line" && INBOX_LINE_OA_ENABLED;
+    if (filters.listTab === "instagram") return row.source === "instagram" && INBOX_INSTAGRAM_ENABLED;
     if (filters.listTab === "everything") return true;
-    return !isCommentChat(row) && row.source !== "line";
+    // แท็บ Messenger = เฉพาะ Messenger จริงๆ ต้องกัน instagram ออกด้วย ไม่งั้น IG จะโผล่ผิดช่อง
+    return !isCommentChat(row) && row.source !== "line" && row.source !== "instagram";
   }
 
   function scheduleUnreadRefresh(delay = 500) {
@@ -443,6 +454,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
         loadCommentUnreadCount(),
         loadMessengerUnreadCount(),
         ...(INBOX_LINE_OA_ENABLED ? [loadLineUnreadCount()] : []),
+        ...(INBOX_INSTAGRAM_ENABLED ? [loadInstagramUnreadCount()] : []),
       ]);
     }, delay);
   }
@@ -525,13 +537,15 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     const promise = (async () => {
       try {
         let query = supabase.from("chat_customers")
-          .select("id, customer_name, last_user_text, last_reply_text, last_reply_by, last_reply_at, last_message_at, page_id, page_name, country, cust_lang, source, entry_ad_id, entry_ad_name, comment_ad_name, comment_ad_ids, comment_ad_names, comment_is_ad, comment_promoted_to_inbox, stage, stage_manual, psid, profile_pic, awaiting_reply, unread, cust_read_at, blocked_at, synced_at, updated_at")
+          .select("id, customer_name, last_user_text, last_reply_text, last_reply_by, last_reply_at, last_message_at, page_id, page_name, country, cust_lang, source, entry_ad_id, entry_ad_name, comment_ad_name, comment_ad_ids, comment_ad_names, comment_is_ad, comment_promoted_to_inbox, stage, stage_manual, psid, profile_pic, awaiting_reply, unread, cust_read_at, blocked_at, synced_at, updated_at, tags")
           .order("last_message_at", { ascending: false }).limit(200);
         query = showBlocked ? query.not("blocked_at", "is", null) : query.is("blocked_at", null);
         if (listTab === "comments") query = query.or("source.eq.comment,id.like.fbc_%");
         else if (listTab === "line") query = query.eq("source", "line");
+        else if (listTab === "instagram") query = query.eq("source", "instagram");
         else if (listTab === "everything") { /* ทุกช่องทางจริง รวมความคิดเห็นด้วย */ }
-        else query = query.not("id", "like", "fbc_%").or("source.is.null,and(source.neq.comment,source.neq.line)");
+        // แท็บ Messenger — เดิมกันออกแค่ comment กับ line ทำให้แชท Instagram หลุดมาปนอยู่ในนี้
+        else query = query.not("id", "like", "fbc_%").or("source.is.null,and(source.neq.comment,source.neq.line,source.neq.instagram)");
         if (unreadOnly) query = query.eq("unread", true);
 
         if (listTab === "line") {
@@ -556,6 +570,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
             loadCommentUnreadCount(),
             loadMessengerUnreadCount(),
             ...(INBOX_LINE_OA_ENABLED ? [loadLineUnreadCount()] : []),
+        ...(INBOX_INSTAGRAM_ENABLED ? [loadInstagramUnreadCount()] : []),
           ]);
         }
       } catch (error) {
@@ -578,7 +593,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   async function loadMessengerUnreadCount() {
     const ps = pageSelRef.current;
     let mq = supabase.from("chat_customers").select("id", { count: "exact", head: true })
-      .eq("unread", true).not("id", "like", "fbc_%").or("source.is.null,and(source.neq.comment,source.neq.line)");
+      .eq("unread", true).not("id", "like", "fbc_%").or("source.is.null,and(source.neq.comment,source.neq.line,source.neq.instagram)");
     if (ps.mode === "single" && ps.single) mq = mq.eq("page_id", ps.single);
     else if (ps.mode === "multi" && ps.multi.length) mq = mq.in("page_id", ps.multi);
     if (allowedPages) mq = mq.in("page_id", allowedPages);
@@ -589,6 +604,15 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     let lq = supabase.from("chat_customers").select("id", { count: "exact", head: true }).eq("source", "line").eq("unread", true);
     if (allowedPages) lq = lq.in("page_id", allowedPages);
     const { count } = await lq; setLineUnreadCount(count || 0);
+  }
+  async function loadInstagramUnreadCount() {
+    const ps = pageSelRef.current;
+    let iq = supabase.from("chat_customers").select("id", { count: "exact", head: true }).eq("source", "instagram").eq("unread", true);
+    // IG ผูกกับเพจ Facebook จึงเคารพตัวเลือกเพจเหมือน Messenger (ต่างจาก LINE ที่ไม่ได้ผูกกับเพจ)
+    if (ps.mode === "single" && ps.single) iq = iq.eq("page_id", ps.single);
+    else if (ps.mode === "multi" && ps.multi.length) iq = iq.in("page_id", ps.multi);
+    if (allowedPages) iq = iq.in("page_id", allowedPages);
+    const { count } = await iq; setInstagramUnreadCount(count || 0);
   }
   async function loadCommentUnreadCount() {
     const ps = pageSelRef.current;
@@ -607,7 +631,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
       const viewing = ps.mode === "single" ? (ps.single ? [ps.single] : []) : (ps.multi || []);
       // เลือกเพจไว้ = นับเฉพาะเพจนั้น ; ไม่เลือก (ดูทุกเพจ) = นับทุกเพจที่มีสิทธิ์
       const scope = viewing.length ? viewing.filter((p) => !allowedPages || allowedPages.includes(p)) : allowedPages;
-      let cq = supabase.from("chat_customers").select("id", { count: "exact", head: true }).eq("unread", true).not("id", "like", "fbc_%").or("source.is.null,and(source.neq.comment,source.neq.line)");
+      let cq = supabase.from("chat_customers").select("id", { count: "exact", head: true }).eq("unread", true).not("id", "like", "fbc_%").or("source.is.null,and(source.neq.comment,source.neq.line,source.neq.instagram)");
       if (scope && scope.length === 0) { navigator.clearAppBadge(); return; }
       if (scope) cq = cq.in("page_id", scope);
       const { count } = await cq;
@@ -632,8 +656,10 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
       return { ...s, transcript: keepTr, unread: data.unread, awaiting_reply: data.awaiting_reply };
     });
     if (grew) {
-      const { data: tr } = await supabase.functions.invoke("messenger-reply", { body: { action: "translate", id } });
-      if (tr?.ok) setTranslations(tr.translations || {});
+      if (cur.source !== "line") {
+        const { data: tr } = await supabase.functions.invoke("messenger-reply", { body: { action: "translate", id } });
+        if (tr?.ok) setTranslations(tr.translations || {});
+      }
       // มีข้อความใหม่ในแชทที่เปิดอยู่ = ถือว่าอ่านแล้ว (เราเห็นอยู่)
       supabase.functions.invoke("messenger-reply", { body: { action: "mark_seen", id } });
     }
@@ -778,7 +804,9 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
             transcriptRefreshTimerRef.current = setTimeout(() => refreshOpenTranscript(row.id), 250);
           }
           if (grew) {
-            supabase.functions.invoke("messenger-reply", { body: { action: "translate", id: row.id } }).then(({ data: tr }) => { if (tr?.ok) setTranslations(tr.translations || {}); });
+            if (row.source !== "line") {
+              supabase.functions.invoke("messenger-reply", { body: { action: "translate", id: row.id } }).then(({ data: tr }) => { if (tr?.ok) setTranslations(tr.translations || {}); });
+            }
             supabase.functions.invoke("messenger-reply", { body: { action: "mark_seen", id: row.id } });
           }
         }
@@ -964,13 +992,13 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     setSelected({ ...item, transcript: null });
     logActivity("open_chat", { id: item.id, customer_name: item.customer_name, page_id: item.page_id });
     setTranslations({}); setReply(""); setSendPreview(null); setSendMsg(""); setAdSources([]); setAdLoading(false); setSavedReplies([]); setSavedOpen(false); setKnowledgeOpen(false); setKnowledgeResults([]); setReplyTo(null); setMessageMenu(null); setKnowledgeCapture(null); setKnowledgeCaptureMsg(""); setEmojiOpen(false); setInfoOpen(false); setStatusMenuOpen(false); setLabelMsg(null); setQuickFillState({});
-    setForceLang(lsGet(`ui.forceLang.${item.id}`, "auto"));   // ภาษาที่เคยเลือกไว้ของแชทนี้ (จำต่อเครื่อง)
-    setTranslating(true);
-    // แปลทำคู่ขนานกับการดึง transcript เพื่อไม่ต้องรอ query แรกจบแล้วค่อยเริ่ม Edge Function
-    const translationPromise = supabase.functions.invoke("messenger-reply", { body: { action: "translate", id: item.id } });
+    setForceLang(item.source === "line" ? "Thai" : lsGet(`ui.forceLang.${item.id}`, "auto"));   // LINE เป็นภาษาไทย ไม่ต้องแปล
+    // LINE OA ใช้ภาษาไทย ไม่ต้องเรียกตัวแปลหรือสร้างคำแปลใต้ข้อความ
+    const translationPromise = item.source === "line" ? null : supabase.functions.invoke("messenger-reply", { body: { action: "translate", id: item.id } });
+    setTranslating(!!translationPromise);
     // ดึงเฉพาะคอลัมน์ที่หน้าแชทใช้จริง (เลี่ยง select * ที่ลากคอลัมน์หนักที่ไม่ได้ใช้ เช่น ads_context/hash → เปิดแชทไวขึ้นมากในแชทใหญ่)
     const CHAT_COLS = "id, page_id, page_name, psid, customer_name, source, stage, stage_manual, classified_by, needs_ai, needs_verify, manual_data, manual_data_by, manual_data_at, trade_id, username, phone, email, awaiting_reply, unread, cust_read_at, cust_lang, country, profile_pic, transcript, account_opened_at, entry_ad_id, entry_ad_name, last_user_text, last_reply_text, last_reply_by, last_reply_at, last_message_at, comment_ad_name, comment_ad_ids, comment_ad_names, comment_is_ad, comment_promoted_to_inbox, comment_permalink, blocked_at, synced_at, updated_at, notes, tags, ai_summary, ai_summary_at";
-    try {
+    if (translationPromise) try {
       const { data, error } = await supabase.from("chat_customers").select(CHAT_COLS).eq("id", item.id).maybeSingle().abortSignal(controller.signal);
       if (openSeq !== openRequestRef.current.seq) return;
       if (error) throw error;
@@ -1064,7 +1092,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     try {
       const { data, error } = await supabase.functions.invoke("messenger-reply", { body: {
         action: "preview", id: selected.id, text_th: reply.trim(),
-        force_lang: forceLang !== "auto" ? forceLang : undefined,
+        force_lang: selected.source !== "line" && forceLang !== "auto" ? forceLang : undefined,
       } });
       if (error) { setSendMsg("สร้างตัวอย่างไม่สำเร็จ: " + (await readFunctionErrorMessage(error))); return; }
       if (!data?.ok) { setSendMsg("สร้างตัวอย่างไม่สำเร็จ: " + (data?.error || "")); return; }
@@ -1160,7 +1188,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
           reply_to_text: approved.replyTo?.text || null, reply_to_mid: approved.replyTo?.mid || null,
           reply_to_img: approved.replyTo?.img || null, reply_to_at: approved.replyTo?.at || null,
           reply_to_quote_token: approved.replyTo?.quoteToken || null,
-          force_lang: forceLang !== "auto" ? forceLang : undefined,
+          force_lang: selected.source !== "line" && forceLang !== "auto" ? forceLang : undefined,
           comment_reply_mode: isCommentChat(selected) ? "public" : undefined,
         } });
         if (error) { rollbackOptimistic(); setSendMsg("ส่งไม่สำเร็จ: " + (await readFunctionErrorMessage(error))); return; }
@@ -1267,23 +1295,53 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
       setNotesSaving(false);
     }
   }
+  async function persistTags(id, nextTags, previousTags) {
+    const { error } = await supabase.from("chat_customers").update({ tags: nextTags, updated_at: new Date().toISOString() }).eq("id", id);
+    if (!error) return true;
+    setSelected((s) => (s && s.id === id ? { ...s, tags: previousTags } : s));
+    setList((l) => (l || []).map((x) => (x.id === id ? { ...x, tags: previousTags } : x)));
+    setTagMsg(`บันทึกแท็กไม่สำเร็จ: ${error.message || "ตรวจสอบฐานข้อมูลแล้วลองใหม่"}`);
+    return false;
+  }
   async function addTag(raw) {
     const value = raw.trim();
     if (!value || !selected) return;
     const id = selected.id;
-    const nextTags = Array.from(new Set([...(selected.tags || []), value]));
+    const previousTags = Array.isArray(selected.tags) ? selected.tags : [];
+    const nextTags = Array.from(new Set([...previousTags, value]));
     setTagDraft("");
+    setTagMsg("");
     setSelected((s) => (s && s.id === id ? { ...s, tags: nextTags } : s));
     setList((l) => (l || []).map((x) => (x.id === id ? { ...x, tags: nextTags } : x)));
-    await supabase.from("chat_customers").update({ tags: nextTags, updated_at: new Date().toISOString() }).eq("id", id);
+    await persistTags(id, nextTags, previousTags);
   }
   async function removeTag(tag) {
     if (!selected) return;
     const id = selected.id;
-    const nextTags = (selected.tags || []).filter((t) => t !== tag);
+    const previousTags = Array.isArray(selected.tags) ? selected.tags : [];
+    const nextTags = previousTags.filter((t) => t !== tag);
+    setTagMsg("");
     setSelected((s) => (s && s.id === id ? { ...s, tags: nextTags } : s));
     setList((l) => (l || []).map((x) => (x.id === id ? { ...x, tags: nextTags } : x)));
-    await supabase.from("chat_customers").update({ tags: nextTags, updated_at: new Date().toISOString() }).eq("id", id);
+    await persistTags(id, nextTags, previousTags);
+  }
+  // แท็กลัดกดครั้งเดียว — ใช้บ่อยสุดคือเช็คว่าลูกค้าเปิดบัญชีกับเราหรือยัง กันพิมพ์เองทุกครั้ง
+  // ติดแท็กหนึ่งจะดึงอีกแท็กที่ตรงข้ามออกให้อัตโนมัติ (กันติดค้างทั้งสองสถานะพร้อมกัน)
+  const QUICK_TAGS = [
+    { label: "✅ เปิดบัญชีแล้ว", opposite: "❌ ยังไม่เปิดบัญชี" },
+    { label: "❌ ยังไม่เปิดบัญชี", opposite: "✅ เปิดบัญชีแล้ว" },
+  ];
+  async function toggleQuickTag(label, opposite) {
+    if (!selected) return;
+    const id = selected.id;
+    const has = (selected.tags || []).includes(label);
+    const base = (selected.tags || []).filter((t) => t !== opposite);
+    const previousTags = Array.isArray(selected.tags) ? selected.tags : [];
+    const nextTags = has ? base.filter((t) => t !== label) : Array.from(new Set([...base, label]));
+    setTagMsg("");
+    setSelected((s) => (s && s.id === id ? { ...s, tags: nextTags } : s));
+    setList((l) => (l || []).map((x) => (x.id === id ? { ...x, tags: nextTags } : x)));
+    await persistTags(id, nextTags, previousTags);
   }
   // สรุปบทสนทนา — กดเอง ไม่ auto (ต้นทุนเรียก AI ทุกครั้ง)
   async function summarizeConversation() {
@@ -1318,16 +1376,39 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
       </div>
       <div>
         <div className="text-xs text-night-ink-3 mb-1">แท็ก</div>
-        {(selected.tags || []).length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mb-1.5">
-            {selected.tags.map((t) => (
-              <span key={t} className="inline-flex items-center gap-1 text-[11px] font-medium pl-2 pr-1 py-1 rounded-full bg-blue-500/15 text-blue-400">
-                {t}
-                <button onClick={() => removeTag(t)} className="text-blue-400 hover:text-blue-400" aria-label={`ลบแท็ก ${t}`}><X size={11} /></button>
-              </span>
-            ))}
-          </div>
-        )}
+        {/* แท็กลัด — เช็คสถานะเปิดบัญชีได้ในคลิกเดียว ไม่ต้องพิมพ์เอง */}
+        <div className="flex flex-wrap gap-1.5 mb-1.5">
+          {QUICK_TAGS.map(({ label, opposite }) => {
+            const active = (selected.tags || []).includes(label);
+            return (
+              <button
+                key={label}
+                onClick={() => toggleQuickTag(label, opposite)}
+                className={`text-[11px] font-medium px-2.5 py-1 rounded-full border ${
+                  active
+                    ? "bg-night-accent border-night-accent text-white"
+                    : "bg-night-surface2 border-night-border text-night-ink-2 hover:text-night-ink"
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+        {(() => {
+          const quickLabels = QUICK_TAGS.map((q) => q.label);
+          const customTags = (selected.tags || []).filter((t) => !quickLabels.includes(t));
+          return customTags.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-1.5">
+              {customTags.map((t) => (
+                <span key={t} className="inline-flex items-center gap-1 text-[11px] font-medium pl-2 pr-1 py-1 rounded-full bg-blue-500/15 text-blue-400">
+                  {t}
+                  <button onClick={() => removeTag(t)} className="text-blue-400 hover:text-blue-400" aria-label={`ลบแท็ก ${t}`}><X size={11} /></button>
+                </span>
+              ))}
+            </div>
+          );
+        })()}
         <input
           value={tagDraft}
           onChange={(e) => setTagDraft(e.target.value)}
@@ -1335,6 +1416,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
           placeholder="เพิ่มแท็ก แล้วกด Enter"
           className="w-full rounded-lg border border-night-border px-2.5 py-1.5 text-xs"
         />
+        {tagMsg && <div role="alert" className="mt-1 text-[11px] text-rose-400 break-words">{tagMsg}</div>}
       </div>
       <div className="pt-2 border-t border-night-border-subtle space-y-1.5">
         <div className="flex items-center justify-between">
@@ -1389,9 +1471,34 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   }
 
   const fmt = (t) => { try { return new Date(t).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" }); } catch { return t || ""; } };
+  // แท็กทั้งหมดที่มีอยู่จริงในลิสต์ที่โหลดมา — ใช้ทำแถบกรอง ไม่ต้อง query แยก
+  const allTags = Array.from(new Set((list || []).flatMap((x) => Array.isArray(x.tags) ? x.tags : []))).sort();
+
+  // ประเทศ + แอดต้นทาง: สร้างจากลิสต์ที่โหลดอยู่ พร้อมนับจำนวนต่อกลุ่ม เพื่อให้เห็นสัดส่วนทันทีว่าลูกค้ามาจากไหนเยอะ
+  const countByCountry = (list || []).reduce((acc, x) => {
+    const c = String(x.country || "").trim();
+    if (c) acc[c] = (acc[c] || 0) + 1;
+    return acc;
+  }, {});
+  const allCountries = Object.entries(countByCountry).sort((a, c) => c[1] - a[1]);
+
+  // ชื่อแอดอาจว่าง (referral ส่งมาแค่ ad_id) — ใช้ id ย่อแทนเพื่อยังแยกกลุ่มได้
+  const adMap = (list || []).reduce((acc, x) => {
+    const id = String(x.entry_ad_id || "").trim();
+    if (!id) return acc;
+    if (!acc[id]) acc[id] = { id, name: String(x.entry_ad_name || "").trim(), n: 0 };
+    if (!acc[id].name && x.entry_ad_name) acc[id].name = String(x.entry_ad_name).trim();
+    acc[id].n++;
+    return acc;
+  }, {});
+  const allAds = Object.values(adMap).sort((a, c) => c.n - a.n);
+
   const filtered = (list || []).filter((x) =>
     (!unreadOnly || x.unread) &&
-    (!q.trim() || `${x.customer_name || ""} ${x.last_user_text || ""} ${x.country || ""}`.toLowerCase().includes(q.trim().toLowerCase()))
+    (!tagFilter || (Array.isArray(x.tags) && x.tags.includes(tagFilter))) &&
+    (!countryFilter || String(x.country || "").trim() === countryFilter) &&
+    (!adFilter || String(x.entry_ad_id || "").trim() === adFilter) &&
+    (!q.trim() || `${x.customer_name || ""} ${x.last_user_text || ""} ${x.country || ""} ${x.entry_ad_name || ""}`.toLowerCase().includes(q.trim().toLowerCase()))
   );
   const tItemsRaw = Array.isArray(selected?.transcript) ? selected.transcript : [];
   // กันแสดงซ้ำ — ตาข่ายกันสุดท้าย ไม่ว่า transcript ใน DB จะเบิ้ลด้วยเหตุใด (race webhook / echo+sync คนละ id)
@@ -1488,7 +1595,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   const hashText = (s) => { let h = 5381; const str = String(s || ""); for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0; return (h >>> 0).toString(16); };
   const thOf = (m) => translations[hashText(String(m?.t || ""))];   // คำแปลของ "ข้อความนี้" (จับด้วย hash)
   // ควรโชว์บรรทัดคำแปลใต้ข้อความนี้ไหม
-  const showTh = (m) => !!thOf(m) || (translating && !isThaiText(m.t));
+  const showTh = (m) => selected?.source !== "line" && (!!thOf(m) || (translating && !isThaiText(m.t)));
   const srcLabel = (r) => (r?.source === "line" ? "LINE OA" : r?.source === "instagram" ? "Instagram" : r?.entry_ad_id ? `#${r.entry_ad_id}` : r?.source === "ad" ? "โฆษณา (ไม่ทราบ id)" : r?.source === "organic" ? "ออร์แกนิก" : "ไม่ทราบ");
 
   const activeIds = pageSel.mode === "single" ? (pageSel.single ? [pageSel.single] : []) : pageSel.multi;
@@ -1613,14 +1720,15 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
           {/* แท็บเลือกช่องทาง — "ทั้งหมด" รวมทุกช่องทาง (ยกเว้นความคิดเห็น), ที่เหลือกรองเฉพาะช่องทางนั้น
               สไตล์ underline + จุดสีต่อช่องทาง ตามดีไซน์ mockup (ไม่ใช้ segmented pill แบบเดิม) */}
           <div className="flex gap-3 -mx-2.5 px-2.5 border-b border-night-border-subtle">
-            {[["everything", "ทั้งหมด", "#58A6FF"], ["all", "Messenger", "#0084FF"], ...(INBOX_LINE_OA_ENABLED ? [["line", "LINE OA", "#06C755"]] : []), ...(INBOX_COMMENTS_ENABLED ? [["comments", "ความคิดเห็น", "#8B949E"]] : [])].map(([k, label, dot]) => (
+            {[["everything", "ทั้งหมด", "#58A6FF"], ["all", "Messenger", "#0084FF"], ...(INBOX_INSTAGRAM_ENABLED ? [["instagram", "Instagram", "#E1306C"]] : []), ...(INBOX_LINE_OA_ENABLED ? [["line", "LINE OA", "#06C755"]] : []), ...(INBOX_COMMENTS_ENABLED ? [["comments", "ความคิดเห็น", "#8B949E"]] : [])].map(([k, label, dot]) => (
               <button key={k} onClick={() => { setListTab(k); if (k === "everything") { setShowBlocked(false); setUnreadOnly(false); } }} className={`relative flex items-center gap-1.5 pb-2 pt-0.5 text-[11px] font-medium whitespace-nowrap border-b-2 -mb-px ${listTab === k ? "border-night-accent text-night-accent-light" : "border-transparent text-night-ink-2 hover:text-night-ink"}`}>
                 <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: dot }} />
                 {label}
                 {k === "comments" && commentUnreadCount > 0 && <span className="absolute -top-0.5 -right-2 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-night-surface" title={`มีความคิดเห็นใหม่ ${commentUnreadCount} รายการ`} />}
                 {k === "line" && lineUnreadCount > 0 && <span className="absolute -top-0.5 -right-2 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-night-surface" title={`มีแชท LINE ใหม่ ${lineUnreadCount} รายการ`} />}
                 {k === "all" && messengerUnreadCount > 0 && <span className="absolute -top-0.5 -right-2 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-night-surface" title={`มีแชท Messenger ใหม่ ${messengerUnreadCount} รายการ`} />}
-                {k === "everything" && (messengerUnreadCount + lineUnreadCount) > 0 && <span className="absolute -top-0.5 -right-2 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-night-surface" title="มีแชทใหม่ที่ยังไม่อ่าน" />}
+                {k === "instagram" && instagramUnreadCount > 0 && <span className="absolute -top-0.5 -right-2 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-night-surface" title={`มีแชท Instagram ใหม่ ${instagramUnreadCount} รายการ`} />}
+                {k === "everything" && (messengerUnreadCount + lineUnreadCount + instagramUnreadCount) > 0 && <span className="absolute -top-0.5 -right-2 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-night-surface" title="มีแชทใหม่ที่ยังไม่อ่าน" />}
               </button>
             ))}
           </div>
@@ -1633,6 +1741,68 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
               <span className="inline-flex items-center gap-1"><AlertTriangle size={12} /> บล็อกไว้ (สแปม)</span>
             </FilterPill>
           </div>
+          {/* แยกลูกค้าตามประเทศ / ตามแอดที่ทักมา — สร้างจากลิสต์ที่โหลดอยู่ ไม่ต้อง query แยก
+              ใช้ select เพราะจำนวนกลุ่มอาจเยอะ (หลายประเทศ/หลายแอด) ถ้าทำเป็นชิปจะล้นจอ */}
+          {(allCountries.length > 1 || allAds.length > 0) && (
+            <div className="flex flex-wrap gap-1.5">
+              {allCountries.length > 1 && (
+                <select
+                  value={countryFilter || ""}
+                  onChange={(e) => setCountryFilter(e.target.value || null)}
+                  className={`min-w-0 flex-1 rounded-full border px-2.5 py-1 text-[11px] font-medium ${
+                    countryFilter ? "bg-night-accent border-night-accent text-white" : "bg-night-surface2 border-night-border text-night-ink-2"
+                  }`}
+                  title="แยกลูกค้าตามประเทศ"
+                >
+                  <option value="">🌏 ทุกประเทศ ({list?.length || 0})</option>
+                  {allCountries.map(([c, n]) => (
+                    <option key={c} value={c}>{c} ({n})</option>
+                  ))}
+                </select>
+              )}
+              {allAds.length > 0 && (
+                <select
+                  value={adFilter || ""}
+                  onChange={(e) => setAdFilter(e.target.value || null)}
+                  className={`min-w-0 flex-1 rounded-full border px-2.5 py-1 text-[11px] font-medium ${
+                    adFilter ? "bg-night-accent border-night-accent text-white" : "bg-night-surface2 border-night-border text-night-ink-2"
+                  }`}
+                  title="แยกลูกค้าตามแอดที่ทักเข้ามา"
+                >
+                  <option value="">📣 ทุกแอด</option>
+                  {allAds.map((a) => (
+                    <option key={a.id} value={a.id}>{a.name || `แอด #${a.id.slice(-6)}`} ({a.n})</option>
+                  ))}
+                </select>
+              )}
+              {(countryFilter || adFilter) && (
+                <button
+                  onClick={() => { setCountryFilter(null); setAdFilter(null); }}
+                  className="shrink-0 rounded-full border border-night-border bg-night-surface2 px-2.5 py-1 text-[11px] font-medium text-night-ink-2 hover:text-night-ink"
+                >
+                  ล้างตัวกรอง
+                </button>
+              )}
+            </div>
+          )}
+          {/* กรองตามแท็ก — แสดงเฉพาะแท็กที่มีจริงในลิสต์ที่โหลดอยู่ตอนนี้ กดซ้ำเพื่อยกเลิกกรอง */}
+          {allTags.length > 0 && (
+            <div className="flex gap-1.5 overflow-x-auto -mx-0.5 px-0.5 pb-0.5">
+              {allTags.map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setTagFilter((cur) => (cur === t ? null : t))}
+                  className={`shrink-0 inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium border whitespace-nowrap ${
+                    tagFilter === t
+                      ? "bg-night-accent border-night-accent text-white"
+                      : "bg-night-surface2 border-night-border text-night-ink-2 hover:text-night-ink"
+                  }`}
+                >
+                  🏷 {t}
+                </button>
+              ))}
+            </div>
+          )}
           {/* แจ้งเตือนแชทค้างอ่าน — แอดมินคุมทั้งหมด ผู้ใช้ไม่มีปุ่มปรับ
               เหลือแค่แถบ "ขออนุญาตแจ้งเตือน" ที่ต้องให้ผู้ใช้กดเอง เพราะเบราว์เซอร์บังคับว่า
               ต้องมาจากการคลิกของผู้ใช้เท่านั้น สั่งเปิดจากโค้ดล่วงหน้าไม่ได้ */}
@@ -1741,6 +1911,9 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                         : x.source === "instagram"
                           ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-fuchsia-500/25 text-fuchsia-400 font-semibold">◎ Instagram</span>
                           : (x.entry_ad_id || x.source === "ad") && <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-400">{x.entry_ad_id ? `แอด` : "โฆษณา"}</span>}
+                      {Array.isArray(x.tags) && x.tags.map((t) => (
+                        <span key={t} className="text-[10px] px-1.5 py-0.5 rounded bg-night-accent/15 text-night-accent-light">🏷 {t}</span>
+                      ))}
                     </div>
                   </div>
                 </button>
@@ -1914,6 +2087,16 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                           ⬇ ข้อความนี้คือรอบที่{selected?.awaiting_reply && i === tItems.length - 1 ? "ยังไม่ได้ตอบ" : "ตอบช้า"}
                         </div>
                       )}
+                      {/* ที่มาจากสตอรี่ IG — บอกให้แอดมินรู้ว่าลูกค้าทักเพราะเห็นสตอรี่ (ตอบสตอรี่ / แท็กเราในสตอรี่) */}
+                      {m.via === "instagram_story" && (
+                        <div className="mb-1 flex items-center gap-1.5 rounded-full border border-pink-500/30 bg-pink-500/10 px-2.5 py-1 text-[10.5px] font-semibold text-pink-300">
+                          <Instagram size={11} className="shrink-0" />
+                          {m.story_kind === "mention" ? "แท็กเราในสตอรี่" : "ตอบจากสตอรี่"}
+                          {m.story_url && (
+                            <a href={m.story_url} target="_blank" rel="noopener noreferrer" className="underline hover:text-pink-200">ดูสตอรี่</a>
+                          )}
+                        </div>
+                      )}
                       <div className={`relative max-w-[80%] ${isHl(m) ? "ring-2 ring-amber-400 rounded-2xl" : ""}`}>
                         {m.img
                           ? <button type="button" onClick={() => setLightbox(m.img)} className="block rounded-2xl focus:outline-none focus:ring-2 focus:ring-brand-500 cursor-zoom-in" aria-label="ดูรูปขยาย">
@@ -1972,17 +2155,19 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
               {sendMsg && <div className="px-4 py-1.5 text-[11px] text-night-ink-2 border-t border-night-border-subtle whitespace-pre-wrap break-words">{sendMsg}</div>}
               {knowledgeCaptureMsg && !knowledgeCapture && <div className="px-4 py-1.5 text-[11px] font-medium text-emerald-400 border-t border-emerald-100 bg-emerald-500/15">{knowledgeCaptureMsg}</div>}
               <div className="p-3 border-t border-night-border relative shrink-0" style={{ paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom))" }}>
-                <div className="chat-compose-guide flex items-center gap-2 mb-2 flex-wrap rounded-xl px-3 py-2">
-                  <div className="text-[11px] font-medium">✦ พิมพ์ไทย — ระบบแปลแล้วส่ง <span className="opacity-60">(Ctrl/⌘+Enter = ส่ง)</span></div>
-                  <label className="chat-language-control text-[11px] flex items-center gap-1.5 ml-auto rounded-lg px-2 py-1">
-                    <span className="font-semibold">🌐 แปลเป็น</span>
-                    <select value={forceLang} onChange={(e) => { setForceLang(e.target.value); if (selected) lsSet(`ui.forceLang.${selected.id}`, e.target.value); }}
-                      className="rounded-md border-0 px-2 py-1 text-[11px] font-semibold bg-night-surface">
-                      {LANG_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                    </select>
-                  </label>
-                  {forceLang === "auto" && selected.cust_lang && <span className="chat-language-hint rounded-full px-2 py-1 text-[10px] font-medium">อ้างอิงภาษาหัวแชท: {selected.cust_lang}</span>}
-                </div>
+                {selected.source !== "line" && (
+                  <div className="chat-compose-guide flex items-center gap-2 mb-2 flex-wrap rounded-xl px-3 py-2">
+                    <div className="text-[11px] font-medium">✦ พิมพ์ไทย — ระบบแปลแล้วส่ง <span className="opacity-60">(Ctrl/⌘+Enter = ส่ง)</span></div>
+                    <label className="chat-language-control text-[11px] flex items-center gap-1.5 ml-auto rounded-lg px-2 py-1">
+                      <span className="font-semibold">🌐 แปลเป็น</span>
+                      <select value={forceLang} onChange={(e) => { setForceLang(e.target.value); if (selected) lsSet(`ui.forceLang.${selected.id}`, e.target.value); }}
+                        className="rounded-md border-0 px-2 py-1 text-[11px] font-semibold bg-night-surface">
+                        {LANG_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                      </select>
+                    </label>
+                    {forceLang === "auto" && selected.cust_lang && <span className="chat-language-hint rounded-full px-2 py-1 text-[10px] font-medium">อ้างอิงภาษาหัวแชท: {selected.cust_lang}</span>}
+                  </div>
+                )}
                 {savedOpen && (
                   <div className="absolute bottom-full left-3 right-3 mb-1 bg-night-surface border border-night-border rounded-lg shadow-lg max-h-64 overflow-y-auto z-10 divide-y divide-night-border-subtle">
                     {savedReplies.length === 0 ? (

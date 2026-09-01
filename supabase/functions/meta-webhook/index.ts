@@ -77,6 +77,17 @@ async function notifyNewMessage(payload: { page_id: string; page_name: string | 
   } catch (_e) { /* แจ้งเตือนพลาดไม่กระทบ webhook หลัก */ }
 }
 
+// ปุ่มเมนูในแชท (Persistent Menu / Ice Breakers) และปุ่มใน template: Meta ส่งมาเป็น ev.postback ไม่ใช่ ev.message
+// เดิมอ่านแค่ postback.referral (เอา ad_id) ตัวการกดปุ่มเลยหายไป ไม่ขึ้นในกล่องแชทและไม่เด้งแจ้งเตือน
+// แปลงเป็นรูปทรงเดียวกับ message เพื่อใช้ pipeline เดิมทั้งชุด (กันซ้ำด้วย mid / สร้างลูกค้าใหม่ / ยิง push)
+function postbackAsMessage(pb: any) {
+  if (!pb) return null;
+  // title = ข้อความบนปุ่มที่ลูกค้าเห็น, payload = โค้ดที่เราตั้งเอง — เอา title ก่อนเพราะแอดมินอ่านรู้เรื่องกว่า
+  const label = String(pb.title || pb.payload || "").trim();
+  if (!label) return null;
+  return { mid: pb.mid ? String(pb.mid) : null, text: `[กดปุ่ม] ${label}` };
+}
+
 // Echo จาก Meta หมายถึงมีคนตอบผ่าน Page Inbox หรืออุปกรณ์อื่นแล้ว
 // ล้างสถานะทุกแถวของลูกค้าคนเดียวกัน เพื่อให้ทุก user/device เห็นจุดแดงหายพร้อมกัน
 async function clearRelatedUnread(admin: any, pageId: string, psid: string, source: string | null, nowIso: string) {
@@ -261,7 +272,7 @@ Deno.serve(async (req) => {
         }
 
         for (const ev of entry.messaging || []) {
-          const msg = ev.message;
+          const msg = ev.message || postbackAsMessage(ev.postback);
           const referral = ev.referral || ev.postback?.referral;
           const referralAdId = referral?.ad_id ? String(referral.ad_id) : null;
           const isEcho = !!msg?.is_echo || String(ev.sender?.id || "") === igId;
@@ -284,13 +295,29 @@ Deno.serve(async (req) => {
 
           if (msg && (msg.text || msg.attachments?.length)) {
             const mid = msg.mid ? String(msg.mid) : null;
+
+            // ที่มาจากสตอรี่ IG — แอดมินต้องรู้ว่าลูกค้าทักมาเพราะเห็นสตอรี่ ไม่ใช่ทักมาลอย ๆ
+            // ตอบสตอรี่  -> msg.reply_to.story = { url, id }
+            // แท็ก/เมนชันในสตอรี่ -> attachments[].type === "story_mention"
+            const storyReply = msg?.reply_to?.story || null;
+            const storyMention = (msg.attachments || []).find((a: any) => a?.type === "story_mention") || null;
+            const storyUrl = storyReply?.url || storyMention?.payload?.url || null;
+            const storyId = storyReply?.id ? String(storyReply.id) : null;
+            const storyKind = storyReply ? "reply" : storyMention ? "mention" : null;
+            // แปะไว้ทุก item ของ event นี้ เพื่อให้หน้าเว็บโชว์ป้าย "จากสตอรี่" ที่ข้อความนั้นได้ตรงตัว
+            const storyMeta = storyKind
+              ? { via: "instagram_story", story_kind: storyKind, ...(storyUrl ? { story_url: storyUrl } : {}), ...(storyId ? { story_id: storyId } : {}) }
+              : { via: "instagram" };
+
             const items: any[] = [];
-            if (msg.text) items.push({ w: isEcho ? "p" : "u", t: transcriptText(msg.text), at: nowIso, ...(mid ? { mid } : {}), via: "instagram" });
+            if (msg.text) items.push({ w: isEcho ? "p" : "u", t: transcriptText(msg.text), at: nowIso, ...(mid ? { mid } : {}), ...storyMeta });
             for (const att of msg.attachments || []) {
               const type = att?.type;
               const url = att?.payload?.url || null;
-              const label = type === "image" ? "[รูปภาพ]" : type === "video" ? "[วิดีโอ]" : type === "audio" ? "[เสียง]" : type === "file" ? "[ไฟล์]" : "[สื่อ]";
-              items.push({ w: isEcho ? "p" : "u", t: label, at: nowIso, ...(mid ? { mid } : {}), ...(url ? { img: url, img_source: "webhook" } : {}), via: "instagram" });
+              // story_mention ไม่ใช่ "สื่อที่ลูกค้าส่ง" แต่คือภาพสตอรี่ของเราที่เขาแท็ก — ป้ายต้องบอกให้ชัด
+              const label = type === "story_mention" ? "[แท็กเราในสตอรี่]"
+                : type === "image" ? "[รูปภาพ]" : type === "video" ? "[วิดีโอ]" : type === "audio" ? "[เสียง]" : type === "file" ? "[ไฟล์]" : "[สื่อ]";
+              items.push({ w: isEcho ? "p" : "u", t: label, at: nowIso, ...(mid ? { mid } : {}), ...(url ? { img: url, img_source: "webhook" } : {}), ...storyMeta });
             }
             const oldTr = Array.isArray(row?.transcript) ? row.transcript : [];
             if (mid && oldTr.some((m: any) => String(m?.mid || "") === mid)) continue;
@@ -401,7 +428,7 @@ Deno.serve(async (req) => {
         }
 
         // ---- ข้อความจากลูกค้า (real-time) — รองรับทั้งข้อความและรูป/ไฟล์แนบ ----
-        const msg = ev.message;
+        const msg = ev.message || postbackAsMessage(ev.postback);
         if (msg && !msg.is_echo && (msg.text || (msg.attachments?.length))) {
           const inMid = msg.mid ? String(msg.mid) : null;
           const items: any[] = [];

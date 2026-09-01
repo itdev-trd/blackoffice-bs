@@ -17,6 +17,13 @@ const nextConfig = {
   env: {
     NEXT_PUBLIC_BUILD_ID: BUILD_ID,
   },
+  // /tv-members ถูกยุบเข้าไปเป็นแท็บ TradingView ในหน้า /customerdb แล้ว (เนื้อหาเดียวกันเป๊ะ)
+  // เก็บเส้นทางเดิมไว้ให้ redirect เพื่อไม่ให้บุ๊กมาร์ก/ลิงก์เก่ากลายเป็น 404
+  // ทำที่ชั้น routing ไม่ใช่ใน React เพราะหน้านี้อยู่ใต้ layout ที่เป็น client component
+  // การ redirect ระหว่าง render ทำให้ hooks ไม่ตรงกันจนหน้าพัง
+  async redirects() {
+    return [{ source: "/tv-members", destination: "/customerdb", permanent: false }];
+  },
 };
 
 module.exports = nextConfig;

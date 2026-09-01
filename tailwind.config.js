@@ -47,7 +47,7 @@ module.exports = {
         // IBM Plex Sans Thai ครอบทั้งไทยและละตินในตัวเดียว จึงไม่ต้องมีฟอนต์หัวข้อแยก
         // (ฟอนต์ละตินสวยๆ ส่วนใหญ่ไม่มีสระไทย หัวข้อไทยจะ fallback แล้วดูไม่เข้าชุด)
         // ลำดับชั้นสร้างด้วยน้ำหนัก+ขนาด ไม่ใช่การสลับ family
-        sans: ['"IBM Plex Sans Thai"', '"Noto Sans Thai"', "system-ui", "sans-serif"],
+        sans: ["var(--font-roboto)", "var(--font-noto-sans-thai)", "system-ui", "sans-serif"],
         // ตัวเลขทุกที่ที่ต้องเทียบกันเป็นคอลัมน์ (ยอดเงิน, สถิติ, วันเวลา)
         mono: ['"IBM Plex Mono"', "ui-monospace", "SFMono-Regular", "monospace"],
       },

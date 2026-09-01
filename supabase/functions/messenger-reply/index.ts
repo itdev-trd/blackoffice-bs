@@ -26,18 +26,18 @@ async function fetchJson(url: string, init?: RequestInit) {
 
 // ส่งเข้า Messenger: ลอง RESPONSE ก่อน (กรอบ 24 ชม.) ถ้า Meta ปฏิเสธ → retry ด้วย Human Agent tag (ขยายเป็น 7 วัน)
 // message = object ของ Send API (เช่น { text } หรือ { attachment })
-async function sendMessage(pageId: string, pageTok: string, psid: string, message: any, version: string, preferHumanAgent = false) {
+async function sendMessage(pageId: string, pageTok: string, psid: string, message: any, version: string, preferHumanAgent = false, extra: Record<string, unknown> = {}) {
   const url = `https://graph.facebook.com/${version}/${pageId}/messages?access_token=${pageTok}`;
   const post = (body: any) => fetchJson(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   // รู้อยู่แล้วว่าเกิน 24 ชม. → ส่ง HUMAN_AGENT ตรง ไม่เสียเวลายิง RESPONSE ที่ Meta ต้องปฏิเสธก่อน
   let res = preferHumanAgent
-    ? await post({ recipient: { id: psid }, messaging_type: "MESSAGE_TAG", tag: "HUMAN_AGENT", message })
-    : await post({ recipient: { id: psid }, messaging_type: "RESPONSE", message });
+    ? await post({ recipient: { id: psid }, messaging_type: "MESSAGE_TAG", tag: "HUMAN_AGENT", message, ...extra })
+    : await post({ recipient: { id: psid }, messaging_type: "RESPONSE", message, ...extra });
   if (preferHumanAgent && !res?.error) return { ...res, _delivery_mode: "human_agent" };
   // Meta อาจคืน code 10, 200 หรือ subcode อื่นเมื่อเกิน 24 ชม. จึงลอง HUMAN_AGENT ทุกครั้งที่ RESPONSE ถูกปฏิเสธ
   if (res?.error) {
     const firstErr = res.error;   // error ของการยิงครั้งแรก (RESPONSE ถ้าอยู่ในกรอบ)
-    const retry = preferHumanAgent ? res : await post({ recipient: { id: psid }, messaging_type: "MESSAGE_TAG", tag: "HUMAN_AGENT", message });
+    const retry = preferHumanAgent ? res : await post({ recipient: { id: psid }, messaging_type: "MESSAGE_TAG", tag: "HUMAN_AGENT", message, ...extra });
     if (!retry?.error) return { ...retry, _delivery_mode: "human_agent" };
     // ยัง error → วินิจฉัยตามบริบทจริง (อยู่ในกรอบ 24 ชม.หรือไม่) พร้อม code/subcode
     const code = Number(retry.error.code);
@@ -58,10 +58,10 @@ async function sendMessage(pageId: string, pageTok: string, psid: string, messag
 
 // Facebook Login flow ใช้ Page access token และส่งผ่าน /{PAGE_ID}/messages;
 // recipient เป็น IGSID แล้ว Meta จะ route ไปยัง Instagram ที่เชื่อมกับเพจเอง
-async function sendInstagramMessage(pageId: string, pageTok: string, igsid: string, message: any) {
+async function sendInstagramMessage(pageId: string, pageTok: string, igsid: string, message: any, extra: Record<string, unknown> = {}) {
   const res = await fetchJson(`${GRAPH_BASE}/${pageId}/messages?access_token=${pageTok}`, {
     method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ recipient: { id: igsid }, messaging_type: "RESPONSE", message }),
+    body: JSON.stringify({ recipient: { id: igsid }, messaging_type: "RESPONSE", message, ...extra }),
   });
   if (res?.error) throw new Error(res.error.error_user_msg || res.error.message || "ส่ง Instagram DM ไม่สำเร็จ");
   return { ...res, _delivery_mode: "instagram" };
@@ -175,7 +175,7 @@ function stripLegacyMediaReplyPrefix(value: string): string {
   return String(value || "").replace(/^↪\s*\[(?:รูปภาพ|วิดีโอ|เสียง|ไฟล์แนบ|สติกเกอร์)\]\s*\r?\n/i, "").trim();
 }
 
-// Send API สร้าง native reply ไม่ได้ จึงส่งบริบทแบบข้อความย่อแทน
+// ทางถอยเมื่อทำ native reply ไม่ได้ (mid เก่า/ถูกลบ, ตอบใต้คอมเมนต์) — ส่งบริบทเป็นข้อความย่อแทน
 // จำกัดเฉพาะส่วนอ้างอิงไม่เกิน 320 ตัวอักษร และไม่สร้างข้อความ [รูปภาพ] เทียม
 function composeCustomerReplyText(replyText: string, replyToText: string, replyToImg: string): string {
   const answer = String(replyText || "").trim();
@@ -188,6 +188,32 @@ function composeCustomerReplyText(replyText: string, replyToText: string, replyT
   if (available < 20) return answer;
   const excerpt = quote.length <= available ? quote : `${quote.slice(0, available - 1)}…`;
   return `${prefix}${excerpt}${suffix}${answer}`;
+}
+
+// Send API ทำ native reply ได้แล้ว โดย reply_to ต้องอยู่ "ระดับบนสุด" ของ body คู่กับ recipient/message
+// ห้ามใส่ใน message เพราะ Meta ตอบ (#100) Invalid keys "reply_to" were found in param "message".
+// ลูกค้าจะเห็นข้อความที่เราอ้างถึงลอยอยู่เหนือคำตอบ และกดเพื่อเลื่อนไปดูต้นฉบับได้ เหมือน quote ของ LINE
+//
+// mid ที่เก่าเกินไปหรือถูกลบแล้ว Meta จะปฏิเสธทั้งคำขอ ห้ามให้คำตอบหลุดหาย
+// จึงถอยไปส่งแบบเดิม (ไม่มี reply_to แต่เติมข้อความอ้างอิงในเนื้อหา) ให้คำตอบถึงลูกค้าเสมอ
+async function sendWithNativeReply(
+  send: (message: any, extra: Record<string, unknown>) => Promise<any>,
+  nativeText: string,
+  quotedText: string,
+  mid: string
+) {
+  if (!mid) {
+    const res = await send({ text: quotedText }, {});
+    return { ...res, _delivered_text: quotedText, _reply_mode: "text_quote" };
+  }
+  try {
+    const res = await send({ text: nativeText }, { reply_to: { mid } });
+    return { ...res, _delivered_text: nativeText, _reply_mode: "native" };
+  } catch (e) {
+    console.warn("[native reply ถูกปฏิเสธ ถอยไปใช้ข้อความอ้างอิง]", e instanceof Error ? e.message : e);
+    const res = await send({ text: quotedText }, {});
+    return { ...res, _delivered_text: quotedText, _reply_mode: "text_quote_fallback" };
+  }
 }
 
 // คลังความรู้ต้องไม่เก็บข้อมูลระบุตัวลูกค้าที่หลุดมากับบทสนทนา
@@ -412,10 +438,14 @@ Deno.serve(async (req) => {
       // Preview แปลอย่างเดียว ยังไม่แตะ Meta/DB ผู้ใช้แก้ข้อความปลายทางและกดอนุมัติก่อนส่งจริง
       if (action === "preview") return json({ ok: true, preview_text: replyText, lang, source_text: textTh });
 
-      // LINE แสดง native quote ให้ลูกค้าแล้ว จึงไม่ต้องเติมข้อความอ้างอิงซ้ำในเนื้อหา
-      const outText = row.source === "line" && replyToQuoteToken
-        ? replyText
-        : composeCustomerReplyText(replyText, replyToText, replyToImg);
+      // ช่องทางที่ทำ native quote ได้ ลูกค้าเห็นต้นฉบับที่เราอ้างถึงอยู่แล้ว จึงไม่ต้องเติมข้อความอ้างอิงซ้ำในเนื้อหา
+      //   LINE                  -> quoteToken
+      //   Messenger / Instagram -> message.reply_to.mid
+      const quotedText = composeCustomerReplyText(replyText, replyToText, replyToImg);
+      const lineNative = row.source === "line" && !!replyToQuoteToken;
+      // ตอบใต้คอมเมนต์ใช้ native reply ไม่ได้ — mid ที่ถืออยู่เป็น comment id ไม่ใช่ message id
+      const metaNativeMid = !isComment && replyToMid ? replyToMid : "";
+      const outText = lineNative ? replyText : quotedText;
 
       // ส่งจริง
       let send: any, gotPsid: string | null = row.psid || null;
@@ -473,12 +503,18 @@ Deno.serve(async (req) => {
         send = { message_id: pr?.id || pr?.message_id || null };
         gotPsid = pr?.recipient_id ? String(pr.recipient_id) : null;
         } else if (row.source === "instagram") {
-          send = await sendInstagramMessage(row.page_id, pageTok, row.psid, { text: outText });
+          send = await sendWithNativeReply(
+            (message, extra) => sendInstagramMessage(row.page_id, pageTok, row.psid, message, extra),
+            replyText, quotedText, metaNativeMid
+          );
         } else {
           // ส่งผ่าน Send API (RESPONSE ก่อน, เกิน 24 ชม.ค่อย fallback Human Agent)
           const lastCustomerAt = [...transcript].reverse().find((m: any) => m?.w === "u" && m?.at)?.at;
           const outsideResponseWindow = !!lastCustomerAt && Date.now() - new Date(lastCustomerAt).getTime() > 23.9 * 60 * 60 * 1000;
-          send = await sendMessage(row.page_id, pageTok, row.psid, { text: outText }, GRAPH_VERSION, outsideResponseWindow);
+          send = await sendWithNativeReply(
+            (message, extra) => sendMessage(row.page_id, pageTok, row.psid, message, GRAPH_VERSION, outsideResponseWindow, extra),
+            replyText, quotedText, metaNativeMid
+          );
         }
       }
 
@@ -566,7 +602,7 @@ Deno.serve(async (req) => {
       }
       if (!isComment) await clearRelatedUnread(admin, { ...row, id: conversationId, psid: gotPsid || row.psid }, nowIso, true);
       await syncPushState(conversationId);
-      return json({ ok: true, sent_text: replyText, delivered_text: outText, lang, message_id: send?.message_id || null, quote_token: send?.quote_token || null, via, delivery_mode: send?._delivery_mode || null, conversation_id: conversationId, merged_into_existing: mergedIntoExisting, reply_to_text: replyToText || null, reply_to_mid: replyToMid || null, reply_to_img: replyToImg || null, reply_to_at: replyToAt || null });
+      return json({ ok: true, sent_text: replyText, delivered_text: send?._delivered_text || outText, reply_mode: send?._reply_mode || null, lang, message_id: send?.message_id || null, quote_token: send?.quote_token || null, via, delivery_mode: send?._delivery_mode || null, conversation_id: conversationId, merged_into_existing: mergedIntoExisting, reply_to_text: replyToText || null, reply_to_mid: replyToMid || null, reply_to_img: replyToImg || null, reply_to_at: replyToAt || null });
     }
 
     // ---------- ดึงรูปโปรไฟล์ลูกค้า (เก็บไว้ใช้ในลิสต์) ----------

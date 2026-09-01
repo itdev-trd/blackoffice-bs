@@ -20,6 +20,9 @@ export default function LeaderboardTab({ active = true }) {
     ["6 เดือนล่าสุด", () => [thMonth(-5, "start"), thDay(0)]],
     ["ปีนี้", () => { const d = new Date(Date.now() + 7 * 3600 * 1000); return [`${d.getUTCFullYear()}-01-01`, thDay(0)]; }],
   ];
+  // ช่วงที่ใช้บ่อยอยู่เป็นปุ่มลัด ที่เหลืออยู่ในดรอปดาวน์ — กันแถบเครื่องมือรกด้วยชิป 11 อัน
+  const QUICK_PRESETS = [0, 1, 3, 5, 6];
+  const OTHER_PRESETS = PRESETS.map((_, i) => i).filter((i) => !QUICK_PRESETS.includes(i));
   const [since, setSince] = useState(() => thDay(-6));
   const [until, setUntil] = useState(() => thDay(0));
   const [presetIdx, setPresetIdx] = useState(3);   // 7 วันล่าสุด
@@ -65,12 +68,12 @@ export default function LeaderboardTab({ active = true }) {
   // เป็นข้อยกเว้นที่มีเหตุผลจากพาเลตต์หลัก (accent น้ำเงิน) เพราะสีสื่ออันดับโดยตรง
   // ส่วนสีเน้นอื่นใช้ brand/สถานะชุดเดียวกับทั้งแอป
   const C = {
-    bg: "#F7F9FC", ink: "#FFFFFF", border: "rgba(15,23,42,.12)", hair: "rgba(15,23,42,.09)",
+    bg: "#0D1117", ink: "#F8FAFC", border: "rgba(148,163,184,.18)", hair: "rgba(148,163,184,.14)",
     gold: "#B98500", silver: "#64748B", bronze: "#A96022",
     purple: "#3452E0", green: "#059669", red: "#DC2626",
-    t1: "#0F172A", t2: "#475467", t3: "#667085",
+    t1: "#F8FAFC", t2: "#A5B4C7", t3: "#718096",
   };
-  const FONT = "'IBM Plex Sans Thai','Noto Sans Thai',system-ui,-apple-system,sans-serif";
+  const FONT = "'Roboto','Noto Sans Thai',system-ui,-apple-system,sans-serif";
   const NUM = "'IBM Plex Mono',ui-monospace,monospace";
   const board = res?.board || [];
   const top3 = board.slice(0, 3);
@@ -90,31 +93,51 @@ export default function LeaderboardTab({ active = true }) {
   const PAD = "clamp(20px,4.5vw,60px)";
 
   return (
-    <div style={{ fontFamily: FONT, background: C.bg, color: C.t1, borderRadius: 26, border: `1px solid ${C.border}`, boxShadow: "0 24px 70px -42px rgba(15,23,42,.35)", overflow: "hidden" }}>
+    <div className="leaderboard-shell w-full max-w-[1400px] mx-auto" style={{ fontFamily: FONT, background: C.bg, color: C.t1, borderRadius: 26, border: `1px solid ${C.border}`, boxShadow: "0 24px 70px -42px rgba(0,0,0,.65)", overflow: "hidden" }}>
       <style>{`
         @keyframes lbPulse{0%,100%{opacity:.9;transform:scale(1)}50%{opacity:0;transform:scale(2.2)}}
         @keyframes lbFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-7px)}}
         @keyframes lbBreathe{0%,100%{opacity:.55}50%{opacity:.9}}
         @keyframes lbRise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
         .lb-row{transition:background .18s ease}
-        .lb-row:hover{background:rgba(15,23,42,.035)}
-        .lb-tab{transition:color .2s ease}
-        .lb-tab:hover{color:rgba(15,23,42,.9)}
+        .lb-row:hover{background:rgba(148,163,184,.06)}
+        .lb-tab{transition:color .2s ease,background .2s ease,border-color .2s ease,box-shadow .2s ease}
+        .lb-tab:hover{color:#F8FAFC}
         .lb-ico{transition:all .2s ease}
-        .lb-ico:hover{color:${C.t1};border-color:rgba(15,23,42,.24)!important;background:rgba(15,23,42,.05)!important}
-        .lb-date{color-scheme:light}
+        .lb-ico:hover{color:${C.t1};border-color:rgba(148,163,184,.35)!important;background:rgba(148,163,184,.08)!important}
+        .lb-date{color-scheme:dark}
         .lb-date::-webkit-calendar-picker-indicator{filter:none;cursor:pointer}
         .lb-podium{animation:lbRise .6s cubic-bezier(.2,.8,.2,1) both}
         @media(max-width:640px){
           .lb-hide-sm{display:none!important}
           .lb-grid{grid-template-columns:38px 1fr 92px!important}
+          .lb-masthead{padding-top:24px!important}
+          .lb-masthead-inner{gap:18px!important}
+          .lb-masthead-title{min-width:0!important;flex:1 1 100%!important}
+          .lb-total{width:100%;padding-left:0!important;text-align:left!important;display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+          .lb-total-glow{display:none!important}
+          .lb-total-number{font-size:48px!important;margin-top:0!important}
+          .lb-toolbar{align-items:stretch!important;flex-direction:column!important;gap:14px!important}
+          .lb-presets{gap:12px!important}
+          .lb-toolbar-controls{width:100%;justify-content:flex-start!important;flex-wrap:wrap!important;gap:8px!important}
+          .lb-date{flex:1 1 132px;min-width:0}
+          .lb-live{margin-left:auto}
+          .lb-podium{gap:8px!important;padding:42px 12px 72px!important;min-height:390px!important}
+          .lb-podium > div{min-width:0!important}
+          .lb-podium > div:nth-child(1){width:clamp(82px,27vw,125px)!important}
+          .lb-podium > div:nth-child(2){width:clamp(96px,31vw,145px)!important}
+          .lb-podium > div:nth-child(3){width:clamp(82px,27vw,125px)!important}
+          .lb-podium > div:nth-child(1) > div:nth-of-type(2), .lb-podium > div:nth-child(3) > div:nth-of-type(2){width:68px!important;height:68px!important}
+          .lb-podium > div:nth-child(2) > div:nth-of-type(2){width:82px!important;height:82px!important}
+          .lb-podium > div:nth-child(1) > div:last-child > div:last-child, .lb-podium > div:nth-child(3) > div:last-child > div:last-child{height:74px!important}
+          .lb-podium > div:nth-child(2) > div:last-child > div:last-child{height:112px!important}
         }
       `}</style>
 
       {/* ═══ Editorial masthead ═══ */}
-      <div style={{ padding: `36px ${PAD} 0` }}>
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 28 }}>
-          <div style={{ minWidth: 240 }}>
+      <div className="lb-masthead" style={{ padding: `36px ${PAD} 0` }}>
+        <div className="lb-masthead-inner" style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 28 }}>
+          <div className="lb-masthead-title" style={{ minWidth: 240 }}>
             {/* ถอดป้าย "LEADERBOARD" ออก — เป็นภาษาอังกฤษที่แปลตรงกับหัวข้อ "กระดานแต้ม" ที่อยู่ใต้มันพอดี
                 (letterSpacing .42em ยังทำให้อ่านเป็นคำไม่ได้อีก) เมนูซ้ายบอกอยู่แล้วว่าอยู่หน้าไหน */}
             <h2 style={{ fontSize: "clamp(30px,4.6vw,52px)", fontWeight: 800, lineHeight: .98, letterSpacing: "-.025em", margin: 0 }}>กระดานแต้ม</h2>
@@ -123,10 +146,10 @@ export default function LeaderboardTab({ active = true }) {
             </p>
           </div>
           {/* Total score — editorial figure, not a boxed card */}
-          <div style={{ textAlign: "right", position: "relative", paddingLeft: 30 }}>
-            <div style={{ position: "absolute", right: -8, top: -18, width: 200, height: 120, background: `radial-gradient(60% 60% at 70% 40%, ${C.purple}44, transparent 72%)`, filter: "blur(14px)", pointerEvents: "none", animation: "lbBreathe 4s ease-in-out infinite" }} />
+          <div className="lb-total" style={{ textAlign: "right", position: "relative", paddingLeft: 30 }}>
+            <div className="lb-total-glow" style={{ position: "absolute", right: -8, top: -18, width: 200, height: 120, background: `radial-gradient(60% 60% at 70% 40%, ${C.purple}44, transparent 72%)`, filter: "blur(14px)", pointerEvents: "none", animation: "lbBreathe 4s ease-in-out infinite" }} />
             <div style={{ position: "relative", fontSize: 11, letterSpacing: ".34em", textTransform: "uppercase", color: C.t3, fontWeight: 600, fontFamily: NUM }}>แต้มรวมทั้งหมด</div>
-            <div style={{ position: "relative", fontFamily: NUM, fontVariantNumeric: "tabular-nums", fontSize: "clamp(46px,7vw,84px)", fontWeight: 800, lineHeight: .92, letterSpacing: "-.03em", marginTop: 6, transition: "transform .35s cubic-bezier(.2,.8,.2,1)", transform: flash ? "scale(1.04)" : "scale(1)", color: "#0F172A", background: "none", WebkitBackgroundClip: "border-box", WebkitTextFillColor: "#0F172A", filter: "none" }}>
+            <div className="lb-total-number" style={{ position: "relative", fontFamily: NUM, fontVariantNumeric: "tabular-nums", fontSize: "clamp(46px,7vw,84px)", fontWeight: 800, lineHeight: .92, letterSpacing: "-.03em", marginTop: 6, transition: "transform .35s cubic-bezier(.2,.8,.2,1)", transform: flash ? "scale(1.04)" : "scale(1)", color: C.t1, background: "none", WebkitBackgroundClip: "border-box", WebkitTextFillColor: C.t1, filter: "none" }}>
               {/* ตอนยังไม่มีข้อมูลเคยเรนเดอร์ "—" ที่ขนาด 84px ซึ่งอ่านเป็นแท่งดำ ไม่ใช่สถานะ
                   ใช้ 0 ที่สีจางแทน — สื่อว่า "ยังไม่มีแต้ม" โดยรูปแบบตัวเลขยังคงเดิม */}
               <span style={res ? undefined : { color: C.t3, fontWeight: 600 }}>
@@ -140,20 +163,36 @@ export default function LeaderboardTab({ active = true }) {
         </div>
 
         {/* Toolbar: editorial tabs + date + live — separated by hairlines */}
-        <div style={{ marginTop: 30, borderTop: `1px solid ${C.hair}`, borderBottom: `1px solid ${C.hair}`, padding: "14px 0", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 16 }}>
-          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "clamp(10px,1.6vw,22px)" }}>
-            {PRESETS.map(([label, fn], i) => {
+        <div className="lb-toolbar" style={{ marginTop: 30, borderTop: `1px solid ${C.hair}`, borderBottom: `1px solid ${C.hair}`, padding: "14px 0", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 16 }}>
+          {/* เดิมวางช่วงเวลาทั้ง 11 แบบเป็นชิปเรียงแถวเดียว ทำให้แถบเครื่องมือรกและหาปุ่มที่ต้องการยาก
+              เหลือเฉพาะช่วงที่ใช้บ่อยเป็นปุ่มลัด ที่เหลือย้ายไปดรอปดาวน์ "ช่วงอื่น" */}
+          <div className="lb-presets" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "clamp(8px,1.2vw,14px)" }}>
+            {QUICK_PRESETS.map((i) => {
+              const [label, fn] = PRESETS[i];
               const on = presetIdx === i;
               return (
                 <button key={label} className="lb-tab" onClick={() => { const [s, u] = fn(); setSince(s); setUntil(u); setPresetIdx(i); }}
-                  style={{ position: "relative", background: "none", border: "none", cursor: "pointer", padding: "2px 0", fontSize: 13.5, fontWeight: on ? 700 : 500, color: on ? C.t1 : C.t3, fontFamily: FONT }}>
+                  style={{ position: "relative", background: on ? "rgba(185,133,0,.14)" : "transparent", border: on ? `1px solid ${C.gold}` : "1px solid transparent", borderRadius: 8, cursor: "pointer", padding: "8px 13px", fontSize: 13.5, fontWeight: on ? 700 : 500, color: on ? C.t1 : C.t3, fontFamily: FONT, boxShadow: on ? `0 0 0 2px rgba(185,133,0,.08)` : "none" }}>
                   {label}
-                  {on && <span style={{ position: "absolute", left: 0, right: 0, bottom: -15, height: 2, borderRadius: 2, background: `linear-gradient(90deg,${C.gold},#E9B923)`, boxShadow: `0 0 12px ${C.gold}` }} />}
                 </button>
               );
             })}
+            <select
+              aria-label="ช่วงเวลาอื่น"
+              value={QUICK_PRESETS.includes(presetIdx) ? "" : String(presetIdx)}
+              onChange={(e) => {
+                const i = Number(e.target.value);
+                if (!Number.isInteger(i) || !PRESETS[i]) return;
+                const [s, u] = PRESETS[i][1]();
+                setSince(s); setUntil(u); setPresetIdx(i);
+              }}
+              style={{ background: "transparent", color: OTHER_PRESETS.includes(presetIdx) ? C.t1 : C.t3, border: `1px solid ${OTHER_PRESETS.includes(presetIdx) ? C.gold : C.border}`, borderRadius: 8, padding: "8px 10px", fontSize: 13.5, fontFamily: FONT, cursor: "pointer" }}
+            >
+              <option value="">ช่วงอื่น…</option>
+              {OTHER_PRESETS.map((i) => <option key={PRESETS[i][0]} value={i}>{PRESETS[i][0]}</option>)}
+            </select>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div className="lb-toolbar-controls" style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <input type="date" className="lb-date" value={since} onChange={(e) => { setSince(e.target.value); setPresetIdx(-1); }}
               style={{ background: "transparent", color: C.t2, border: `1px solid ${C.border}`, borderRadius: 999, padding: "6px 12px", fontSize: 12.5, fontFamily: NUM }} />
             <span style={{ color: C.t3, fontSize: 12 }}>→</span>
@@ -163,7 +202,7 @@ export default function LeaderboardTab({ active = true }) {
               style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 34, height: 34, borderRadius: "50%", background: "transparent", color: C.t2, border: `1px solid ${C.border}`, cursor: "pointer", opacity: busy ? .5 : 1 }}>
               {busy ? <Loader2 className="animate-spin" size={15} /> : <RefreshCw size={15} />}
             </button>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, color: C.green, fontWeight: 600, letterSpacing: ".02em" }}>
+            <span className="lb-live" style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, color: C.green, fontWeight: 600, letterSpacing: ".02em" }}>
               <span style={{ position: "relative", width: 7, height: 7 }}>
                 <span style={{ position: "absolute", inset: 0, borderRadius: "50%", background: C.green, animation: "lbPulse 2s ease-out infinite" }} />
                 <span style={{ position: "absolute", inset: 0, borderRadius: "50%", background: C.green }} />
@@ -178,7 +217,7 @@ export default function LeaderboardTab({ active = true }) {
       {/* ═══ CINEMATIC PODIUM STAGE (hero) ═══ */}
       {board.length > 0 ? (
         <div style={{ position: "relative", overflow: "hidden", marginTop: 8, minHeight: 480,
-          background: "radial-gradient(130% 90% at 50% -10%, #FFFFFF 0%, #EEF3FA 48%, #E5EBF4 100%)" }}>
+          background: "radial-gradient(130% 90% at 50% -10%, #1B2635 0%, #121A25 48%, #0F151E 100%)" }}>
           {/* atmospheric top haze */}
           <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 240, background: "radial-gradient(70% 100% at 50% 0%, rgba(255,255,255,.05), transparent 70%)", pointerEvents: "none" }} />
           {/* faint ticker line horizon */}
@@ -189,7 +228,7 @@ export default function LeaderboardTab({ active = true }) {
           </svg>
           {/* reflective floor */}
           <div style={{ position: "absolute", left: 0, right: 0, bottom: 88, height: 1, background: `linear-gradient(90deg,transparent, ${C.gold}88, rgba(255,255,255,.35), ${C.gold}88, transparent)`, opacity: .5 }} />
-          <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 96, background: "linear-gradient(180deg, rgba(229,235,244,0), #E5EBF4 70%)", pointerEvents: "none" }} />
+          <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 96, background: "linear-gradient(180deg, rgba(15,21,30,0), #0F151E 70%)", pointerEvents: "none" }} />
 
           <div className="lb-podium" style={{ position: "relative", display: "flex", alignItems: "flex-end", justifyContent: "center", gap: "clamp(14px,4vw,64px)", padding: `70px ${PAD} 96px`, zIndex: 2 }}>
             {order.map((rank, i) => {
@@ -246,7 +285,7 @@ export default function LeaderboardTab({ active = true }) {
           </div>
         </div>
       ) : (!busy && res) ? (
-        <div style={{ margin: `20px ${PAD} 40px`, textAlign: "center", padding: "72px 20px", borderRadius: 22, border: `1px solid ${C.hair}`, background: "radial-gradient(100% 100% at 50% 0%, #FFFFFF, #EEF2F7)" }}>
+        <div style={{ margin: `20px ${PAD} 40px`, textAlign: "center", padding: "72px 20px", borderRadius: 22, border: `1px solid ${C.hair}`, background: "radial-gradient(100% 100% at 50% 0%, #1B2635, #111820)" }}>
           <Trophy size={44} style={{ color: C.t3, margin: "0 auto 14px" }} />
           <div style={{ fontSize: 16, fontWeight: 700, color: C.t2 }}>ยังไม่มีแต้มในช่วงนี้</div>
           <div style={{ fontSize: 13.5, color: C.t3, marginTop: 6 }}>แต้มจะปรากฏเมื่อมีการตอบแชทนอกเวลาทำการ</div>

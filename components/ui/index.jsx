@@ -89,10 +89,22 @@ export function Button({
 // Card — พื้นผิวหลัก
 // quiet = พาเนลรองสำหรับแยกกลุ่มข้อมูลย่อยภายในการ์ดใบใหญ่
 // ---------------------------------------------------------------
-export function Card({ quiet = false, glass = false, hover = false, className = "", children, ...props }) {
+// title/subtitle/right = หัวการ์ดมาตรฐาน — ก่อนหน้านี้แต่ละหน้าประกอบหัวการ์ดเอง
+// ทำให้ระยะขอบและขนาดตัวอักษรไม่ตรงกันสักหน้า ย้ายมาไว้ที่เดียวให้เหมือนกันทั้งระบบ
+export function Card({ quiet = false, glass = false, hover = false, title, subtitle, right, bodyClassName = "", className = "", children, ...props }) {
+  const hasHeader = title || right;
   return (
-    <div className={cx(quiet || glass ? "ds-card-glass" : "ds-card", hover && "ds-hover-lift", className)} {...props}>
-      {children}
+    <div className={cx(quiet || glass ? "ds-card-glass" : "ds-card", hover && "ds-hover-lift", hasHeader && "overflow-hidden", className)} {...props}>
+      {hasHeader && (
+        <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
+          <div className="min-w-0">
+            {title && <h3 className="ds-title text-[15px]">{title}</h3>}
+            {subtitle && <p className="mt-0.5 text-2xs text-slate-400">{subtitle}</p>}
+          </div>
+          {right && <div className="shrink-0 flex items-center gap-2">{right}</div>}
+        </div>
+      )}
+      {hasHeader ? <div className={bodyClassName}>{children}</div> : children}
     </div>
   );
 }
@@ -100,13 +112,15 @@ export function Card({ quiet = false, glass = false, hover = false, className = 
 // ---------------------------------------------------------------
 // SectionTitle — หัวข้อหน้า + คำอธิบาย + ช่องขวาสำหรับปุ่ม
 // ---------------------------------------------------------------
+// หัวหน้าเพจมาตรฐาน — ทุกหน้าต้องเริ่มด้วยตัวนี้ตัวเดียว ไม่ประกอบหัวเอง
+// เส้นคั่นด้านล่างทำหน้าที่ "ตรึงหัว" ให้สายตารู้ว่าเนื้อหาเริ่มตรงไหน และทำให้ทุกหน้าขึ้นต้นเหมือนกัน
 export function SectionTitle({ eyebrow, title, subtitle, right, className = "" }) {
   return (
-    <div className={cx("ds-section-title flex items-start justify-between gap-4 flex-wrap", className)}>
+    <div className={cx("ds-section-title flex items-start justify-between gap-4 flex-wrap border-b border-slate-100 pb-4", className)}>
       <div className="min-w-0">
         {eyebrow && <div className="ds-eyebrow mb-1.5">{eyebrow}</div>}
-        <h2 className="ds-title text-[22px] sm:text-[26px]">{title}</h2>
-        {subtitle && <p className="text-[13.5px] text-slate-500 mt-1.5 max-w-2xl leading-relaxed">{subtitle}</p>}
+        <h2 className="ds-title text-[24px] sm:text-[28px]">{title}</h2>
+        {subtitle && <p className="text-sm text-slate-500 mt-1.5 max-w-2xl leading-relaxed">{subtitle}</p>}
       </div>
       {right && <div className="ds-section-actions shrink-0">{right}</div>}
     </div>

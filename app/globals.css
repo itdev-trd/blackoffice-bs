@@ -39,27 +39,54 @@
 /* ธีมมืดตาม mockup ที่ผู้ใช้ส่งมา — เปิดผ่าน class="dark" บน <html>
    แก้แค่ค่าตัวแปร ไม่ใช้ !important จึงไม่ชนกับ Tailwind (บทเรียนจากธีมมืดชุดก่อน) */
 html.dark {
-  --ground: #0D1117;
-  --surface: #161B22;
-  --line: #30363D;
-  --line-strong: #444C56;
+  --ground: #0D1117;      /* พื้นหลังหน้า — ระดับล่างสุด */
+  --surface: #161B22;     /* การ์ด/พาเนล — ต้องสว่างกว่าพื้นหน้าเพื่อให้อ่านเป็นชั้น */
+  --surface-2: #1C2128;   /* ชั้นซ้อนในการ์ด (หัวตาราง, แถบเครื่องมือ, ช่องกรอก) */
+  --line: #2A3038;        /* เส้นแบ่งปกติ — บางพอไม่ตัดสายตา */
+  --line-strong: #3D444D; /* เส้นตอน hover/โฟกัส */
   --ink: #E6EDF3;
-  --ink-2: #8B949E;
+  --ink-2: #9BA6B2;       /* สว่างกว่าเดิมเล็กน้อย ให้ข้อความรองอ่านออกจริงบนพื้นเข้ม */
   --ink-3: #6E7681;
   --brand: #1F6FEB;
-  --brand-strong: #58A6FF;
-  --brand-soft: rgba(31, 111, 235, .15);
+  --brand-strong: #388BFD;
+  --brand-soft: rgba(31, 111, 235, .16);
   color-scheme: dark;
 }
 html.dark body { background: var(--ground); color: var(--ink-2); }
 
+/* แถบเลื่อนธีมสว่างใช้สีดำโปร่ง ซึ่งมองไม่เห็นบนพื้นเข้ม — สลับเป็นสีอ่อนโปร่งแทน */
+html.dark ::-webkit-scrollbar-thumb { background: rgba(230, 237, 243, .14); background-clip: content-box; }
+html.dark ::-webkit-scrollbar-thumb:hover { background: rgba(230, 237, 243, .26); background-clip: content-box; }
+
+/* ปุ่ม/สถานะโหลดที่ยังฝังสีธีมสว่างไว้ตายตัว ต้องมีคู่ของธีมมืด ไม่งั้นอ่านไม่ออก */
+html.dark .ds-btn-danger {
+  background: rgba(244, 63, 94, .14);
+  color: #FDA4AF;
+  border-color: rgba(244, 63, 94, .32);
+}
+html.dark .ds-btn-danger:hover:not(:disabled) { background: rgba(244, 63, 94, .22); }
+html.dark .ds-btn-ghost:hover:not(:disabled) { background: rgba(230, 237, 243, .07); }
+html.dark .ds-skeleton {
+  background: linear-gradient(90deg, #161B22 25%, #1F262E 37%, #161B22 63%);
+  background-size: 800px 100%;
+}
+html.dark ::selection { background: rgba(56, 139, 253, .32); color: var(--ink); }
+
 /* Dark theme bridge: หน้าฟีเจอร์เก่าบางส่วนยังใช้ utility slate/white อยู่
    จึง remap เฉพาะใต้ html.dark ให้ทุกหน้ามี surface เดียวกับ Inbox โดยไม่กระทบธีมสว่าง */
 html.dark .bg-white { background-color: var(--surface) !important; }
+.brand-mark-surface { background-color: #fff !important; }
+/* พาเนลย่อย/หัวตาราง/แถบเครื่องมือที่อยู่ "ในการ์ด" ต้องสว่างกว่าการ์ดเล็กน้อย
+   (เดิมแมปเป็นสีพื้นหน้าซึ่งเข้มกว่าการ์ด อ่านออกมาเป็นรูเจาะแทนที่จะเป็นชั้นซ้อน) */
 html.dark .bg-slate-50,
 html.dark .bg-slate-100,
 html.dark .bg-gray-50,
-html.dark .bg-gray-100 { background-color: var(--ground) !important; }
+html.dark .bg-gray-100 { background-color: var(--surface-2) !important; }
+html.dark .hover\:bg-slate-50:hover,
+html.dark .hover\:bg-slate-100:hover,
+html.dark .hover\:bg-gray-50:hover,
+html.dark .hover\:bg-gray-100:hover { background-color: var(--surface-2) !important; }
+html.dark .ds-card-glass { background: var(--surface-2); }
 html.dark .text-slate-900,
 html.dark .text-slate-800,
 html.dark .text-slate-700,
@@ -86,6 +113,30 @@ html.dark .bg-brand-50\/40 { background-color: var(--brand-soft) !important; }
 html.dark input,
 html.dark textarea,
 html.dark select { color-scheme: dark; }
+
+/* ช่องกรอกต้องดูกดได้ — ธีมมืดเดิมพื้นช่องเป็นสีเดียวกับการ์ดพอดี เหลือแค่เส้นขอบบางๆ
+   จนแทบไม่รู้ว่าตรงไหนพิมพ์ได้ ให้ recess ลงไปหนึ่งชั้น + โฟกัสชัดด้วยวงแหวนสี brand
+   (ครอบเฉพาะช่องที่ไม่ได้กำหนดพื้นเอง เพื่อไม่ไปทับดีไซน์เฉพาะจุดเช่นฟองแชท) */
+html.dark input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+html.dark textarea,
+html.dark select {
+  background-color: #0F141A;
+  border-color: var(--line);
+  color: var(--ink);
+}
+html.dark input::placeholder,
+html.dark textarea::placeholder { color: var(--ink-3); }
+html.dark input:focus,
+html.dark textarea:focus,
+html.dark select:focus {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px rgba(31, 111, 235, .22);
+  outline: none;
+}
+
+/* เป้าแตะ/คลิกต้องใหญ่พอสำหรับทุกวัย — บังคับความสูงขั้นต่ำของตัวควบคุมทั้งระบบ */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+select { min-height: 40px; }
 
 /* Keep semantic status colors readable on the chat theme. */
 html.dark .bg-emerald-50 { background-color: rgba(16, 185, 129, .14) !important; }
@@ -141,7 +192,8 @@ html { color-scheme: light; }
 body {
   background: var(--ground);
   color: var(--ink-2);
-  font-family: "IBM Plex Sans Thai", "Noto Sans Thai", system-ui, sans-serif;
+  /* Roboto สำหรับละติน/ตัวเลข และ fallback เป็น Noto Sans Thai สำหรับอักษรไทย */
+  font-family: var(--font-roboto), var(--font-noto-sans-thai), system-ui, sans-serif;
   overflow-wrap: break-word;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
@@ -383,14 +435,19 @@ body {
 /* ความสูงห้องแชท — มือถือเต็มจอ เดสก์ท็อปเว้นขอบ
    มือถือ: เผื่อพื้นที่ด้านล่างให้แถบเมนูล่าง (~60px) เฉพาะตอนโชว์ลิสต์ —
    ตอนเปิดคุยกับลูกค้า ChatInboxTab จะซ้อนทับด้วย fixed inset-0 เต็มจอทับแถบเมนูล่างอยู่แล้ว ไม่ต้องหักพื้นที่ */
+/* แถบ "มีเวอร์ชันใหม่" เป็น fixed ด้านบน — เว้นที่ให้ด้วยตัวแปรนี้ (UpdateBanner ตั้งค่าเป็น 44px ตอนโชว์)
+   ค่าเริ่มต้น 0px = ไม่มีแบนเนอร์ ไม่กินพื้นที่ใคร */
+:root { --update-banner-h: 0px; }
+body { padding-top: var(--update-banner-h); }
+
 .chat-shell { height: 82vh; }
 @media (min-width: 768px) {
-  .chat-shell { height: 100vh; border-radius: 0 !important; border-width: 0 !important; }
+  .chat-shell { height: calc(100vh - var(--update-banner-h)); border-radius: 0 !important; border-width: 0 !important; }
 }
 @media (max-width: 767px) {
   .chat-shell {
-    height: calc(100vh - 60px - env(safe-area-inset-bottom));
-    height: calc(100dvh - 60px - env(safe-area-inset-bottom));
+    height: calc(100vh - 60px - var(--update-banner-h) - env(safe-area-inset-bottom));
+    height: calc(100dvh - 60px - var(--update-banner-h) - env(safe-area-inset-bottom));
     padding-bottom: env(safe-area-inset-bottom);
   }
   .chat-fullbleed { margin-left: calc(-1 * env(safe-area-inset-left)); margin-right: calc(-1 * env(safe-area-inset-right)); }
@@ -533,7 +590,11 @@ body {
 @media (max-width: 767px) {
   .dashboard-page-main { padding-inline: 12px; }
   .dashboard-page-main > * { width: 100%; }
-  .dashboard-page-main .grid { grid-template-columns: minmax(0, 1fr); }
+  /* เดิมมี .dashboard-page-main .grid { grid-template-columns: minmax(0,1fr) } อยู่ตรงนี้
+     ซึ่งบังคับ "ทุก" grid ในแดชบอร์ดให้เหลือคอลัมน์เดียวบนมือถือ ทับ grid-cols-* ของ Tailwind ทั้งหมด
+     ผลคือการ์ดตัวเลขสรุปเรียงทีละใบ กินการเลื่อนยาวมากกว่าจะเห็นเนื้อหาจริง
+     คลาส grid-cols-N ของ Tailwind ใช้ minmax(0,1fr) อยู่แล้วจึงย่อได้เองและไม่ล้นจอ
+     ส่วนตารางที่ตั้งใจให้เลื่อนแนวนอนก็มี overflow-x-auto ครอบไว้เองอยู่แล้ว */
   .dashboard-page-main .overflow-x-auto { max-width: 100%; }
   .ds-section-title { gap: .75rem; }
   .ds-section-actions { width: 100%; }

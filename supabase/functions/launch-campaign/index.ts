@@ -88,25 +88,60 @@ function buildTargeting(cfg: Record<string, any>, launchCfg: Record<string, any>
     }
   }
 
+  // ประเทศ: เดิมฝัง ["TH"] ตายตัว ยิงนอกไทยไม่ได้เลย — ให้ตั้งจากหน้าเว็บได้ แต่คง TH เป็นค่าเริ่มต้น
+  // รับเฉพาะรหัส ISO 2 ตัวอักษรพิมพ์ใหญ่ กันค่าเพี้ยนหลุดไปให้ Meta ปฏิเสธทั้งแคมเปญ
+  const rawCountries = Array.isArray(launchCfg?.countries) ? launchCfg.countries : [];
+  const countries = rawCountries
+    .map((c: unknown) => String(c || "").trim().toUpperCase())
+    .filter((c: string) => /^[A-Z]{2}$/.test(c));
+  const geo = { countries: countries.length ? countries : ["TH"] };
+
+  // เพศ: Meta ใช้ 1=ชาย 2=หญิง ถ้าไม่ระบุ = ทุกเพศ (ห้ามส่ง key ไปเลย ไม่ใช่ส่ง [])
+  const rawGenders = Array.isArray(launchCfg?.genders) ? launchCfg.genders : [];
+  const genders = rawGenders.map((g: unknown) => Number(g)).filter((g: number) => g === 1 || g === 2);
+  const genderSpec = genders.length > 0 && genders.length < 2 ? { genders } : {};
+
   return cfg.audience_id
     ? {
         custom_audiences: [{ id: cfg.audience_id }],
-        geo_locations: { countries: ["TH"] },
+        geo_locations: geo,
         targeting_automation: { advantage_audience: advantageAudience },
+        ...genderSpec,
         ...placements,
         ...flexibleSpec,
       }
     : {
-        geo_locations: { countries: ["TH"] },
+        geo_locations: geo,
         age_min: cfg.age_min || 22,
         age_max: cfg.age_max || 55,
         targeting_automation: { advantage_audience: advantageAudience },
+        ...genderSpec,
         ...placements,
         ...flexibleSpec,
       };
 }
 
-function buildPromotedObject(cfg: Record<string, any>) {
+// objective ที่เปิดให้เลือกได้ — จำกัดไว้เท่าที่ระบบรองรับครบวงจรจริง (สร้าง+วัดผล+monitor-ads อ่านได้)
+// ห้ามเพิ่มค่ามั่วๆ เพราะแต่ละ objective ผูกกับ optimization_goal และ promoted_object คนละแบบ
+// ถ้าคู่ไม่ตรงกัน Meta ตอบ OAuthException 100 "ไม่สามารถใช้เป้าหมายประสิทธิภาพได้" แล้วแคมเปญล่มทั้งก้อน
+const OBJECTIVES = ["OUTCOME_LEADS", "OUTCOME_ENGAGEMENT", "OUTCOME_TRAFFIC"];
+function resolveObjective(launchCfg: Record<string, any> | null) {
+  const raw = String(launchCfg?.objective || "").toUpperCase();
+  return OBJECTIVES.includes(raw) ? raw : "OUTCOME_LEADS";
+}
+
+function buildPromotedObject(cfg: Record<string, any>, objective: string) {
+  // OUTCOME_TRAFFIC (คลิกไปเว็บ) ไม่ต้องมี promoted_object — ส่งไปจะโดนปฏิเสธ
+  if (objective === "OUTCOME_TRAFFIC") return null;
+
+  // ยิงให้คนทักแชท: ต้องผูกกับเพจเสมอ pixel ใช้ไม่ได้เพราะปลายทางอยู่ในแชทไม่ใช่หน้าเว็บ
+  if (objective === "OUTCOME_ENGAGEMENT") {
+    if (!cfg.page_id) {
+      throw new Error("โฆษณาแบบ 'ให้คนทักแชท' ต้องตั้งค่า page_id ในหน้า 'ตั้งค่า' ก่อน");
+    }
+    return { page_id: cfg.page_id };
+  }
+
   // objective OUTCOME_LEADS ต้องมี promoted_object เสมอ ห้ามปล่อยว่าง
   // มี pixel_id -> วัดผล lead จาก pixel event บนหน้า landing page
   // ไม่มี pixel_id -> fallback เป็น page_id เพื่อใช้ Instant Form (แบบฟอร์มลีดในเพจ) แทน
@@ -120,8 +155,30 @@ function buildPromotedObject(cfg: Record<string, any>) {
 // OAuthException code 100 "ไม่สามารถใช้เป้าหมายประสิทธิภาพได้"
 // - promoted_object เป็น pixel_id (วัดผลจาก landing page ภายนอก) -> ต้องใช้ OFFSITE_CONVERSIONS
 // - promoted_object เป็น page_id (Instant Form ในเพจ) -> ใช้ LEAD_GENERATION ได้
-function buildOptimizationGoal(cfg: Record<string, any>) {
+// - objective OUTCOME_ENGAGEMENT (ให้คนทักแชท) -> CONVERSATIONS
+// - objective OUTCOME_TRAFFIC (คลิกไปเว็บ) -> LINK_CLICKS
+function buildOptimizationGoal(cfg: Record<string, any>, objective: string) {
+  if (objective === "OUTCOME_ENGAGEMENT") return "CONVERSATIONS";
+  if (objective === "OUTCOME_TRAFFIC") return "LINK_CLICKS";
   return cfg.pixel_id ? "OFFSITE_CONVERSIONS" : "LEAD_GENERATION";
+}
+
+// วันเริ่ม-วันจบ: หน้าเว็บส่งมาเป็นสตริง ISO (จาก <input type="datetime-local"> ที่แปลงแล้ว)
+// Meta รับ ISO 8601 ได้ตรงๆ แต่ถ้าค่าเพี้ยน/พาร์สไม่ผ่านต้องตัดทิ้ง ไม่ใช่ส่งไปให้ปฏิเสธทั้ง adset
+// ไม่ระบุ start = เริ่มทันทีที่กดเปิด, ไม่ระบุ end = ยิงต่อเนื่องจนสั่งหยุด (พฤติกรรมเดิม)
+function buildSchedule(launchCfg: Record<string, any> | null) {
+  const parse = (v: unknown) => {
+    if (!v) return null;
+    const t = new Date(String(v));
+    return Number.isNaN(t.getTime()) ? null : t;
+  };
+  const start = parse(launchCfg?.start_time);
+  const end = parse(launchCfg?.end_time);
+  const out: Record<string, string> = {};
+  if (start) out.start_time = start.toISOString();
+  // วันจบต้องอยู่หลังวันเริ่ม ไม่งั้นไม่ต้องส่ง (ปล่อยยิงต่อเนื่อง) ดีกว่าให้ Meta ปฏิเสธ
+  if (end && (!start || end > start)) out.end_time = end.toISOString();
+  return out;
 }
 
 // special_ad_categories: อนุญาตเฉพาะค่าที่ Meta รับได้ ถ้า config ว่าง/เพี้ยน -> [] (ปลอดภัยสุดสำหรับ niche นี้)
@@ -138,10 +195,15 @@ function sanitizeSpecialCategories(launchCfg: Record<string, any> | null) {
   return raw.filter((x: string) => ALLOWED_SPECIAL_CATEGORIES.includes(x));
 }
 
-async function createCampaign(actAccount: string, name: string, launchCfg: Record<string, any> | null) {
+async function createCampaign(
+  actAccount: string,
+  name: string,
+  launchCfg: Record<string, any> | null,
+  objective: string
+) {
   return metaPost(`${actAccount}/campaigns`, {
     name: `AI-Gen | ${name}`,
-    objective: "OUTCOME_LEADS",
+    objective,
     status: "PAUSED",
     special_ad_categories: sanitizeSpecialCategories(launchCfg),
     // budget ของแคมเปญนี้อยู่ที่ระดับ adset ไม่ใช่ Campaign Budget Optimization
@@ -155,9 +217,10 @@ async function createAdset(
   name: string,
   dailyBudgetThb: number,
   targeting: Record<string, unknown>,
-  promotedObject: Record<string, unknown>,
+  promotedObject: Record<string, unknown> | null,
   optimizationGoal: string,
-  launchCfg: Record<string, any> | null
+  launchCfg: Record<string, any> | null,
+  objective: string
 ) {
   // ใช้ bid_strategy จาก config เฉพาะแบบไม่ต้องมีวงเงินบิด (WITHOUT_CAP) เท่านั้น
   // แบบ COST_CAP / BID_CAP ต้องมี bid_amount ด้วย ถ้าไม่มีจะทำให้ Meta ปฏิเสธ -> fallback เป็นค่าปลอดภัยเดิม
@@ -171,7 +234,13 @@ async function createAdset(
     optimization_goal: optimizationGoal,
     bid_strategy: bidStrategy,
     targeting,
-    promoted_object: promotedObject,
+    // OUTCOME_TRAFFIC ไม่มี promoted_object — ส่ง null/{} ไปจะโดนปฏิเสธ ต้องไม่ใส่ key เลย
+    ...(promotedObject ? { promoted_object: promotedObject } : {}),
+    // ยิงให้คนทักแชท ต้องบอก Meta ว่าปลายทางคือกล่องข้อความไหน ไม่งั้นมันตีเป็นโฆษณาธรรมดา
+    ...(objective === "OUTCOME_ENGAGEMENT"
+      ? { destination_type: launchCfg?.message_destination === "INSTAGRAM_DIRECT" ? "INSTAGRAM_DIRECT" : "MESSENGER" }
+      : {}),
+    ...buildSchedule(launchCfg),
     status: "PAUSED",
   });
 }
@@ -275,8 +344,9 @@ Deno.serve(async (req) => {
     const actAccount = `act_${cfg.ad_account_id}`;
     const defaultDailyBudget = cfg.daily_budget_thb || 300;
     const targeting = buildTargeting(cfg, launchCfg, ghostCfg);
-    const promotedObject = buildPromotedObject(cfg);
-    const optimizationGoal = buildOptimizationGoal(cfg);
+    const objective = resolveObjective(launchCfg);
+    const promotedObject = buildPromotedObject(cfg, objective);
+    const optimizationGoal = buildOptimizationGoal(cfg, objective);
 
     // ดึงข้อมูล copy/image ที่เลือกไว้ทั้งหมดในครั้งเดียว
     const copyIds = [...new Set(pairs.map((p) => p.copy_id))];
@@ -301,8 +371,8 @@ Deno.serve(async (req) => {
         if (!copy) throw new Error(`ไม่พบ copy id ${pair.copy_id}`);
         const dailyBudgetThb = pair.daily_budget_thb || defaultDailyBudget;
 
-        const campaign = await createCampaign(actAccount, copy.headline, launchCfg);
-        const adset = await createAdset(actAccount, campaign.id, copy.headline, dailyBudgetThb, targeting, promotedObject, optimizationGoal, launchCfg);
+        const campaign = await createCampaign(actAccount, copy.headline, launchCfg, objective);
+        const adset = await createAdset(actAccount, campaign.id, copy.headline, dailyBudgetThb, targeting, promotedObject, optimizationGoal, launchCfg, objective);
         const { ad } = await createCreativeAndAd(actAccount, adset.id, cfg, copy, image?.image_url ?? null, launchCfg);
 
         const { data: row, error: insertErr } = await supabaseAdmin
@@ -338,8 +408,8 @@ Deno.serve(async (req) => {
       if (!firstCopy) throw new Error(`ไม่พบ copy id ${pairs[0].copy_id}`);
       const totalDailyBudget = body.daily_budget_thb || defaultDailyBudget;
 
-      const campaign = await createCampaign(actAccount, `${firstCopy.headline} (multi-ad)`, launchCfg);
-      const adset = await createAdset(actAccount, campaign.id, `${firstCopy.headline} (multi-ad)`, totalDailyBudget, targeting, promotedObject, optimizationGoal, launchCfg);
+      const campaign = await createCampaign(actAccount, `${firstCopy.headline} (multi-ad)`, launchCfg, objective);
+      const adset = await createAdset(actAccount, campaign.id, `${firstCopy.headline} (multi-ad)`, totalDailyBudget, targeting, promotedObject, optimizationGoal, launchCfg, objective);
 
       for (const pair of pairs) {
         const copy = copyById.get(pair.copy_id);
