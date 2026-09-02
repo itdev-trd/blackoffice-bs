@@ -58,6 +58,8 @@ function resultOf(m) {
   return { label: "—", value: null, cost: null };
 }
 
+const ACCT_KEY = "ui.campaigns.adAccount";
+
 const LEVELS = {
   campaign: { title: "แคมเปญ", child: "adsets", childTitle: "ชุดโฆษณา" },
   adsets: { title: "ชุดโฆษณา", child: "ads", childTitle: "โฆษณา" },
@@ -67,14 +69,30 @@ const LEVELS = {
 export default function AdsTable() {
   // อ่าน ad account จาก settings เอง — ไม่ต้องส่ง prop ผ่าน page → tab หลายชั้น
   const [adAccountId, setAdAccountId] = useState(undefined); // undefined = ยังไม่รู้, "" = ยังไม่ตั้ง
+  const [accounts, setAccounts] = useState([]);
   useEffect(() => {
+    // ยิงหลายบัญชีเป็นเรื่องปกติ — ให้สลับดูได้ในหน้านี้ โดยไม่ต้องไปแก้ค่าเริ่มต้นในหน้าตั้งค่า
+    // จำบัญชีที่ดูล่าสุดไว้ใน localStorage ไม่ต้องเลือกใหม่ทุกครั้งที่เปิดหน้า
+    let remembered = "";
+    try { remembered = localStorage.getItem(ACCT_KEY) || ""; } catch { /* โหมดส่วนตัวอ่านไม่ได้ */ }
     supabase
       .from("settings")
       .select("value")
       .eq("key", "campaign_defaults")
       .maybeSingle()
-      .then(({ data }) => setAdAccountId(String(data?.value?.ad_account_id || "").trim()));
+      .then(({ data }) => setAdAccountId(remembered || String(data?.value?.ad_account_id || "").trim()));
+    supabase.functions
+      .invoke("list-ad-accounts", { body: {} })
+      .then(({ data }) => setAccounts(Array.isArray(data?.accounts) ? data.accounts : []))
+      .catch(() => setAccounts([]));
   }, []);
+
+  function pickAccount(id) {
+    setAdAccountId(id);
+    setPath([]);   // เปลี่ยนบัญชีแล้วต้องกลับไประดับแคมเปญ ไม่งั้น cursor ชี้ไปยัง node ของบัญชีเก่า
+    setRows(null);
+    try { localStorage.setItem(ACCT_KEY, id); } catch { /* ไม่ต้องจำก็ได้ */ }
+  }
   const [range, setRange] = useState("last_30d");
   // เส้นทางที่เจาะลงมา: [] = ระดับแคมเปญ, [{id,name}] = อยู่ในแคมเปญนั้น (ดูชุดโฆษณา), 2 ชั้น = ดูโฆษณา
   const [path, setPath] = useState([]);
@@ -145,15 +163,47 @@ export default function AdsTable() {
     );
   }
 
+  // ยังไม่ได้เลือกบัญชี — ให้เลือกได้จากที่นี่เลย ไม่ต้องเด้งไปหน้าตั้งค่า
+  // (ไม่เลือกให้อัตโนมัติ เพราะแต่ละบัญชีเป็นเงินคนละก้อน ต้องให้คนตัดสินใจ)
   if (!adAccountId) {
+    const usable = accounts.filter((a) => Number(a.status) === 1);
     return (
-      <div className="ds-card p-5">
+      <div className="ds-card space-y-3 p-5">
         <div className="flex items-start gap-2.5 text-sm text-amber-700">
           <AlertTriangle size={17} className="mt-0.5 shrink-0" />
-          <div>
-            ยังไม่ได้ตั้ง <span className="font-medium">Ad Account ID</span> — ไปกรอกที่ ตั้งค่า → ค่าเริ่มต้นแคมเปญ ก่อน
-          </div>
+          <div>ยังไม่ได้เลือกบัญชีโฆษณา — เลือกได้เลยด้านล่าง (ตั้งเป็นค่าเริ่มต้นถาวรได้ที่ ตั้งค่า → ค่าเริ่มต้นแคมเปญ)</div>
         </div>
+        {accounts.length === 0 ? (
+          <div className="text-sm text-slate-400">กำลังโหลดรายการบัญชี… ถ้าไม่ขึ้น ให้เช็ค Meta Token ในหน้าตั้งค่า</div>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {accounts.map((a) => {
+              const id = String(a.account_id || a.id || "").replace(/^act_/, "");
+              const disabled = Number(a.status) !== 1;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => pickAccount(id)}
+                  title={disabled ? a.status_label || "Meta จำกัดบัญชีนี้" : `ดูข้อมูลบัญชี ${a.name || id}`}
+                  className={`rounded-control border px-3.5 py-2 text-[13px] font-medium transition ${
+                    disabled
+                      ? "cursor-not-allowed border-slate-200 bg-slate-50 text-slate-400 line-through"
+                      : "border-slate-300 bg-white text-slate-700 hover:border-brand-400 hover:text-brand-700"
+                  }`}
+                >
+                  {a.name || id}
+                  {a.currency ? <span className="ml-1.5 text-[11px] text-slate-400">{a.currency}</span> : null}
+                  {disabled ? <span className="ml-1.5 text-[11px]">({a.status_label || "ใช้งานไม่ได้"})</span> : null}
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {usable.length === 0 && accounts.length > 0 && (
+          <div className="text-[12px] text-rose-600">ทุกบัญชีถูก Meta จำกัดอยู่ — ต้องยืนยันตัวตน/อุทธรณ์ใน Ads Manager ก่อน</div>
+        )}
       </div>
     );
   }
@@ -192,6 +242,24 @@ export default function AdsTable() {
           ))}
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {accounts.length > 0 && (
+            <select
+              value={adAccountId || ""}
+              onChange={(e) => pickAccount(e.target.value)}
+              title="สลับบัญชีโฆษณา"
+              className="max-w-[220px] rounded-control border border-slate-300 bg-white px-2.5 py-1.5 text-[12.5px] font-medium"
+            >
+              {accounts.map((a) => {
+                const id = String(a.account_id || a.id || "").replace(/^act_/, "");
+                const disabled = Number(a.status) !== 1;
+                return (
+                  <option key={id} value={id} disabled={disabled}>
+                    {a.name || id}{disabled ? ` · ${a.status_label || "ใช้งานไม่ได้"}` : ""}
+                  </option>
+                );
+              })}
+            </select>
+          )}
           <div className="flex flex-wrap gap-1 rounded-control border border-slate-200 bg-slate-100 p-1">
             {RANGES.map(([v, l]) => (
               <button

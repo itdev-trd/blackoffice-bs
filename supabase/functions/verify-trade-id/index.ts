@@ -32,7 +32,9 @@ Deno.serve(async (req) => {
   const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...corsHeaders, "content-type": "application/json" } });
   try {
     // ต้องล็อกอิน + มีสิทธิ์ใช้งาน (fail-closed) — ใครเข้าหน้าตอบแชทได้ก็ใช้ได้
-    const auth = await authorizeRequest(req);
+    // allowService: ให้ฟังก์ชันฝั่งเซิร์ฟเวอร์ (scan-trade-ids) เรียกเป็นชุดได้
+    // ไม่กระทบผู้ใช้ทั่วไป — ยังต้องล็อกอินเหมือนเดิมถ้าเรียกจากหน้าเว็บ
+    const auth = await authorizeRequest(req, { allowService: true });
     if (!auth.ok) return json({ ok: false, error: auth.error }, auth.status);
 
     const body = await req.json().catch(() => ({}));

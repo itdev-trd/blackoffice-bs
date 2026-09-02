@@ -168,7 +168,7 @@ export function ArchiveBar({ a, visibleIds, archivedCount }) {
         <>
           <span className="text-slate-500">เลือกไว้ {a.sel.length} รายการ</span>
           {a.showArchived ? (
-            <button onClick={() => a.restore(a.sel)} disabled={a.busy} className="rounded-lg bg-emerald-600 text-white px-3 py-1 font-medium hover:bg-emerald-700 disabled:opacity-50">
+            <button onClick={() => a.restore(a.sel)} disabled={a.busy} className="rounded-lg bg-emerald-700 text-white px-3 py-1 font-medium hover:bg-emerald-800 disabled:opacity-50">
               {a.busy ? "กำลังกู้คืน..." : "กู้คืนที่เลือก"}
             </button>
           ) : (

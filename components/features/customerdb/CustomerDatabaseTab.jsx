@@ -15,6 +15,7 @@ import {
   ChevronRight,
   ArrowUpDown,
   X,
+  Sparkles,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { beToCe, bangkokDate } from "@/lib/utils/date";
@@ -89,6 +90,10 @@ export function CustomerDataForm({ row, onSaved, darkMode = false }) {
   const [f, setF] = useState({ trade_id: "", username: "", phone: "", email: "" });
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);   // {ok, text}
+  // ให้ AI อ่านบทสนทนาแล้วเสนอว่าเลข/ข้อความไหนคืออะไร — เสนอเท่านั้น ไม่เติมลงช่องเองจนแอดมินกดรับ
+  // regex แยกไม่ออกว่าเลขไหนคือเลขบัญชี เบอร์โทร หรือยอดเงิน แต่ AI อ่านบริบทได้
+  const [aiBusy, setAiBusy] = useState(false);
+  const [ai, setAi] = useState(null);     // { suggestion, evidence, confidence, note } | { error }
   // ฟีเจอร์ TV ในหน้าแชท — เห็นเฉพาะแอดมินจนกว่าจะกดปล่อย (settings.tv_features.released)
   const [tvOn, setTvOn] = useState(false);
   const [scripts, setScripts] = useState([]);
@@ -108,6 +113,7 @@ export function CustomerDataForm({ row, onSaved, darkMode = false }) {
   useEffect(() => {
     setF({ trade_id: row?.trade_id || "", username: row?.username || "", phone: row?.phone || "", email: row?.email || "" });
     setMsg(null);
+    setAi(null);
   }, [row?.id, row?.trade_id, row?.username, row?.phone, row?.email]);
 
   // โหลด role + flag ปล่อยอัปเดต + สคริปต์ ครั้งเดียว
@@ -227,14 +233,87 @@ export function CustomerDataForm({ row, onSaved, darkMode = false }) {
         className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
     </div>
   );
+  async function askAi() {
+    if (!row?.id || aiBusy) return;
+    setAiBusy(true); setAi(null); setMsg(null);
+    const { data, error } = await supabase.functions.invoke("extract-customer-data", { body: { id: row.id } });
+    setAiBusy(false);
+    if (error || !data?.ok) { setAi({ error: data?.error || error?.message || "ให้ AI อ่านไม่สำเร็จ" }); return; }
+    setAi(data);
+  }
+
+  // รับข้อเสนอทีละช่อง — ไม่เขียนลงฐานข้อมูล แค่เติมลงฟอร์มให้แอดมินตรวจแล้วกดบันทึกเอง
+  const acceptOne = (field, value) => setF((cur) => ({ ...cur, [field]: value }));
+  const acceptAll = () => {
+    const sg = ai?.suggestion || {};
+    setF((cur) => ({
+      trade_id: sg.trade_id || cur.trade_id,
+      username: sg.tv_username || cur.username,
+      phone: sg.phone || cur.phone,
+      email: sg.email || cur.email,
+    }));
+  };
+
   return (
     <div className={`${darkMode ? "chat-customer-form" : ""} border-t border-slate-200 pt-3 mt-1 space-y-2`}>
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <label className="text-xs font-medium text-slate-500 flex items-center gap-1"><CheckCircle2 size={13} /> ข้อมูลลูกค้า (แอดมินป้อนเอง)</label>
-        {row?.manual_data && row?.manual_data_by && (
-          <span className="text-[10px] text-emerald-600 font-medium">✓ ป้อนโดย {String(row.manual_data_by).split("@")[0]}</span>
-        )}
+        <div className="flex items-center gap-2">
+          {row?.manual_data && row?.manual_data_by && (
+            <span className="text-[10px] text-emerald-600 font-medium">✓ ป้อนโดย {String(row.manual_data_by).split("@")[0]}</span>
+          )}
+          <button type="button" onClick={askAi} disabled={aiBusy || !row?.id}
+            title="ให้ AI อ่านบทสนทนาแล้วเสนอว่าเลขไหนคือเลขบัญชี อีเมล หรือ username TradingView"
+            className="inline-flex items-center gap-1 rounded-full border border-brand-400/50 px-2 py-0.5 text-[10.5px] font-semibold text-brand-600 hover:bg-brand-50 disabled:opacity-50">
+            {aiBusy ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />} สแกนด้วย AI
+          </button>
+        </div>
       </div>
+
+      {/* ข้อเสนอจาก AI — ต้องกดรับก่อนถึงจะลงช่อง และยังต้องกด "บันทึกข้อมูล" อีกที
+          ไม่เขียนอะไรเองเลย เพราะระบบสกัดอัตโนมัติเคยทำข้อมูลลูกค้าเพี้ยนมาก่อน */}
+      {ai && (
+        <div className="rounded-lg border border-brand-400/40 bg-brand-50/40 p-2.5 space-y-1.5">
+          {ai.error ? (
+            <div className="text-[11px] text-rose-600">{ai.error}</div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-semibold text-slate-600">AI เสนอ (ยังไม่บันทึก)</span>
+                <button type="button" onClick={acceptAll} className="text-[10.5px] font-semibold text-brand-600 hover:underline">
+                  รับทั้งหมด
+                </button>
+              </div>
+              {[["trade_id", "ไอดีเทรด", "trade_id"], ["email", "อีเมล", "email"], ["tv_username", "User TV", "username"], ["phone", "เบอร์โทร", "phone"]]
+                .filter(([k]) => ai.suggestion?.[k])
+                .map(([k, label, formKey]) => (
+                  <div key={k} className="flex items-start justify-between gap-2 text-[11px]">
+                    <div className="min-w-0">
+                      <span className="text-slate-400">{label}: </span>
+                      <span className="font-mono font-semibold text-slate-700">{ai.suggestion[k]}</span>
+                      {ai.confidence?.[k] != null && (
+                        <span className={`ml-1 ${Number(ai.confidence[k]) >= 0.8 ? "text-emerald-600" : "text-amber-600"}`}>
+                          ({Math.round(Number(ai.confidence[k]) * 100)}%)
+                        </span>
+                      )}
+                      {ai.evidence?.[k] && (
+                        <div className="truncate text-[10px] text-slate-400" title={ai.evidence[k]}>จาก: “{ai.evidence[k]}”</div>
+                      )}
+                    </div>
+                    <button type="button" onClick={() => acceptOne(formKey, ai.suggestion[k])}
+                      className="shrink-0 rounded border border-slate-300 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-white">
+                      ใส่
+                    </button>
+                  </div>
+                ))}
+              {!Object.values(ai.suggestion || {}).some(Boolean) && (
+                <div className="text-[11px] text-slate-400">AI ไม่พบข้อมูลที่มั่นใจในบทสนทนานี้</div>
+              )}
+              {ai.note && <div className="text-[10px] text-slate-400">หมายเหตุ: {ai.note}</div>}
+            </>
+          )}
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-2">
         {inp("trade_id", "ไอดีเทรด", "เลขบัญชีเทรด")}
         {inp("username", "User TradingView", "username TV")}
@@ -280,7 +359,7 @@ export function CustomerDataForm({ row, onSaved, darkMode = false }) {
         </div>
       )}
 
-      <button onClick={save} disabled={busy} className="w-full rounded-lg bg-emerald-600 text-white px-3 py-2 text-sm font-semibold hover:bg-emerald-700 disabled:opacity-50 flex items-center justify-center gap-1.5">
+      <button onClick={save} disabled={busy} className="w-full rounded-lg bg-emerald-700 text-white px-3 py-2 text-sm font-semibold hover:bg-emerald-800 disabled:opacity-50 flex items-center justify-center gap-1.5">
         {busy ? <Loader2 className="animate-spin" size={14} /> : <CheckCircle2 size={14} />} บันทึกข้อมูล
       </button>
       {msg && <div className={`text-[11px] whitespace-pre-line ${msg.ok ? "text-emerald-600" : "text-rose-600"}`}>{msg.text}</div>}
@@ -952,7 +1031,7 @@ function CustomerImportModal({ state, pageName, onClose, onApply }) {
         </div>
         <div className="border-t border-slate-200 p-4 flex items-center justify-end gap-2">
           <button onClick={onClose} disabled={state.applying} className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-600 disabled:opacity-40">{result?.updated > 0 ? "ปิด" : "ยกเลิก"}</button>
-          {!result?.updated && <button onClick={onApply} disabled={!matched || state.applying} className="rounded-lg bg-emerald-600 text-white px-4 py-2 text-sm font-semibold hover:bg-emerald-500 disabled:opacity-40 flex items-center gap-2">{state.applying && <Loader2 size={15} className="animate-spin" />}ยืนยันอัปเดต {matchedRecords} แถว</button>}
+          {!result?.updated && <button onClick={onApply} disabled={!matched || state.applying} className="rounded-lg bg-emerald-700 text-white px-4 py-2 text-sm font-semibold hover:bg-emerald-500 disabled:opacity-40 flex items-center gap-2">{state.applying && <Loader2 size={15} className="animate-spin" />}ยืนยันอัปเดต {matchedRecords} แถว</button>}
         </div>
       </div>
     </div>

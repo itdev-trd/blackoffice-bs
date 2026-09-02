@@ -114,6 +114,50 @@ export function ChatSyncConfigPanel() {
     setSaving(false); setSaved(true); setTimeout(() => setSaved(false), 1500);
   }
   // ดึง Dataset ID ของทุกเพจจาก Meta (1 เพจ = 1 dataset) แล้วเก็บลง page_lead_config
+  // นโยบายเก็บข้อมูลแชท
+  const [retCfg, setRetCfg] = useState(null);
+  const [retBusy, setRetBusy] = useState("");
+  const [retStat, setRetStat] = useState(null);
+  useEffect(() => {
+    supabase.from("settings").select("value").eq("key", "retention_config").maybeSingle()
+      .then(({ data }) => setRetCfg(data?.value || { enabled: true, review_days: 7, purge_days: 23, mode: "transcript_only", return_on_reply: true }));
+    supabase.functions.invoke("chat-retention", { body: { action: "status" } })
+      .then(({ data }) => { if (data?.ok) setRetStat({ counts: data.counts }); });
+  }, []);
+  async function saveRet() {
+    setRetBusy("save"); setRetStat(null);
+    // clamp ฝั่งนี้ด้วย กันพิมพ์ 0 หรือค่าติดลบแล้วกลายเป็นล้างทันที (ฝั่งเซิร์ฟเวอร์ clamp อีกชั้น)
+    const clean = {
+      ...retCfg,
+      review_days: Math.min(90, Math.max(1, Number(retCfg.review_days) || 7)),
+      purge_days: Math.min(30, Math.max(1, Number(retCfg.purge_days) || 23)),
+    };
+    const { error } = await supabase.from("settings").upsert({ key: "retention_config", value: clean, updated_at: new Date().toISOString() });
+    setRetBusy("");
+    setRetCfg(clean);
+    setRetStat(error ? { error: error.message } : { saved: true });
+  }
+  async function runRet(dry) {
+    setRetBusy(dry ? "dry" : "run"); setRetStat(null);
+    const { data, error } = await supabase.functions.invoke("chat-retention", { body: { action: "run", dry_run: dry } });
+    setRetBusy("");
+    if (error) { setRetStat({ error: await readFunctionErrorMessage(error) }); return; }
+    if (data?.ok === false) { setRetStat({ error: data.error }); return; }
+    setRetStat(data);
+  }
+
+  // เติมประเทศจาก targeting ของแอด — dry-run ได้ก่อนเขียนจริง
+  const [originBusy, setOriginBusy] = useState("");
+  const [originRes, setOriginRes] = useState(null);
+  async function runOrigin(dry) {
+    setOriginBusy(dry ? "dry" : "run"); setOriginRes(null);
+    const { data, error } = await supabase.functions.invoke("detect-chat-origin", { body: { dry_run: dry } });
+    setOriginBusy("");
+    if (error) { setOriginRes({ error: await readFunctionErrorMessage(error) }); return; }
+    if (data?.ok === false) { setOriginRes({ error: data.error }); return; }
+    setOriginRes(data);
+  }
+
   async function fetchDatasets() {
     setDsLoading(true); setDsResult(null);
     const { data, error } = await supabase.functions.invoke("page-datasets", { body: {} });
@@ -166,6 +210,147 @@ export function ChatSyncConfigPanel() {
         </details>
       </div>
 
+      {/* นโยบายเก็บข้อมูลแชท — แอดมินตั้งจำนวนวันเองได้ */}
+      <div className="rounded-xl border border-amber-200 bg-amber-50/40 p-4 space-y-3">
+        <div>
+          <div className="text-sm font-medium text-slate-800">แชทที่ลูกค้าไม่สนใจแล้ว</div>
+          <p className="text-[11px] text-slate-500 mt-0.5">
+            ติดแท็ก 🚫 ไม่สนใจ ในหน้าตอบแชท → ย้ายออกจากกล่องหลักไปเมนู "ไม่สนใจ" (ต่อจากบล็อกไว้)
+            → ครบกำหนดให้แอดมินยืนยัน → ยืนยันแล้วจึงล้างข้อมูลตามวันที่ตั้ง
+            · <span className="font-medium">ลูกค้าทักกลับมาเมื่อไหร่ ระบบดึงกลับเข้ากล่องหลักเอง</span>
+          </p>
+        </div>
+        {retCfg && (
+          <>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <label className="text-xs text-slate-600">อยู่ในเมนู "ไม่สนใจ" กี่วันก่อนขอให้ยืนยัน</label>
+                <input type="number" min={1} max={90} value={retCfg.review_days ?? 7}
+                  onChange={(e) => setRetCfg({ ...retCfg, review_days: Number(e.target.value) })}
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                <p className="mt-0.5 text-[10.5px] text-slate-400">1–90 วัน · ตั้ง 1 = พรุ่งนี้ขอยืนยันเลย</p>
+              </div>
+              <div>
+                <label className="text-xs text-slate-600">ยืนยันแล้วอีกกี่วันจึงล้างข้อมูล</label>
+                <input type="number" min={1} max={30} value={retCfg.purge_days ?? 23}
+                  onChange={(e) => setRetCfg({ ...retCfg, purge_days: Number(e.target.value) })}
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+                <p className="mt-0.5 text-[10.5px] text-slate-400">1–30 วัน · ยกเลิกได้ก่อนถึงกำหนด</p>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-600">ตอนครบกำหนด ให้ลบอะไร</label>
+              <select value={retCfg.mode || "transcript_only"}
+                onChange={(e) => setRetCfg({ ...retCfg, mode: e.target.value })}
+                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">
+                <option value="transcript_only">ลบแค่บทสนทนา — เก็บชื่อ/เลขบัญชี/สถิติไว้ (แนะนำ)</option>
+                <option value="full">ลบทั้งแถว — เสียประวัติเปิดบัญชี สถิติ และตัวกันซ้ำ</option>
+              </select>
+              {retCfg.mode === "full" && (
+                <p className="mt-1 text-[11px] text-rose-600">
+                  ⚠️ ลบทั้งแถวจะเสียประวัติลูกค้าที่เปิดบัญชีแล้ว สถิติการตอบ กระดานแต้ม และที่มาจากแอด
+                  · ลูกค้าคนเดิมทักกลับมาจะนับเป็นลูกค้าใหม่
+                </p>
+              )}
+            </div>
+
+            <label className="flex items-center gap-2 text-xs text-slate-600">
+              <input type="checkbox" checked={retCfg.enabled !== false}
+                onChange={(e) => setRetCfg({ ...retCfg, enabled: e.target.checked })} className="h-4 w-4" />
+              เปิดใช้งานการล้างข้อมูลอัตโนมัติ (งานรันทุกวัน 02:00 น.)
+            </label>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button onClick={saveRet} disabled={retBusy === "save"}
+                className="bg-amber-700 text-white rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-amber-800 disabled:opacity-60 flex items-center gap-1.5">
+                {retBusy === "save" ? <Loader2 className="animate-spin" size={14} /> : null} บันทึกนโยบาย
+              </button>
+              <button onClick={() => runRet(true)} disabled={!!retBusy}
+                className="border border-slate-300 text-slate-600 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-slate-50 disabled:opacity-60 flex items-center gap-1.5">
+                {retBusy === "dry" ? <Loader2 className="animate-spin" size={14} /> : null} ดูก่อนว่าจะทำอะไร
+              </button>
+            </div>
+
+            {retStat && (
+              <div className="text-xs bg-white rounded-lg border border-slate-200 p-2.5 space-y-1">
+                {retStat.error ? <div className="text-rose-600">{retStat.error}</div> : (
+                  <>
+                    {retStat.counts && (
+                      <div className="flex flex-wrap gap-3 text-slate-700">
+                        <span>อยู่ในเมนู <b>{retStat.counts.in_menu}</b></span>
+                        <span>รอยืนยัน <b className="text-amber-600">{retStat.counts.awaiting_confirm}</b></span>
+                        <span>รอล้าง <b>{retStat.counts.scheduled_purge}</b></span>
+                        <span className="text-slate-400">ล้างแล้ว {retStat.counts.already_purged}</span>
+                      </div>
+                    )}
+                    {retStat.dry_run !== undefined && (
+                      <div className="text-slate-600">
+                        ถ้ารันตอนนี้: ดึงกลับกล่องหลัก <b>{retStat.returned_to_inbox ?? 0}</b> ราย ·
+                        ถึงกำหนดล้าง <b>{retStat.due_purge ?? 0}</b> ราย
+                      </div>
+                    )}
+                    {retStat.saved && <div className="text-emerald-600">บันทึกนโยบายแล้ว ✓</div>}
+                  </>
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* เติมประเทศจากแอดที่ลูกค้าทักมา — ช่วยเคสที่ลูกค้าส่งแต่สติกเกอร์/รูป/พิมพ์ผิด จนเดาภาษาจากข้อความไม่ได้ */}
+      <div className="rounded-xl border border-sky-200 bg-sky-50/40 p-4 space-y-2">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <div className="text-sm font-medium text-slate-800">เติมประเทศลูกค้าจากแอดที่ทักเข้ามา</div>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              ลูกค้าที่ส่งแต่สติกเกอร์/รูป หรือพิมพ์ผิด จะเดาภาษาจากข้อความไม่ได้ — ถ้าเขาทักมาจากแอด
+              ระบบจะใช้ประเทศเป้าหมายของแอดนั้นแทน · แอดที่ยิงหลายประเทศจะถูกข้าม (สรุปไม่ได้)
+              · ไม่ทับค่าที่แอดมินกรอกเอง
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button onClick={() => runOrigin(true)} disabled={!!originBusy}
+              className="border border-slate-300 text-slate-600 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-slate-50 disabled:opacity-60 flex items-center gap-1.5">
+              {originBusy === "dry" ? <Loader2 className="animate-spin" size={14} /> : null} ดูก่อนว่าจะเติมกี่คน
+            </button>
+            <button onClick={() => runOrigin(false)} disabled={!!originBusy}
+              className="bg-sky-700 text-white rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-sky-800 disabled:opacity-60 flex items-center gap-1.5">
+              {originBusy === "run" ? <Loader2 className="animate-spin" size={14} /> : <RefreshCw size={14} />} เติมเลย
+            </button>
+          </div>
+        </div>
+        {originRes && (
+          <div className="text-xs bg-white rounded-lg border border-slate-200 p-2.5 space-y-1">
+            {originRes.error ? (
+              <div className="text-rose-600">{originRes.error}</div>
+            ) : (
+              <>
+                <div className="text-slate-700">
+                  {originRes.dry_run ? "จะเติมได้ " : "เติมแล้ว "}
+                  <span className="font-semibold">{originRes.updated}</span> คน
+                  <span className="text-slate-400"> · ตรวจแอด {originRes.ads_checked} ตัว · เข้าเกณฑ์ {originRes.candidates} คน</span>
+                </div>
+                {originRes.by_country && Object.keys(originRes.by_country).length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {Object.entries(originRes.by_country).map(([c, n]) => (
+                      <span key={c} className="rounded-full bg-sky-50 text-sky-700 px-2 py-0.5">{c} {n}</span>
+                    ))}
+                  </div>
+                )}
+                {originRes.note && <div className="text-slate-400">{originRes.note}</div>}
+                {originRes.skipped_ads && Object.keys(originRes.skipped_ads).length > 0 && (
+                  <div className="text-slate-400">
+                    ข้าม {Object.keys(originRes.skipped_ads).length} แอด: {[...new Set(Object.values(originRes.skipped_ads))].join(" · ")}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* ผูกเพจกับ webhook (real-time) — ต้องกดครั้งเดียวหลังตั้ง webhook ใน Meta */}
       <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-4 space-y-2">
         <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -177,7 +362,7 @@ export function ChatSyncConfigPanel() {
             <button onClick={() => runWebhook("status")} disabled={!!webhookBusy} className="border border-slate-300 text-slate-600 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-slate-50 disabled:opacity-60 flex items-center gap-1.5">
               {webhookBusy === "status" ? <Loader2 className="animate-spin" size={14} /> : null} เช็คสถานะ
             </button>
-            <button onClick={() => runWebhook("subscribe")} disabled={!!webhookBusy} className="bg-emerald-600 text-white rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-emerald-700 disabled:opacity-60 flex items-center gap-1.5">
+            <button onClick={() => runWebhook("subscribe")} disabled={!!webhookBusy} className="bg-emerald-700 text-white rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-emerald-800 disabled:opacity-60 flex items-center gap-1.5">
               {webhookBusy === "subscribe" ? <Loader2 className="animate-spin" size={14} /> : <RefreshCw size={14} />} ผูกเพจกับ webhook
             </button>
           </div>

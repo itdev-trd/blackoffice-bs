@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { MessageSquare, Users, Tv } from "lucide-react";
+import { MessageSquare, Users, Tv, ScanSearch } from "lucide-react";
 import CustomerDatabaseTab, { TradeIdChecker } from "@/components/features/customerdb/CustomerDatabaseTab";
 import TvMembersTab from "@/components/features/tv-members/TvMembersTab";
+import DetectedDataReview from "@/components/features/customerdb/DetectedDataReview";
 import { SavedRepliesPanel } from "@/components/features/settings/SettingsTab";
 import { SectionTitle } from "@/components/ui";
 import { useDashboard } from "@/components/dashboard/DashboardContext";
@@ -11,6 +12,7 @@ import { useDashboard } from "@/components/dashboard/DashboardContext";
 const MODES = [
   ["customers", "ลูกค้า", Users],
   ["tv", "TradingView", Tv],
+  ["detected", "ตรวจข้อมูลที่พบ", ScanSearch],
   ["replies", "ตอบกลับอัตโนมัติ", MessageSquare],
 ];
 
@@ -55,6 +57,7 @@ export default function CustomerOperationsTab({ allowedPages = null, onOpenChat 
       </div>
       {activeMode === "customers" && <CustomerDatabaseTab onOpenChat={onOpenChat} />}
       {activeMode === "tv" && <TvMembersTab active embedded />}
+      {activeMode === "detected" && <DetectedDataReview onOpenChat={onOpenChat} />}
       {activeMode === "replies" && <SavedRepliesPanel allowedPages={allowedPages} />}
     </div>
   );

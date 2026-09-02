@@ -347,7 +347,7 @@ function ReviewTab({ adCopies, adImages, onChanged, brandConfig }) {
         <button
           onClick={handleLaunch}
           disabled={launching || (!selectedCopyIds.length && !suggestion)}
-          className="flex items-center gap-1.5 text-sm bg-emerald-600 text-white rounded-lg px-5 py-2.5 font-medium hover:bg-emerald-700 disabled:opacity-60"
+          className="flex items-center gap-1.5 text-sm bg-emerald-700 text-white rounded-lg px-5 py-2.5 font-medium hover:bg-emerald-800 disabled:opacity-60"
         >
           {launching ? <Loader2 className="animate-spin" size={15} /> : <CheckCircle2 size={15} />}
           ยืนยันลอนช์

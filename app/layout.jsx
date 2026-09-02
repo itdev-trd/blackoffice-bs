@@ -40,7 +40,16 @@ export const viewport = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="th" suppressHydrationWarning className={`dark ${notoSansThai.variable} ${roboto.variable}`}>
+    <html lang="th" suppressHydrationWarning className={`${notoSansThai.variable} ${roboto.variable}`}>
+      <head>
+        {/* ทาคลาสธีมก่อนหน้าจอวาด — ไม่งั้นเห็นจอขาวแวบก่อนกลายเป็นมืด
+            ต้องเป็น inline script เพราะ React hydrate ทีหลังเสมอ */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{var t=localStorage.getItem("ui.theme");var d=t!=="light";document.documentElement.classList.toggle("dark",d);document.documentElement.style.colorScheme=d?"dark":"light";}catch(e){document.documentElement.classList.add("dark");}})();`,
+          }}
+        />
+      </head>
       <body>
         <AuthListener />
         {children}

@@ -1466,7 +1466,7 @@ function ApplyChangeButton({ change, onDone, label, tone = "slate" }) {
   const tones = {
     slate: "bg-brand-600 text-white hover:bg-brand-700",
     rose: "bg-rose-600 text-white hover:bg-rose-700",
-    emerald: "bg-emerald-600 text-white hover:bg-emerald-700",
+    emerald: "bg-emerald-700 text-white hover:bg-emerald-800",
     blue: "bg-blue-600 text-white hover:bg-blue-700",
   };
   async function apply() {

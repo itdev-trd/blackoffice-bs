@@ -40,6 +40,41 @@ async function notify(conversationId: string, pageId: string, pageName: string, 
   } catch (_) { /* push must not break webhook */ }
 }
 
+// รูป/วิดีโอ/เสียง/ไฟล์ที่ลูกค้าส่งใน LINE ไม่มี URL สาธารณะเหมือนสติกเกอร์
+// ต้องดาวน์โหลดผ่าน api-data.line.me ด้วย channel access token แล้วเก็บลง storage เอง
+// ไม่ทำแบบนี้ แอดมินจะเห็นแค่ป้าย "[รูปภาพ]" เปิดดูรูปจริงไม่ได้เลย
+//
+// เก็บเฉพาะ image/video (สิ่งที่ต้องเห็นด้วยตา) — เสียง/ไฟล์คงเป็นป้ายไว้ ไม่เปลืองพื้นที่
+const LINE_MEDIA_TYPES = ["image", "video"];
+const MAX_LINE_MEDIA_BYTES = 12 * 1024 * 1024; // กันไฟล์ใหญ่ผิดปกติทำให้ฟังก์ชันตาย
+
+async function saveLineMedia(admin: any, accessToken: string, messageId: string, kind: string) {
+  try {
+    const res = await fetch(`https://api-data.line.me/v2/bot/message/${encodeURIComponent(messageId)}/content`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!res.ok) { console.warn("[line media] โหลดไม่ได้", messageId, res.status); return null; }
+    const buf = new Uint8Array(await res.arrayBuffer());
+    if (buf.byteLength === 0 || buf.byteLength > MAX_LINE_MEDIA_BYTES) {
+      console.warn("[line media] ขนาดไม่เหมาะ", messageId, buf.byteLength);
+      return null;
+    }
+    const mime = res.headers.get("content-type") || (kind === "video" ? "video/mp4" : "image/jpeg");
+    const ext = mime.includes("png") ? "png" : mime.includes("gif") ? "gif" : mime.includes("webp") ? "webp"
+      : kind === "video" ? "mp4" : "jpg";
+    // ใช้ messageId เป็นชื่อไฟล์ — LINE ส่ง event ซ้ำได้ upsert จึงไม่สร้างไฟล์ซ้ำ
+    const path = `line/${messageId}.${ext}`;
+    const up = await admin.storage.from("chat-media").upload(path, buf, { contentType: mime, upsert: true });
+    if (up.error) { console.warn("[line media] อัปโหลดไม่สำเร็จ", up.error.message); return null; }
+    return { url: admin.storage.from("chat-media").getPublicUrl(path).data.publicUrl, mime };
+  } catch (e) {
+    // โหลดรูปพลาดต้องไม่ทำให้ข้อความหาย — ปล่อยเป็นป้ายไว้แล้วไปต่อ
+    console.warn("[line media] error", e instanceof Error ? e.message : e);
+    return null;
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method !== "POST") return new Response("ok");
   const raw = await req.text();
@@ -70,8 +105,14 @@ Deno.serve(async (req) => {
       const mid = String(event.message?.id || event.webhookEventId || "");
       if (mid && transcript.some((m: any) => String(m?.mid || "") === mid)) continue;
       const stickerUrl = stickerImageUrl(event.message);
+      // สื่อจริงที่ลูกค้าส่ง (รูป/วิดีโอ) — ดาวน์โหลดเก็บไว้เพื่อให้เปิดดูในแอปได้
+      const lineType = String(event.message?.type || "");
+      const media = (!stickerUrl && mid && LINE_MEDIA_TYPES.includes(lineType))
+        ? await saveLineMedia(admin, cfg.accessToken, mid, lineType)
+        : null;
       const item = {
         w: "u", t: text, at, mid: mid || null, via: "line", line_type: event.message?.type || "unknown",
+        ...(media ? { img: media.url, img_source: "line", ...(lineType === "video" ? { media_kind: "video", media_mime: media.mime } : {}) } : {}),
         ...(event.message?.quoteToken ? { quote_token: String(event.message.quoteToken) } : {}),
         ...(stickerUrl ? { img: stickerUrl, sticker: true, sticker_id: String(event.message.stickerId), package_id: String(event.message.packageId || "") } : {}),
         ...(event.message?.markAsReadToken ? { mark_as_read_token: String(event.message.markAsReadToken) } : {}),

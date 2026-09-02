@@ -788,6 +788,13 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
   useEffect(() => { if (visibleSections.length && !visibleSections.some((s) => s.key === section)) setSection(visibleSections[0].key); }, [allowedSettings]);
   const [campaignDefaults, setCampaignDefaults] = useState(settings.campaign_defaults || {});
   const [launchCfg, setLaunchCfg] = useState(settings.launch_config || {});
+  // รายการบัญชีโฆษณาจริงจาก Meta — ทำ dropdown แทนช่องพิมพ์ ID มือ (พิมพ์ผิดตัวเดียวคือยิงลงบัญชีคนอื่น)
+  const [adAccounts, setAdAccounts] = useState(null); // null = กำลังโหลด
+  useEffect(() => {
+    supabase.functions.invoke("list-ad-accounts", { body: {} })
+      .then(({ data }) => setAdAccounts(Array.isArray(data?.accounts) ? data.accounts : []))
+      .catch(() => setAdAccounts([]));
+  }, []);
   // launch_config ถูกเขียนจากสองที่: การ์ดนี้ กับ LaunchConfigCard ในหัวข้อ "ทั่วไป" (ที่ upsert ตรงเข้า DB เอง)
   // ถ้าไม่ sync กลับ แอดมินที่กด "ใช้ค่าที่ AI แนะนำ" แล้วมาเซฟหัวข้อแคมเปญ จะเขียนทับค่าเก่าที่ค้างใน state
   useEffect(() => { setLaunchCfg(settings.launch_config || {}); }, [settings.launch_config]);
@@ -1038,7 +1045,41 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
       {section === "campaign" && (<>
       <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
         <h3 className="font-semibold text-slate-800">ค่าเริ่มต้นแคมเปญ (Meta)</h3>
-        {field(campaignDefaults, setCampaignDefaults, "ad_account_id", "Ad Account ID (ไม่ต้องมี act_ นำหน้า)")}
+        {/* บัญชีโฆษณา — เลือกจากรายการจริง ไม่ให้พิมพ์ ID เอง
+            ยิงผิดบัญชี = เงินออกจากที่ผิด และบางบัญชีถูก Meta จำกัดอยู่ ต้องเห็นสถานะก่อนเลือก */}
+        <div>
+          <label className="text-sm text-slate-600">บัญชีโฆษณา (ใช้เป็นค่าเริ่มต้นตอนยิงแอด)</label>
+          {adAccounts === null ? (
+            <div className="mt-1.5 text-sm text-slate-400">กำลังโหลดรายการบัญชี…</div>
+          ) : adAccounts.length === 0 ? (
+            <input
+              className="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              placeholder="ดึงรายการไม่ได้ — กรอก Ad Account ID เอง (ไม่ต้องมี act_)"
+              value={campaignDefaults.ad_account_id || ""}
+              onChange={(e) => setCampaignDefaults({ ...campaignDefaults, ad_account_id: e.target.value.trim().replace(/^act_/, "") })}
+            />
+          ) : (
+            <select
+              className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+              value={campaignDefaults.ad_account_id || ""}
+              onChange={(e) => setCampaignDefaults({ ...campaignDefaults, ad_account_id: e.target.value })}
+            >
+              <option value="">— เลือกบัญชีโฆษณา —</option>
+              {adAccounts.map((a) => {
+                const id = String(a.account_id || a.id || "").replace(/^act_/, "");
+                const disabled = Number(a.status) !== 1;
+                return (
+                  <option key={id} value={id} disabled={disabled}>
+                    {a.name || id}{a.currency ? ` · ${a.currency}` : ""}{disabled ? ` · ${a.status_label || "ใช้งานไม่ได้"}` : ""}
+                  </option>
+                );
+              })}
+            </select>
+          )}
+          <p className="mt-1 text-[11px] text-slate-400">
+            บัญชีที่ Meta จำกัดไว้จะเลือกไม่ได้ · ยิงแอดข้ามบัญชีเป็นครั้งๆ ทำได้จากหน้า "แคมเปญ" โดยไม่ต้องแก้ค่านี้
+          </p>
+        </div>
         {field(campaignDefaults, setCampaignDefaults, "page_id", "Facebook Page ID")}
         {field(campaignDefaults, setCampaignDefaults, "pixel_id", "Pixel ID")}
         {field(campaignDefaults, setCampaignDefaults, "audience_id", "Custom/Lookalike Audience ID (เว้นว่างได้ถ้ายังไม่มี — จะยิงแบบกว้างแทน)")}
@@ -1535,7 +1576,7 @@ function KnowledgeBasePanel({ allowedPages = null }) {
             <label className="block text-xs text-slate-500">คำตอบ<textarea rows={3} value={item.answer} onChange={(e) => edit(item.id, "answer", e.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800" /></label>
             <div className="flex justify-end gap-2">
               <button onClick={() => review(item, "rejected")} disabled={saving === item.id} className="rounded-lg border border-rose-200 text-rose-600 px-3 py-1.5 text-xs disabled:opacity-50">ไม่ใช้</button>
-              <button onClick={() => review(item, "approved")} disabled={saving === item.id || !item.question.trim() || !item.answer.trim()} className="rounded-lg bg-emerald-600 text-white px-3 py-1.5 text-xs disabled:opacity-50">อนุมัติ</button>
+              <button onClick={() => review(item, "approved")} disabled={saving === item.id || !item.question.trim() || !item.answer.trim()} className="rounded-lg bg-emerald-700 text-white px-3 py-1.5 text-xs disabled:opacity-50">อนุมัติ</button>
             </div>
           </div>
         ))}

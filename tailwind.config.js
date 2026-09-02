@@ -11,18 +11,20 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        // ธีมมืดตาม mockup ที่ผู้ใช้ส่งมา (GitHub-dark inspired)
+        // สี sidebar/หน้าแชท — ผูกกับตัวแปรใน globals.css เพื่อให้เปลี่ยนตามธีมได้
+        // เดิมเป็น hex ฝังตาย ธีมสว่างจึงเปลี่ยนแต่เนื้อหา ส่วน sidebar ยังมืดค้างอยู่
+        // ใช้ rgb(var(--x) / <alpha-value>) เพราะทั้งโปรเจกต์ใช้ opacity modifier (bg-night-accent/15)
         night: {
-          base: "#0D1117",
-          surface: "#161B22",
-          surface2: "#1C2128",
-          border: "#30363D",
-          "border-subtle": "#21262D",
-          ink: "#E6EDF3",
-          "ink-2": "#8B949E",
-          "ink-3": "#484F58",
-          accent: "#1F6FEB",
-          "accent-light": "#58A6FF",
+          base: "rgb(var(--n-base) / <alpha-value>)",
+          surface: "rgb(var(--n-surface) / <alpha-value>)",
+          surface2: "rgb(var(--n-surface2) / <alpha-value>)",
+          border: "rgb(var(--n-border) / <alpha-value>)",
+          "border-subtle": "rgb(var(--n-border-subtle) / <alpha-value>)",
+          ink: "rgb(var(--n-ink) / <alpha-value>)",
+          "ink-2": "rgb(var(--n-ink-2) / <alpha-value>)",
+          "ink-3": "rgb(var(--n-ink-3) / <alpha-value>)",
+          accent: "rgb(var(--n-accent) / <alpha-value>)",
+          "accent-light": "rgb(var(--n-accent-light) / <alpha-value>)",
         },
         // accent เดียวของระบบ — ปุ่มหลัก, เมนูที่เลือก, ลิงก์
         brand: {

@@ -25,7 +25,17 @@ const RATE_LIMIT_CODES = new Set([4, 17, 32, 613, 80004]); // Meta rate limit (a
 const READ_STATUS_STATE_KEY = "messenger_read_status_sync";
 const DEFAULT_READ_STATUS_COOLDOWN_MS = 5 * 60 * 1000;
 const MAX_TRANSCRIPT_TEXT = 10_000;
-const transcriptText = (value: unknown) => String(value || "").slice(0, MAX_TRANSCRIPT_TEXT);
+// อิโมจิ/อักขระเสริมถูกเก็บเป็น surrogate pair 2 ตัว ถ้าลูกค้าส่งมาไม่ครบคู่
+// (หรือถูกเราตัดกลางคู่ตอน slice) Postgres จะปฏิเสธ "Unicode low surrogate must follow a high surrogate"
+// แล้วล้มการเขียนทั้ง batch — ต้องตัดตัวเดี่ยวที่ค้างออกหลัง slice เสมอ
+function stripLoneSurrogates(s: string): string {
+  return s
+    .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/g, "")
+    .replace(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "");
+}
+const transcriptText = (value: unknown) => stripLoneSurrogates(String(value || "").slice(0, MAX_TRANSCRIPT_TEXT));
+// ชื่อ/ข้อความย่อก็วิ่งผ่าน JSON body เดียวกัน ถ้ามี surrogate ค้างก็ล้มทั้งคำขอ
+const safeShort = (v: unknown, n: number) => stripLoneSurrogates(String(v || "").slice(0, n)) || null;
 
 async function syncPushState(conversationId: string) {
   try {
@@ -70,6 +80,14 @@ Deno.serve(async (req) => {
     const body = await readJsonBody(req, 64 * 1024);
     const full = body?.full === true;
     const onlyPage = body?.page_id ? String(body.page_id) : null;
+    // ตัดยอดวันที่: ไม่เอาแชทที่เก่ากว่านี้ (โหมด full) — เพจที่คุยกับลูกค้ามานานมีเป็นหมื่นแชท
+    // ดึงหมดทำให้เปลืองโควตา Meta และหน้าเว็บอืดโดยไม่ได้ใช้ข้อมูลเก่าจริง
+    const sinceMs = (() => {
+      const v = body?.since;
+      if (!v) return null;
+      const t = new Date(String(v));
+      return Number.isNaN(t.getTime()) ? null : t.getTime();
+    })();
     const after = body?.after ? String(body.after) : null;
     const job = body?.job ? String(body.job) : "sync";  // "sync" = ดึงข้อมูลอย่างเดียว | "classify" = AI เล็ก | "verify" = AI ใหญ่
     const auth = job === "read_status" && !full
@@ -235,11 +253,11 @@ Deno.serve(async (req) => {
         const lastPageMsg = [...transcript].reverse().find((m: any) => m.w === "p");
         rows.push({
           id: c.id, page_id: page.id, page_name: page.name,
-          psid: customer.id ?? null, customer_name: customer.name ?? null,
+          psid: customer.id ?? null, customer_name: safeShort(customer.name, 300),
           message_count: c.message_count ?? msgs.length, user_message_count: userMsgs.length,
           phone: null, trade_id: null, username: null, email: null,
-          last_user_text: (userTexts[0] || "").slice(0, 300) || null,
-          last_reply_text: lastPageMsg ? String(lastPageMsg.t || "").slice(0, 300) : null,
+          last_user_text: safeShort(userTexts[0], 300),
+          last_reply_text: lastPageMsg ? safeShort(lastPageMsg.t, 300) : null,
           last_reply_by: lastPageMsg?.by_name ?? null,
           last_reply_at: lastPageMsg?.at ?? null,
           last_message_at: lastAt, transcript,
@@ -373,24 +391,40 @@ Deno.serve(async (req) => {
       }
       const urlFor = (cur: string | null) => buildUrl(page) + (cur ? `&after=${encodeURIComponent(cur)}` : "");
       let processed = 0;
+      let skippedOld = 0;
       let done = false;
       for (let i = 0; i < MAX_LOOPS_PER_CALL; i++) {
         const data = await fetchJson(urlFor(cursor));
         if (data?.error) {
           // โดน Meta rate limit (app/page/user) — ไม่ error ดิบ ให้หยุดพักแล้ว resume จาก cursor เดิมได้
           if (RATE_LIMIT_CODES.has(Number(data.error.code))) {
-            return new Response(JSON.stringify({ ok: true, full: true, page: page.name, processed, next_after: cursor, done: false, rate_limited: true }), { headers: { ...corsHeaders, "content-type": "application/json" } });
+            return new Response(JSON.stringify({ ok: true, full: true, page: page.name, processed, skipped_old: skippedOld, next_after: cursor, done: false, rate_limited: true }), { headers: { ...corsHeaders, "content-type": "application/json" } });
           }
           return new Response(JSON.stringify({ ok: false, error: `[${page.name}] ${data.error.message || data.error}` }), { status: 200, headers: { ...corsHeaders, "content-type": "application/json" } });
         }
-        const rb = await processBatch(page, data?.data ?? [], false);
+        const batchAll = (data?.data ?? []) as any[];
+        // Meta คืน conversations เรียงตาม updated_time ใหม่→เก่า
+        // เมื่อเจอหน้าที่ "ไม่มีแชทใหม่กว่ายอดเลย" = ที่เหลือเก่ากว่าทั้งหมด หยุดได้เลย ไม่ต้องไล่ต่อ
+        // นี่คือจุดที่ประหยัดโควตาที่สุด ไม่ใช่แค่กรองทิ้งหลังดึงมาแล้ว
+        const batch = sinceMs
+          ? batchAll.filter((c: any) => {
+              const t = c?.updated_time ? new Date(c.updated_time).getTime() : NaN;
+              return Number.isNaN(t) ? true : t >= sinceMs;
+            })
+          : batchAll;
+        const rb = await processBatch(page, batch, false);
         processed += rb.upserted;
+        if (sinceMs && batchAll.length > 0 && batch.length === 0) {
+          skippedOld += batchAll.length;
+          done = true; cursor = null; break;
+        }
+        skippedOld += batchAll.length - batch.length;
         if (!data?.paging?.next) { done = true; cursor = null; break; }
         cursor = data?.paging?.cursors?.after ?? null;
         if (!cursor) { done = true; break; }
         if (Date.now() > aiDeadline) break;
       }
-      return new Response(JSON.stringify({ ok: true, full: true, page: page.name, processed, next_after: done ? null : cursor, done }), { headers: { ...corsHeaders, "content-type": "application/json" } });
+      return new Response(JSON.stringify({ ok: true, full: true, page: page.name, processed, skipped_old: skippedOld, next_after: done ? null : cursor, done }), { headers: { ...corsHeaders, "content-type": "application/json" } });
     }
 
     // ---- โหมดปกติ: ทุกเพจที่เปิด ดึงจนได้ "งานที่ต้องทำ" ครบ per_page ----

@@ -109,12 +109,27 @@ async function clearRelatedUnread(admin: any, row: any, nowIso: string, answered
 }
 
 // เรียก OpenAI (ตัวเดียวกับที่ทั้งระบบใช้ — IMAGE_API_KEY) คืน JSON
-async function openaiJson(model: string, sys: string, user: string): Promise<any> {
+// gpt-5 เป็น reasoning model — ถ้าไม่กำหนด reasoning_effort จะคิดลึกทุกครั้งและกิน token มาก
+// งานในไฟล์นี้ไม่เท่ากันเรื่องความสำคัญ จึงแยกระดับ:
+//   translate / summarize = อ่านให้แอดมินเข้าใจ (ภายใน) -> "low" พอ ประหยัดได้เยอะเพราะยิงบ่อยสุด
+//   reply = ข้อความที่ "ลูกค้าได้รับจริง" -> ไม่ลด ปล่อยค่าเริ่มต้น เพราะแปลผิดคือเสียลูกค้า
+async function openaiJson(
+  model: string,
+  sys: string,
+  user: string,
+  opts: { effort?: "low" | "medium" | "high"; maxTokens?: number } = {}
+): Promise<any> {
   const key = await getOpenAIKey();
   const resp = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
-    body: JSON.stringify({ model, max_completion_tokens: 2000, response_format: { type: "json_object" }, messages: [{ role: "system", content: sys }, { role: "user", content: user }] }),
+    body: JSON.stringify({
+      model,
+      max_completion_tokens: opts.maxTokens ?? 2000,
+      ...(opts.effort ? { reasoning_effort: opts.effort } : {}),
+      response_format: { type: "json_object" },
+      messages: [{ role: "system", content: sys }, { role: "user", content: user }],
+    }),
   });
   if (!resp.ok) throw new Error(`OpenAI ${resp.status}: ${await resp.text()}`);
   const data = await resp.json();
@@ -340,7 +355,8 @@ Deno.serve(async (req) => {
         }
         if (batch.length) batches.push(batch);
         for (const part of batches) {
-          const out = await openaiJson(model, TRANSLATE_SYS, JSON.stringify({ messages: part.map((m: any) => ({ i: m.h, t: m.t })) }));
+          // แปลให้แอดมินอ่าน (ภายใน) — low พอ และนี่คือตัวที่เรียกบ่อยสุดในระบบ
+          const out = await openaiJson(model, TRANSLATE_SYS, JSON.stringify({ messages: part.map((m: any) => ({ i: m.h, t: m.t })) }), { effort: "low" });
           for (const it of (out?.items || [])) { const k = String(it?.i ?? ""); if (k) cacheMap[k] = String(it.th || ""); }
           // ภาษา/ประเทศ = ของ "ลูกค้า" เท่านั้น — batch หลังสุดที่มีข้อความลูกค้าจะตรงกับข้อความล่าสุดกว่า
           if (part.some((m: any) => m.w === "u")) {
@@ -379,10 +395,11 @@ Deno.serve(async (req) => {
         text: String(m.th || m.t || (m.img ? "[รูปภาพ/ไฟล์แนบ]" : "")).trim(),
       })).filter((m: any) => m.text);
       if (!recent.length) throw new Error("ไม่มีข้อความตัวอักษรให้สรุป");
+      // สรุปบทสนทนาให้แอดมินอ่าน (ภายใน) — low + จำกัด token เพราะสรุปแค่ 3-5 ประโยค
       const out = await openaiJson(model, SUMMARIZE_SYS, JSON.stringify({
         customer_name: row.customer_name || null,
         messages: recent,
-      }));
+      }), { effort: "low", maxTokens: 1200 });
       const summary = String(out?.summary || "").trim();
       if (!summary) throw new Error("สรุปไม่สำเร็จ ลองใหม่อีกครั้ง");
       const nowIso = new Date().toISOString();
@@ -425,6 +442,8 @@ Deno.serve(async (req) => {
         replyText = textTh; lang = "Thai";
       } else {
         // เมื่อมีภาษาบนหัวแชท ส่งข้อความล่าสุดเป็นค่าว่างเพื่อไม่ให้ AI ตรวจใหม่แล้วเลือกคนละภาษา
+        // ตั้งใจ "ไม่ลด" effort ที่นี่ — นี่คือข้อความที่ลูกค้าได้รับจริง แปลเพี้ยนคือเสียลูกค้า
+        // (translate/summarize ที่เป็นงานภายในถูกลดเป็น low ไปแล้ว)
         const tr = await openaiJson(model, REPLY_SYS, JSON.stringify({
           customer_last_message: targetLang ? "" : lastUserText,
           known_lang: targetLang,

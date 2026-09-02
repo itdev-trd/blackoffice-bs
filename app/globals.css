@@ -30,6 +30,19 @@
   --brand: #3452E0;
   --brand-strong: #2A41B8;
   --brand-soft: #EEF1FE;
+  /* สีของ sidebar/หน้าแชท (คลาส night-*) — เดิมเป็น hex ฝังตายใน tailwind.config
+     ทำให้ธีมสว่างเปลี่ยนแต่เนื้อหา ส่วน sidebar ยังมืดอยู่
+     เก็บเป็น "ช่อง RGB" ไม่ใช่ hex เพราะทั้งโปรเจกต์ใช้ opacity modifier (bg-night-accent/15) */
+  --n-base: 255 255 255;
+  --n-surface: 255 255 255;
+  --n-surface2: 246 247 249;
+  --n-border: 228 231 236;
+  --n-border-subtle: 240 242 245;
+  --n-ink: 20 23 31;
+  --n-ink-2: 71 84 103;
+  --n-ink-3: 102 112 133;
+  --n-accent: 52 82 224;
+  --n-accent-light: 42 65 184;
   --radius-card: 14px;
   --radius-control: 10px;
   --ease: cubic-bezier(.2, .8, .2, 1);
@@ -46,10 +59,28 @@ html.dark {
   --line-strong: #3D444D; /* เส้นตอน hover/โฟกัส */
   --ink: #E6EDF3;
   --ink-2: #9BA6B2;       /* สว่างกว่าเดิมเล็กน้อย ให้ข้อความรองอ่านออกจริงบนพื้นเข้ม */
-  --ink-3: #6E7681;
+  /* #6E7681 เดิมได้ 3.77 บนพื้นการ์ด — ต่ำกว่าเกณฑ์ AA (4.5) และใช้กับหัวข้อย่อย
+     เช่น "ไอดีเทรด" / "อีเมล" ในแผงข้อมูลลูกค้า · #838B96 ได้ 5.02 บนการ์ด
+     และ 4.70 บนพื้นชั้นสอง (surface-2) ที่สว่างกว่า จึงผ่านทั้งสองชั้น
+     (คนละตัวกับ --n-ink-3 ที่ tailwind ใช้ ต้องแก้ทั้งสองชุด) */
+  --ink-3: #838B96;
   --brand: #1F6FEB;
   --brand-strong: #388BFD;
   --brand-soft: rgba(31, 111, 235, .16);
+  /* ธีมมืด — ค่าเดิมที่เคยฝังใน tailwind.config (GitHub-dark) */
+  --n-base: 13 17 23;
+  --n-surface: 22 27 34;
+  --n-surface2: 28 33 40;
+  --n-border: 48 54 61;
+  --n-border-subtle: 33 38 45;
+  --n-ink: 230 237 243;
+  --n-ink-2: 139 148 158;
+  /* เดิม 72 79 88 ให้คอนทราสต์แค่ 2.09 บนพื้นการ์ด — ต่ำกว่าแม้เกณฑ์ตัวอักษรใหญ่ (3.0)
+     ใช้กับเวลาในรายการแชท 208 จุด ซึ่งอ่านแทบไม่ออก · 131 139 150 ได้ 5.02 ผ่าน AA
+     และยังต่างจาก ink-2 (5.62) พอให้เห็นลำดับความสำคัญ (ธีมสว่างไม่ต้องแก้ ได้ 4.54-4.97 อยู่แล้ว) */
+  --n-ink-3: 131 139 150;
+  --n-accent: 31 111 235;
+  --n-accent-light: 88 166 255;
   color-scheme: dark;
 }
 html.dark body { background: var(--ground); color: var(--ink-2); }
@@ -163,6 +194,37 @@ html.dark .text-violet-800,
 html.dark .text-purple-600,
 html.dark .text-purple-700,
 html.dark .text-purple-800 { color: #c4b5fd !important; }
+
+/* ป้ายสถานะทั่วเว็บใช้คู่ "bg-<สี>-100 + text-<สี>-700" (CHAT_STAGES, StatusBadge,
+   หน้าวิเคราะห์, หน้ารออนุมัติ, ฐานข้อมูลลูกค้า ฯลฯ)
+   ธีมมืดเดิม remap ไว้แค่พื้น -50 กับตัวหนังสือบางสี ทำให้พื้น -100 ยังซีดอยู่
+   แต่ตัวหนังสือถูกเปลี่ยนเป็นเฉดซีดแล้ว => ซีดบนซีด วัดได้ 1.45 คือแทบมองไม่เห็น
+   (ป้าย "มาใหม่" ขึ้นทุกแถวในกล่องแชท จึงโดนทั้งหน้า)
+   แก้เป็นคู่: พื้น -100 เป็นโปร่งเข้มแบบ -50 และเติมสีที่ยังขาด (indigo/blue)
+   ให้ตัวหนังสือเป็นเฉดซีดด้วย ไม่งั้นจะกลับด้านเป็นตัวเข้มบนพื้นเข้ม */
+html.dark .bg-emerald-100 { background-color: rgba(16, 185, 129, .16) !important; }
+html.dark .bg-rose-100    { background-color: rgba(244, 63, 94, .16) !important; }
+html.dark .bg-amber-100   { background-color: rgba(245, 158, 11, .16) !important; }
+html.dark .bg-sky-100     { background-color: rgba(14, 165, 233, .16) !important; }
+html.dark .bg-violet-100,
+html.dark .bg-purple-100  { background-color: rgba(139, 92, 246, .16) !important; }
+html.dark .bg-indigo-100  { background-color: rgba(99, 102, 241, .16) !important; }
+html.dark .bg-blue-100    { background-color: rgba(59, 130, 246, .16) !important; }
+html.dark .text-indigo-600,
+html.dark .text-indigo-700,
+html.dark .text-indigo-800 { color: #a5b4fc !important; }
+html.dark .text-blue-600,
+html.dark .text-blue-700,
+html.dark .text-blue-800 { color: #93c5fd !important; }
+
+/* สีแบรนด์ที่ใช้เป็นตัวหนังสือ (53 จุด) ถูกเลือกไว้สำหรับพื้นสว่าง
+   บนพื้นมืดจึงจมหาย: brand-600 ได้ 2.82 · brand-700 ได้ 2.10
+   เลื่อนขึ้นเป็น brand-400 ในธีมมืด — ได้ 4.97/4.65 บนการ์ดและพื้นชั้นสอง
+   ยังเป็นสีแบรนด์เดิม ไม่ใช่สีน้ำเงินอื่น */
+html.dark .text-brand-500,
+html.dark .text-brand-600,
+html.dark .text-brand-700,
+html.dark .text-brand-800 { color: #6C81F0 !important; }
 html.dark .placeholder\:text-slate-400::placeholder,
 html.dark .placeholder\:text-gray-400::placeholder { color: var(--ink-3) !important; }
 
@@ -217,6 +279,65 @@ body {
 
 /* ตัวเลขที่ต้องเทียบกันเป็นคอลัมน์ ต้องกว้างเท่ากันทุกตัว */
 .tabular, table td, table th { font-variant-numeric: tabular-nums; }
+
+/* =====================================================================
+   ชิมความอ่านออกสำหรับธีมสว่าง
+   โปรเจกต์นี้ถูกออกแบบเป็นธีมมืดตายตัวมาก่อน (layout ใส่ class "dark" ฝังไว้)
+   ป้าย/ชิป/ข้อความสถานะจึงใช้สีระดับ 200-400 ซึ่งอ่านออกดีบนพื้นเข้ม
+   แต่บนพื้นขาวจะจางเกินไป — ทดแทนเป็นระดับ 600-700 เฉพาะธีมสว่าง
+   แก้ที่นี่จุดเดียวแทนไปแก้ class ทีละที่หลายร้อยแห่ง (และไม่กระทบธีมมืดเลย)
+   ===================================================================== */
+html:not(.dark) .text-sky-200,     html:not(.dark) .text-sky-300,     html:not(.dark) .text-sky-400     { color: #0369A1; }
+html:not(.dark) .text-blue-200,    html:not(.dark) .text-blue-300,    html:not(.dark) .text-blue-400    { color: #1D4ED8; }
+html:not(.dark) .text-cyan-200,    html:not(.dark) .text-cyan-300,    html:not(.dark) .text-cyan-400    { color: #0E7490; }
+html:not(.dark) .text-teal-200,    html:not(.dark) .text-teal-300,    html:not(.dark) .text-teal-400    { color: #0F766E; }
+html:not(.dark) .text-emerald-200, html:not(.dark) .text-emerald-300, html:not(.dark) .text-emerald-400 { color: #047857; }
+html:not(.dark) .text-green-200,   html:not(.dark) .text-green-300,   html:not(.dark) .text-green-400   { color: #15803D; }
+html:not(.dark) .text-lime-200,    html:not(.dark) .text-lime-300,    html:not(.dark) .text-lime-400    { color: #4D7C0F; }
+html:not(.dark) .text-amber-200,   html:not(.dark) .text-amber-300,   html:not(.dark) .text-amber-400   { color: #B45309; }
+html:not(.dark) .text-yellow-200,  html:not(.dark) .text-yellow-300,  html:not(.dark) .text-yellow-400  { color: #A16207; }
+html:not(.dark) .text-orange-200,  html:not(.dark) .text-orange-300,  html:not(.dark) .text-orange-400  { color: #C2410C; }
+html:not(.dark) .text-rose-200,    html:not(.dark) .text-rose-300,    html:not(.dark) .text-rose-400    { color: #BE123C; }
+html:not(.dark) .text-red-200,     html:not(.dark) .text-red-300,     html:not(.dark) .text-red-400     { color: #B91C1C; }
+html:not(.dark) .text-pink-200,    html:not(.dark) .text-pink-300,    html:not(.dark) .text-pink-400    { color: #BE185D; }
+html:not(.dark) .text-fuchsia-200, html:not(.dark) .text-fuchsia-300, html:not(.dark) .text-fuchsia-400 { color: #A21CAF; }
+html:not(.dark) .text-purple-200,  html:not(.dark) .text-purple-300,  html:not(.dark) .text-purple-400  { color: #7E22CE; }
+html:not(.dark) .text-violet-200,  html:not(.dark) .text-violet-300,  html:not(.dark) .text-violet-400  { color: #6D28D9; }
+html:not(.dark) .text-indigo-200,  html:not(.dark) .text-indigo-300,  html:not(.dark) .text-indigo-400  { color: #4338CA; }
+
+/* กลุ่มสีเทา — ตัวหนังสือรองที่ใช้เยอะที่สุดในเว็บ (slate-400 อยู่ 292 จุด)
+   บนพื้นมืด slate-400 อ่านออกสบาย แต่บนพื้นขาวได้คอนทราสต์แค่ 2.56 (เกณฑ์ AA = 4.5)
+   ธีมสว่างจึงใช้ #5E6C82 กับทั้ง 400 และ 500 (slate-500 เดิมก็ตก: ได้ 4.34 บนพื้น slate-100)
+   ค่านี้วัดได้ 4.86-5.33 บนพื้นสว่างทุกเฉดที่เว็บใช้ และ 200/300 -> 600 เพราะในธีมมืดสองตัวนี้
+   ถูกใช้ตรงที่ต้องการเน้นกว่า 400 ลำดับความสำคัญจึงต้องคงไว้ ไม่ใช่ให้เท่ากัน */
+html:not(.dark) .text-slate-400, html:not(.dark) .text-gray-400,
+html:not(.dark) .text-slate-500, html:not(.dark) .text-gray-500 { color: #5E6C82; }
+html:not(.dark) .text-slate-300, html:not(.dark) .text-gray-300,
+html:not(.dark) .text-slate-200 { color: #475569; }
+
+/* เฉด -600 ก็ยังไม่ผ่านเกณฑ์ AA บนพื้นสว่าง — วัดจริงได้ 2.7-4.3 (ต้อง 4.5)
+   ที่เห็นเป็นบั๊กจริงคือ amber-600 บนพื้น slate-100 ได้ 2.91 (ตัวเลขสถิติในหน้าตั้งค่า)
+   ตัวอื่นในกลุ่มเดียวกันก็ต่ำหมด ต่างกันแค่ยังไม่มีของขึ้นจอตอนสแกน จึงแก้ทั้งกลุ่มทีเดียว
+   เลื่อนเป็น -700 (yellow ต้องลง 800 เพราะ 700 ได้ 4.49 เฉียดเกณฑ์)
+   ค่าเท่ากับที่ map ให้ 200/300/400 ไว้ข้างบน = ธีมสว่างเหลือเฉดเดียวต่อสี อ่านง่ายและคุมง่ายกว่า
+   ธีมมืดไม่โดนแตะ เพราะ selector มี html:not(.dark) กำกับอยู่ */
+html:not(.dark) .text-sky-600 { color: #0369A1; }
+html:not(.dark) .text-blue-600 { color: #1D4ED8; }
+html:not(.dark) .text-cyan-600 { color: #0E7490; }
+html:not(.dark) .text-teal-600 { color: #0F766E; }
+html:not(.dark) .text-emerald-600 { color: #047857; }
+html:not(.dark) .text-green-600 { color: #15803D; }
+html:not(.dark) .text-lime-600 { color: #4D7C0F; }
+html:not(.dark) .text-amber-600 { color: #B45309; }
+html:not(.dark) .text-yellow-600 { color: #854D0E; }
+html:not(.dark) .text-orange-600 { color: #C2410C; }
+html:not(.dark) .text-rose-600 { color: #BE123C; }
+html:not(.dark) .text-red-600 { color: #B91C1C; }
+
+/* บับเบิลข้อความฝั่งเรา — พื้น brand ทึบ ตัวอักษรต้องขาวทั้งสองธีม
+   (ชิมด้านบนไม่แตะเพราะบับเบิลใช้ text-white อยู่แล้ว แต่กันไว้เผื่อ) */
+html:not(.dark) .chat-bubble-me,
+html:not(.dark) .chat-bubble-me * { color: #FFFFFF; }
 
 /* =====================================================================
    คลาสประกอบ (.ds-*) — ใช้ผ่าน components/ui/index.jsx เป็นหลัก

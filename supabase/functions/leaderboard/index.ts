@@ -74,7 +74,9 @@ Deno.serve(async (req) => {
     const MAX_PAGES = 200;
 
     const aggregateRow = (r: any) => {
-      if (!r.msg_at || !r.replied_at || r.source === "missed") return;   // เฉพาะรอบที่ตอบแล้ว
+      // reply_stats ไม่มีคอลัมน์ source — เดิมเช็ค r.source === "missed" ซึ่งเป็น undefined เสมอ (no-op)
+      // การมี replied_at อยู่แล้วก็หมายถึง "ตอบแล้ว" ตัวกรองนี้จึงเพียงพอ
+      if (!r.msg_at || !r.replied_at) return;
       // ตัดบัญชีเทส
       if (exclude.length && exclude.some((e) => (r.customer_name && String(r.customer_name).toLowerCase().includes(e)) || (r.conversation_id && String(r.conversation_id).toLowerCase() === e))) return;
       const s = new Date(r.msg_at).getTime();
@@ -87,7 +89,7 @@ Deno.serve(async (req) => {
       const isHoliday = !cfg.days.includes(info.day) || holidays.has(thaiDateStr(s));
       const pts = offPoints(info.min, isHoliday, wm <= slowMin);
       if (pts <= 0) return;
-      const who = r.replied_by || r.email || (r.source === "page" ? "(ตอบจากเพจ)" : "(ไม่ระบุ)");
+      const who = r.email || "(ไม่ระบุ)";
       const a = (agg[who] = agg[who] || { email: who, points: 0, count: 0, in_time: 0, slow: 0 });
       a.points += pts; a.count++; if (wm <= slowMin) a.in_time++; else a.slow++;
       total += pts;
@@ -98,7 +100,10 @@ Deno.serve(async (req) => {
     for (let page = 0; page < MAX_PAGES; page++) {
       const offset = page * PAGE_SIZE;
       let q = admin.from("reply_stats")
-        .select("replied_by, email, source, customer_name, conversation_id, page_id, msg_at, replied_at")
+        // ตาราง reply_stats มีแค่ email — ไม่มี replied_by / source (ตัวเขียนใน messenger-reply ใส่แค่ email)
+        // เดิม select คอลัมน์ที่ไม่มีจริง Postgres ตอบ 42703 ทำให้กระดานแต้มพัง 500 ทุกครั้ง
+        // และหน้าเว็บโชว์ข้อความหลอกว่า "ตรวจว่าตั้งค่า API key ของ AI" ซึ่งไม่เกี่ยวกันเลย
+        .select("email, customer_name, conversation_id, page_id, msg_at, replied_at")
         .gte("msg_at", since).lte("msg_at", until)
         .order("msg_at", { ascending: false })
         .range(offset, offset + PAGE_SIZE - 1);

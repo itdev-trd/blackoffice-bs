@@ -12,7 +12,15 @@ import { getSelectedCommentPageIds, resolveCommentAds } from "../_shared/comment
 
 const GRAPH_BASE = "https://graph.facebook.com/v22.0";
 const MAX_TRANSCRIPT_TEXT = 10_000;
-const transcriptText = (value: unknown) => String(value || "").slice(0, MAX_TRANSCRIPT_TEXT);
+// อิโมจิ/อักขระเสริมถูกเก็บเป็น surrogate pair 2 ตัว ถ้าลูกค้าส่งมาไม่ครบคู่
+// (หรือถูกเราตัดกลางคู่ตอน slice) Postgres จะปฏิเสธ "Unicode low surrogate must follow a high surrogate"
+// แล้วล้มการเขียนทั้ง batch — ต้องตัดตัวเดี่ยวที่ค้างออกหลัง slice เสมอ
+function stripLoneSurrogates(s: string): string {
+  return s
+    .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/g, "")
+    .replace(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "");
+}
+const transcriptText = (value: unknown) => stripLoneSurrogates(String(value || "").slice(0, MAX_TRANSCRIPT_TEXT));
 
 // ตรวจลายเซ็น X-Hub-Signature-256 = sha256=HMAC_SHA256(app_secret, rawBody)
 async function verifySig(rawBody: string, sigHeader: string | null, secret: string): Promise<boolean> {

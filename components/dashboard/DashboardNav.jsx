@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import ThemeToggle from "@/components/shared/ThemeToggle";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { ExternalLink, LogOut, Menu, RefreshCw, X } from "lucide-react";
@@ -119,7 +120,7 @@ export default function DashboardNav({ children }) {
         <div className={`shrink-0 flex pt-3 mt-1 border-t border-night-border w-full px-2 ${navCollapsed ? "flex-col items-center gap-1.5" : "flex-col gap-1.5"}`}>
           <button
             onClick={loadAll}
-            className={`flex items-center rounded-lg border border-sky-400/30 bg-sky-400/10 text-sky-300 transition-colors hover:border-sky-300/60 hover:bg-sky-400/20 ${
+            className={`flex items-center rounded-lg border border-sky-500/40 bg-sky-500/10 text-sky-700 transition-colors hover:border-sky-500/70 hover:bg-sky-500/15 dark:border-sky-400/30 dark:bg-sky-400/10 dark:text-sky-300 dark:hover:border-sky-300/60 dark:hover:bg-sky-400/20 ${
               navCollapsed ? "h-11 w-16 flex-col justify-center gap-0.5" : "h-10 w-full gap-2.5 px-3"
             }`}
             title="รีเฟรชข้อมูล"
@@ -128,9 +129,10 @@ export default function DashboardNav({ children }) {
             <RefreshCw size={17} className="shrink-0" />
             <span className={navCollapsed ? "text-[10px] font-semibold leading-none" : "text-[13px] font-semibold"}>รีเฟรช</span>
           </button>
+          <ThemeToggle collapsed={navCollapsed} />
           <button
             onClick={handleLogout}
-            className={`flex items-center rounded-lg border border-rose-400/30 bg-rose-400/10 text-rose-300 transition-colors hover:border-rose-300/60 hover:bg-rose-400/20 ${
+            className={`flex items-center rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-700 transition-colors hover:border-rose-500/70 hover:bg-rose-500/15 dark:border-rose-400/30 dark:bg-rose-400/10 dark:text-rose-300 dark:hover:border-rose-300/60 dark:hover:bg-rose-400/20 ${
               navCollapsed ? "h-11 w-16 flex-col justify-center gap-0.5" : "h-10 w-full gap-2.5 px-3"
             }`}
             title="ออกจากระบบ"
@@ -144,7 +146,7 @@ export default function DashboardNav({ children }) {
               className={`mt-1 flex items-center gap-2 min-w-0 ${navCollapsed ? "justify-center" : "px-1 pb-1"}`}
               title={perm.email}
             >
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-night-accent/15 text-2xs font-bold uppercase text-night-accent-light">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-night-accent/15 text-2xs font-bold uppercase text-night-accent dark:text-night-accent-light dark:text-night-accent-light">
                 {String(perm.email).slice(0, 1)}
               </span>
               {!navCollapsed && <span className="min-w-0 flex-1 truncate text-2xs text-night-ink-2">{perm.email}</span>}
