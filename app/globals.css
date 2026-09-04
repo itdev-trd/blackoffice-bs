@@ -552,7 +552,10 @@ html:not(.dark) .chat-bubble-me * { color: #FFFFFF; }
   .chat-compose-guide { padding: .25rem .45rem; margin-bottom: .35rem; }
   .chat-compose-guide > div:first-child { display: none; }
   .chat-language-control { padding: 0 .3rem; }
-  .chat-language-control select { min-height: 32px; padding: .1rem .3rem; max-width: 12rem; }
+  /* ตัวอักษรในช่องเลือกภาษาเล็กลงให้พอดีมือถือ — ต้อง !important เพราะกฎกันซูมของ iOS
+     ที่บังคับ 16px ให้ทุกช่องกรอกก็ใช้ !important เหมือนกัน
+     ยอมแลก: iOS อาจซูมเล็กน้อยตอนแตะ "เฉพาะช่องนี้" (ช่องพิมพ์ตอบยังเป็น 16px ไม่ซูม) */
+  .chat-language-control select { min-height: 30px; padding: .1rem .3rem; max-width: 11rem; font-size: 13px !important; }
   .chat-language-hint { display: none; }
 }
 
