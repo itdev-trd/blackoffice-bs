@@ -2426,6 +2426,44 @@ create index if not exists chat_customers_tags_gin_idx
 -- อนุญาตให้ผู้ใช้ที่ล็อกอินแก้เฉพาะแท็กได้ (ยังไม่เปิดสิทธิ์คอลัมน์อื่นเพิ่ม)
 grant update (tags) on public.chat_customers to authenticated;
 
+-- ======================================================================
+-- FILE: supabase/migrations/20260904120000_tv_access_contact_channel.sql
+-- ======================================================================
+
+-- ช่องทางที่ลูกค้าติดต่อเข้ามา เก็บตอนแอดมินกดเพิ่มสิทธิ์ TV (แอดมินเลือกเอง ไม่ได้เดาจาก source ของแชท)
+-- ค่าเป็น key ตายตัว ฝั่งหน้าจอค่อยแปลงเป็นป้าย (FB / LINE / IG / ...) จะได้เปลี่ยนคำเรียกได้โดยไม่ต้องแก้ข้อมูลเก่า
+alter table public.tv_access add column if not exists contact_channel text;
+
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'tv_access_contact_channel_check') then
+    alter table public.tv_access
+      add constraint tv_access_contact_channel_check
+      check (contact_channel is null or contact_channel in ('facebook', 'line', 'instagram', 'telegram', 'tiktok', 'youtube'));
+  end if;
+end $$;
+
+-- เช็ค: select username, contact_channel from public.tv_access limit 5;
+
+-- ======================================================================
+-- FILE: supabase/migrations/20260904123000_tv_access_member_type.sql
+-- ======================================================================
+
+-- ประเภทสมาชิก แบ่งตามที่มาของสิทธิ์ (ฟรี / จ่ายเงิน / โปรโมชั่น) — แอดมินเลือกตอนเพิ่มสิทธิ์ TV
+-- เก็บเป็น key เหมือน contact_channel เพื่อให้เปลี่ยนคำเรียกบนหน้าจอได้โดยไม่ต้องแก้ข้อมูลเก่า
+alter table public.tv_access add column if not exists member_type text;
+
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'tv_access_member_type_check') then
+    alter table public.tv_access
+      add constraint tv_access_member_type_check
+      check (member_type is null or member_type in ('free', 'paid', 'promotion'));
+  end if;
+end $$;
+
+-- เช็ค: select username, member_type, contact_channel from public.tv_access limit 5;
+
 -- ============================================================
 -- UTILITY / DIAGNOSTIC / MAINTENANCE SCRIPTS (run ad hoc, not part of the migration order)
 -- ============================================================

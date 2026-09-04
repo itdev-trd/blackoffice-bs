@@ -43,6 +43,18 @@ async function getBrandCookie(brandId: number | null | undefined): Promise<Brand
   if (!brandId) return {};
   try { return JSON.parse(await getSetting(`tv_cookie_${brandId}`) || "{}"); } catch { return {}; }
 }
+// ช่องทางที่ลูกค้าติดต่อเข้ามา — รับเฉพาะค่าที่ตาราง tv_access ยอม (มี check constraint คุมอีกชั้น)
+const CONTACT_CHANNELS = ["facebook", "line", "instagram", "telegram", "tiktok", "youtube"];
+function normalizeContactChannel(value: unknown): string | null {
+  const key = String(value ?? "").trim().toLowerCase();
+  return CONTACT_CHANNELS.includes(key) ? key : null;
+}
+// ประเภทสมาชิก แบ่งตามที่มาของสิทธิ์ — รับเฉพาะค่าที่ตาราง tv_access ยอม
+const MEMBER_TYPES = ["free", "paid", "promotion"];
+function normalizeMemberType(value: unknown): string | null {
+  const key = String(value ?? "").trim().toLowerCase();
+  return MEMBER_TYPES.includes(key) ? key : null;
+}
 // brand_id ของสคริปต์ (pine)
 async function pineBrandId(pineId: string): Promise<number | null> {
   const { data } = await admin().from("tv_scripts").select("brand_id").eq("pine_id", pineId).maybeSingle();
@@ -469,6 +481,8 @@ Deno.serve(async (req) => {
       if ("display_name" in body) patch.display_name = String(body.display_name || "").trim() || null;
       if ("email" in body) patch.email = String(body.email || "").trim() || null;
       if ("trade_id" in body) patch.trade_id = String(body.trade_id || "").trim() || null;
+      if ("contact_channel" in body) patch.contact_channel = normalizeContactChannel(body.contact_channel);
+      if ("member_type" in body) patch.member_type = normalizeMemberType(body.member_type);
       if (usernameChanged) {
         const cookie = await getBrandCookie(Number(current.brand_id) || await pineBrandId(current.pine_id));
         const oldUsername = String(current.username).trim();
@@ -611,6 +625,11 @@ Deno.serve(async (req) => {
             expiration, lot: body?.lot || null, trade_id: body?.trade_id || null,
             status: "active", last_granted_at: nowIso, last_synced_at: nowIso, last_error: null, updated_at: nowIso,
           };
+          // ต่ออายุ/เพิ่มสคริปต์ซ้ำมักไม่ส่งช่องทางมาด้วย — ใส่เฉพาะตอนที่ส่งมาจริง จะได้ไม่ล้างค่าเดิมทิ้ง
+          const grantChannel = normalizeContactChannel(body?.contact_channel);
+          if (grantChannel) payload.contact_channel = grantChannel;
+          const grantMemberType = normalizeMemberType(body?.member_type);
+          if (grantMemberType) payload.member_type = grantMemberType;
           if (existing) { payload.edited_by = grantedBy; payload.edited_at = nowIso; }
           else { payload.granted_by = grantedBy; payload.granted_at = nowIso; }
           const { error: upsertError } = await db.from("tv_access").upsert(payload, { onConflict: "username,pine_id" });

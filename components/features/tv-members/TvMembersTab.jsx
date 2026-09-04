@@ -6,6 +6,43 @@ import { beToCe } from "@/lib/utils/date";
 import { X, Clock, Pencil, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Loader2, Eye, Users, CheckCircle2, AlertTriangle, Tv } from "lucide-react";
 import { Button, SectionTitle, StatCard } from "@/components/ui";
 
+// ช่องทางที่ลูกค้าติดต่อเข้ามา — key ต้องตรงกับ check constraint ของ tv_access.contact_channel
+const CONTACT_CHANNELS = [
+  ["facebook", "FB"], ["line", "LINE"], ["instagram", "IG"],
+  ["telegram", "Telegram"], ["tiktok", "TikTok"], ["youtube", "YT"],
+];
+const channelLabel = (v) => CONTACT_CHANNELS.find(([key]) => key === v)?.[1] || "";
+
+// ประเภทสมาชิก แบ่งตามที่มาของสิทธิ์ — key ต้องตรงกับ check constraint ของ tv_access.member_type
+const MEMBER_TYPES = [["free", "ฟรี"], ["paid", "จ่ายเงิน"], ["promotion", "โปรโมชั่น"]];
+const memberTypeLabel = (v) => MEMBER_TYPES.find(([key]) => key === v)?.[1] || "";
+
+function MemberTypeSelect({ value, onChange }) {
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value)} className="w-full mt-1 rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white">
+      <option value="">เลือกประเภทสมาชิก</option>
+      {MEMBER_TYPES.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+    </select>
+  );
+}
+
+// ปุ่มเลือกช่องทาง — กดปุ่มเดิมซ้ำ = ล้างค่า (เผลอกดผิดแล้วเอาออกได้ ไม่ต้องรีเซ็ตทั้งฟอร์ม)
+function ChannelPicker({ value, onChange }) {
+  return (
+    <div className="mt-1 flex flex-wrap gap-1.5">
+      {CONTACT_CHANNELS.map(([key, label]) => {
+        const on = value === key;
+        return (
+          <button key={key} type="button" onClick={() => onChange(on ? "" : key)} aria-pressed={on}
+            className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold border ${on ? "bg-brand-600 text-white border-brand-600" : "border-slate-300 text-slate-600 hover:bg-slate-50"}`}>
+            {label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export default function TvMembersTab({ active = true, embedded = false }) {
   const [scripts, setScripts] = useState([]);
   const [access, setAccess] = useState([]);
@@ -20,6 +57,8 @@ export default function TvMembersTab({ active = true, embedded = false }) {
   const [dname, setDname] = useState("");
   const [demail, setDemail] = useState("");
   const [tradeId, setTradeId] = useState("");
+  const [channel, setChannel] = useState("");    // ช่องทางที่ลูกค้าติดต่อเข้ามา (ไม่บังคับ)
+  const [memberType, setMemberType] = useState("");   // ประเภทสมาชิก: ฟรี/จ่ายเงิน/โปรโมชั่น (ไม่บังคับ)
   const [brands, setBrands] = useState([]);      // แบรนด์ทั้งหมด (ใช้จัดกลุ่ม + ฟอร์มเพิ่ม)
   const [brandSel, setBrandSel] = useState(null); // แบรนด์ที่เลือกในฟอร์มเพิ่มสมาชิก
   const [pineIds, setPineIds] = useState([]);   // เลือกสคริปต์ได้หลายอัน
@@ -165,6 +204,8 @@ export default function TvMembersTab({ active = true, embedded = false }) {
       case "trade": return (a.trade_id || "").toLowerCase();
       case "exp": return a.expiration ? new Date(a.expiration).getTime() : Infinity;   // ตลอดชีพ = ท้ายสุด
       case "status": return statusInfo(a).label;
+      case "memberType": return memberTypeLabel(a.member_type);
+      case "channel": return channelLabel(a.contact_channel).toLowerCase();
       case "tvGranted": return a.tv_granted_at ? new Date(a.tv_granted_at).getTime() : 0;
       case "by": return (a.granted_by || "").toLowerCase();
       case "editby": return a.edited_at ? new Date(a.edited_at).getTime() : 0;
@@ -195,10 +236,10 @@ export default function TvMembersTab({ active = true, embedded = false }) {
     "116px",                                  // สถานะ
     "104px",                                  // Trade ID
     "100px",                                  // หมดอายุ
-    ...(showAudit ? ["132px", "92px", "104px", "132px"] : []),
+    ...(showAudit ? ["104px", "96px", "132px", "92px", "104px", "132px"] : []),   // ประเภท + ช่องทาง + คอลัมน์ตรวจสอบย้อนหลัง
     "96px",                                   // ปุ่มจัดการ
   ].join(" ");
-  const tableMinW = (canSeeNewTv ? 750 : 590) + (showAudit ? 460 : 0);
+  const tableMinW = (canSeeNewTv ? 750 : 590) + (showAudit ? 660 : 0);
   const createLabel = (a) => { const d = a.created_at || a.granted_at; return d ? new Date(d).toLocaleDateString("th-TH", { day: "2-digit", month: "short", year: "2-digit" }) : "—"; };
   const tvGrantedLabel = (a) => a.tv_granted_at
     ? new Date(a.tv_granted_at).toLocaleString("th-TH", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })
@@ -303,6 +344,7 @@ export default function TvMembersTab({ active = true, embedded = false }) {
       const { data, error } = await supabase.functions.invoke("tradingview", { body: {
         action: "grant", username: uname.trim(), display_name: dname.trim() || null, email: demail.trim() || null,
         pine_ids: [pid], lifetime: d.mode === "lifetime", days: effDays, expiration: expIso, trade_id: tradeId.trim(),
+        contact_channel: channel || null, member_type: memberType || null,
       } });
       if (error || !data?.ok) fails.push(`${name}: ${data?.error || data?.results?.[0]?.error || "ลองใหม่"}`);
       else { realUser = data.username || realUser; summ.push(`${name} (${durLabel(d)})`); }
@@ -310,7 +352,7 @@ export default function TvMembersTab({ active = true, embedded = false }) {
     setGranting(false);
     if (!summ.length) { setMsg("✗ เพิ่มสิทธิ์ไม่สำเร็จ: " + (fails.join(" · ") || "ลองใหม่")); return; }
     setMsg(`✓ ให้สิทธิ์ ${realUser} แล้ว: ${summ.join(", ")}${fails.length ? ` · ไม่สำเร็จ: ${fails.join(" · ")}` : ""}`);
-    setUname(""); setDname(""); setDemail(""); setTradeId(""); setDur({});
+    setUname(""); setDname(""); setDemail(""); setTradeId(""); setChannel(""); setMemberType(""); setDur({});
     load();
   }
   async function revoke(a) {
@@ -360,7 +402,7 @@ export default function TvMembersTab({ active = true, embedded = false }) {
     setAdjRow(null); load();
   }
   // แก้ไขข้อมูลสมาชิก (ชื่อ/USER TV/อีเมล/Trade ID)
-  function openEdit(a) { setEditRow(a); setEditForm({ display_name: a.display_name || "", username: a.username || "", email: a.email || "", trade_id: a.trade_id || "" }); }
+  function openEdit(a) { setEditRow(a); setEditForm({ display_name: a.display_name || "", username: a.username || "", email: a.email || "", trade_id: a.trade_id || "", contact_channel: a.contact_channel || "", member_type: a.member_type || "" }); }
   async function saveEdit() {
     const a = editRow; if (!a) return;
     const nextUsername = editForm.username.trim();
@@ -368,7 +410,7 @@ export default function TvMembersTab({ active = true, embedded = false }) {
     const usernameChanged = nextUsername.toLowerCase() !== String(a.username || "").trim().toLowerCase();
     if (usernameChanged && !confirm(`ย้ายสิทธิ์จาก USER TV \"${a.username}\" ไปเป็น \"${nextUsername}\"?\n\nระบบจะถอนสิทธิ์ชื่อเดิมบน TradingView แล้วให้สิทธิ์ชื่อใหม่ในสคริปต์นี้`)) return;
     setEditSaving(true);
-    const { data, error } = await supabase.functions.invoke("tradingview", { body: { action: "update_member", id: a.id, display_name: editForm.display_name, username: nextUsername, email: editForm.email, trade_id: editForm.trade_id } });
+    const { data, error } = await supabase.functions.invoke("tradingview", { body: { action: "update_member", id: a.id, display_name: editForm.display_name, username: nextUsername, email: editForm.email, trade_id: editForm.trade_id, contact_channel: editForm.contact_channel || null, member_type: editForm.member_type || null } });
     setEditSaving(false);
     if (error || !data?.ok) { setMsg("✗ แก้ไขไม่สำเร็จ: " + (data?.error || "")); return; }
     setEditRow(null);
@@ -390,7 +432,7 @@ export default function TvMembersTab({ active = true, embedded = false }) {
     const headers = [
       ...(includeIndicator ? ["Indicator"] : []),
       "ชื่อลูกค้า", "User TV", ...(canSeeNewTv ? ["อีเมล"] : []), "สถานะ", "Trade ID",
-      "หมดอายุ", "เพิ่มสิทธิ์บน TV", "Create", "คนเพิ่ม", "แก้ไขโดย",
+      "หมดอายุ", "ประเภทสมาชิก", "ช่องทาง", "เพิ่มสิทธิ์บน TV", "Create", "คนเพิ่ม", "แก้ไขโดย",
     ];
     const rows = [headers];
     const scriptNames = new Map(scripts.map((s) => [s.pine_id, s.name || s.pine_id]));
@@ -405,7 +447,7 @@ export default function TvMembersTab({ active = true, embedded = false }) {
         // CSV ใช้คำเดิม (active / expired / revoked) ไม่ใช่ป้ายไทยที่โชว์บนหน้าจอ
         // เพราะไฟล์นี้ถูกวางต่อเข้าชีตของทีม เปลี่ยนคำแล้วสูตรฝั่งนั้นพัง
         a.display_name || "—", a.username || "", ...(canSeeNewTv ? [a.email || "—"] : []), st.key,
-        a.trade_id || "—", expLabel(a), tvGrantedLabel(a), createLabel(a), a.granted_by || "—", editedBy,
+        a.trade_id || "—", expLabel(a), memberTypeLabel(a.member_type) || "—", channelLabel(a.contact_channel) || "—", tvGrantedLabel(a), createLabel(a), a.granted_by || "—", editedBy,
       ]);
     }
     const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n");
@@ -540,6 +582,14 @@ export default function TvMembersTab({ active = true, embedded = false }) {
             <div><label className="text-xs text-slate-500">USER TV</label><input value={editForm.username} onChange={(e) => setEditForm({ ...editForm, username: e.target.value })} className="w-full mt-1 rounded-lg border border-slate-300 px-3 py-2 text-sm" /></div>
             <div><label className="text-xs text-slate-500">อีเมล</label><input value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} className="w-full mt-1 rounded-lg border border-slate-300 px-3 py-2 text-sm" /></div>
             <div><label className="text-xs text-slate-500">Trade ID</label><input value={editForm.trade_id} onChange={(e) => setEditForm({ ...editForm, trade_id: e.target.value })} className="w-full mt-1 rounded-lg border border-slate-300 px-3 py-2 text-sm" /></div>
+            <div>
+              <label className="text-xs text-slate-500">ประเภทสมาชิก</label>
+              <MemberTypeSelect value={editForm.member_type} onChange={(v) => setEditForm({ ...editForm, member_type: v })} />
+            </div>
+            <div>
+              <label className="text-xs text-slate-500">ช่องทางที่ติดต่อ</label>
+              <ChannelPicker value={editForm.contact_channel} onChange={(v) => setEditForm({ ...editForm, contact_channel: v })} />
+            </div>
             {editForm.username.trim().toLowerCase() !== String(editRow.username || "").trim().toLowerCase() && (
               <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
                 ระบบจะถอนสิทธิ์ <b>{editRow.username}</b> บน TradingView แล้วให้สิทธิ์ <b>{editForm.username.trim() || "ชื่อใหม่"}</b> ในสคริปต์เดิม
@@ -645,6 +695,14 @@ export default function TvMembersTab({ active = true, embedded = false }) {
           <div>
             <label className="text-xs text-slate-500">ไอดีเทรด (XM)</label>
             <input value={tradeId} onChange={(e) => setTradeId(e.target.value)} placeholder="เลขไอดีเทรด — ต้องผ่านก่อนถึงเพิ่มได้" className="w-full mt-1 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label className="text-xs text-slate-500">ประเภทสมาชิก <span className="text-slate-400">(ไม่บังคับ)</span></label>
+            <MemberTypeSelect value={memberType} onChange={setMemberType} />
+          </div>
+          <div>
+            <label className="text-xs text-slate-500">ช่องทางที่ติดต่อ <span className="text-slate-400">(ไม่บังคับ)</span></label>
+            <ChannelPicker value={channel} onChange={setChannel} />
           </div>
           <div className="tv-form-section-title tv-form-section"><span>2</span>เลือกแบรนด์และอินดิเคเตอร์</div>
           <div>
@@ -826,7 +884,7 @@ export default function TvMembersTab({ active = true, embedded = false }) {
                   <div className="tv-rows" style={{ minWidth: tableMinW }}>
                     <div className="grid gap-3 px-4 py-2 text-[11px]" style={{ gridTemplateColumns: COLS, borderBottom: "1px solid var(--line)" }}>
                       <H k="name">ชื่อลูกค้า</H><H k="user">User TV</H>{canSeeNewTv && <H k="email">อีเมล</H>}<H k="status">สถานะ</H><H k="trade">Trade ID</H><H k="exp">หมดอายุ</H>
-                      {showAudit && <><H k="tvGranted">เพิ่มสิทธิ์บน TV</H><H k="create">สร้างเมื่อ</H><H k="by">คนเพิ่ม</H><H k="editby">แก้ไขโดย</H></>}
+                      {showAudit && <><H k="memberType">ประเภท</H><H k="channel">ช่องทาง</H><H k="tvGranted">เพิ่มสิทธิ์บน TV</H><H k="create">สร้างเมื่อ</H><H k="by">คนเพิ่ม</H><H k="editby">แก้ไขโดย</H></>}
                       <span></span>
                     </div>
                     {pageRows.length === 0 ? <div className="px-4 py-6 text-center text-xs" style={{ color: "var(--ink-3)" }}>ยังไม่มีสมาชิกในสคริปต์นี้</div> : pageRows.map((a) => {
@@ -851,6 +909,8 @@ export default function TvMembersTab({ active = true, embedded = false }) {
                           style={{ color: st.key === "expired" ? "var(--bad)" : nearExp ? "var(--warn)" : "var(--ink-2)",
                                    fontWeight: (nearExp || st.key === "expired") ? 600 : 400 }}>{expLabel(a)}</span>
                         {showAudit && <>
+                          <span className="truncate text-xs" style={{ color: "var(--ink-3)" }} title={a.member_type ? "ประเภทสมาชิก (ที่มาของสิทธิ์)" : "ยังไม่ได้ระบุประเภท"}>{memberTypeLabel(a.member_type) || "—"}</span>
+                          <span className="truncate text-xs" style={{ color: "var(--ink-3)" }} title={a.contact_channel ? "ช่องทางที่ลูกค้าติดต่อเข้ามา" : "ยังไม่ได้ระบุช่องทาง"}>{channelLabel(a.contact_channel) || "—"}</span>
                           <span className="truncate text-xs" style={{ color: "var(--ink-3)" }} title={a.tv_granted_at ? "วันที่ที่ TradingView ระบุว่าเพิ่มสิทธิ์" : "การตรวจจาก TradingView ยังไม่ส่งวันที่เพิ่มสิทธิ์"}>{tvGrantedLabel(a)}</span>
                           <span className="truncate text-xs" style={{ color: "var(--ink-3)" }}>{createLabel(a)}</span>
                           <span className="truncate text-xs" style={{ color: "var(--ink-3)" }} title={a.granted_by || ""}>{a.granted_by || "—"}</span>
