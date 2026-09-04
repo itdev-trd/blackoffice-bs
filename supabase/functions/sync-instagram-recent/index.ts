@@ -29,7 +29,9 @@ const mediaLabel = (att: any, sticker: unknown) => sticker ? "[สติกเ�
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
-    const auth = await authorizeRequest(req, { tab: ["inbox", "chat"] });
+    // allowService = ให้ cron/service เรียกได้ด้วย ไม่ใช่แค่ตอนมีคนเปิดหน้าตอบแชท
+    // (เดิมคำขอจาก service role ถูกตอบ 401 ทำให้เอาไปตั้ง cron ไม่ได้เลย)
+    const auth = await authorizeRequest(req, { tab: ["inbox", "chat"], allowService: true });
     if (!auth.ok) return json({ ok: false, error: auth.error }, auth.status);
     const body = await req.json().catch(() => ({}));
     const requested = [...new Set((Array.isArray(body?.page_ids) ? body.page_ids : []).map(String).filter(Boolean))];

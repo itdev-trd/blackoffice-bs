@@ -57,12 +57,46 @@ async function ensureAppPageWebhook(base: string, userToken: string, admin: any)
   const status = await fetchJson(`${base}/${appId}/subscriptions?access_token=${encodeURIComponent(appToken)}`, undefined, admin);
   const pageSub = (status?.data || []).find((x: any) => x.object === "page");
   const instagramSub = (status?.data || []).find((x: any) => x.object === "instagram");
+  // callback_url ที่ Meta เก็บไว้จริง = ตัวชี้ขาดว่า webhook จะถูกส่งไปที่ระบบไหน
+  // (แอปหนึ่งมี callback ได้ที่เดียวต่อ object ถ้ามีอีกระบบตั้งทับ event จะไปเข้าที่นั้นทั้งหมด)
+  const callbackOf = (sub: any) => {
+    const urls = [...new Set((sub?.fields ?? []).map((f: any) => String(f?.callback_url || "")).filter(Boolean))];
+    return urls.length ? urls.join(", ") : String(sub?.callback_url || "");
+  };
+  const fieldNames = (sub: any) => (sub?.fields ?? []).map((f: any) => ({ name: f?.name ?? null, version: f?.version ?? null }));
   return {
     success: pageSaved.success === true && instagramSaved.success === true,
     app_id: appId,
-    page: { ...pageSaved, active: pageSub?.active !== false, fields: Array.isArray(pageSub?.fields) ? pageSub.fields : [] },
-    instagram: { ...instagramSaved, active: instagramSub?.active !== false, fields: Array.isArray(instagramSub?.fields) ? instagramSub.fields : [] },
+    expected_callback_url: callbackUrl,
+    page: { ...pageSaved, active: pageSub?.active !== false, fields: fieldNames(pageSub), callback_url: callbackOf(pageSub), callback_matches: callbackOf(pageSub) === callbackUrl },
+    instagram: { ...instagramSaved, active: instagramSub?.active !== false, fields: fieldNames(instagramSub), callback_url: callbackOf(instagramSub), callback_matches: callbackOf(instagramSub) === callbackUrl },
   };
+}
+
+// อ่านการตั้งค่า webhook ของแอปแบบ read-only — action=status ต้องไม่ไปตั้ง callback ทับของใคร
+// ใช้ตรวจว่า "Meta จะส่ง event ไปที่ URL ไหน" ซึ่งเป็นคำตอบเดียวที่บอกได้ว่าทำไม webhook ไม่เข้า
+async function readAppWebhook(base: string, userToken: string, admin: any) {
+  const appSecret = Deno.env.get("META_APP_SECRET") || "";
+  const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
+  if (!appSecret) return { success: false, error: "META_APP_SECRET ไม่ครบ" };
+  const debug = await fetchJson(`${base}/debug_token?input_token=${encodeURIComponent(userToken)}&access_token=${encodeURIComponent(userToken)}`, undefined, admin);
+  const appId = debug?.data?.app_id ? String(debug.data.app_id) : "";
+  if (!appId) return { success: false, error: debug?.error?.message || "หา Meta App ID ไม่สำเร็จ" };
+  const status = await fetchJson(`${base}/${appId}/subscriptions?access_token=${encodeURIComponent(`${appId}|${appSecret}`)}`, undefined, admin);
+  if (status?.error) return { success: false, app_id: appId, error: status.error.error_user_msg || status.error.message };
+  const expected = `${supabaseUrl}/functions/v1/meta-webhook`;
+  const pick = (object: string) => {
+    const sub = (status?.data || []).find((x: any) => x.object === object);
+    const urls = [...new Set((sub?.fields ?? []).map((f: any) => String(f?.callback_url || "")).filter(Boolean))];
+    const callback = urls.length ? urls.join(", ") : String(sub?.callback_url || "");
+    return {
+      active: sub?.active !== false,
+      fields: (sub?.fields ?? []).map((f: any) => f?.name).filter(Boolean),
+      callback_url: callback,
+      callback_matches: callback === expected,
+    };
+  };
+  return { success: true, app_id: appId, expected_callback_url: expected, page: pick("page"), instagram: pick("instagram") };
 }
 
 Deno.serve(async (req) => {
@@ -71,7 +105,9 @@ Deno.serve(async (req) => {
   try {
     const body = await req.json().catch(() => ({}));
     const action = body?.action === "status" ? "status" : body?.action === "sync_comments" ? "sync_comments" : "subscribe";
-    const auth = await authorizeRequest(req, action === "sync_comments" ? { tab: "inbox", allowService: true } : { admin: true, setting: "synccfg" });
+    const auth = await authorizeRequest(req, action === "sync_comments"
+      ? { tab: "inbox", allowService: true }
+      : { admin: true, setting: "synccfg", allowService: action === "status" });
     if (!auth.ok) return json({ ok: false, error: auth.error }, auth.status);
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const selectedPageIds = action === "sync_comments" ? await getSelectedCommentPageIds(admin) : [];
@@ -121,6 +157,9 @@ Deno.serve(async (req) => {
     let mapRefreshed = false;
     let rateGuarded = false;
     let appWebhook: any = null;
+    if (action === "status") {
+      appWebhook = await readAppWebhook(base, token, admin);
+    }
     if (action === "sync_comments") {
       appWebhook = await ensureAppPageWebhook(base, token, admin);
       const mapResult = await getOrRefreshCommentAdMap(admin, base, token, selectedPageIds, { force: body?.force === true });
