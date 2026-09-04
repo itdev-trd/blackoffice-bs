@@ -24,7 +24,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getMetaToken } from "../_shared/meta.ts";
 import { getMetaPages } from "../_shared/meta-pages.ts";
-import { authorizeRequest, canAccessPage } from "../_shared/permissions.ts";
+import { authorizeRequest } from "../_shared/permissions.ts";
 import { readJsonBody } from "../_shared/security.ts";
 
 const GRAPH_BASE = "https://graph.facebook.com/v22.0";
@@ -96,9 +96,7 @@ Deno.serve(async (req) => {
       localLabels = Array.isArray(row.meta_labels) ? row.meta_labels : [];
     }
     if (!pageId) return json({ ok: false, error: "ต้องส่ง page_id" }, 400);
-    if (auth.permission && !canAccessPage(auth.permission, pageId)) {
-      return json({ ok: false, error: "ไม่มีสิทธิ์เข้าถึงเพจนี้" }, 403);
-    }
+    // สิทธิ์ตอบแชทไม่ผูกกับเพจ — ใครเข้าหน้าตอบแชทได้ ก็ตอบได้ทุกเพจและทุก LINE OA
 
     const pd = await getMetaPages(GRAPH_BASE, token, { mustIncludePageId: pageId });
     const pageTok = (pd?.data ?? []).find((p: any) => String(p.id) === pageId)?.access_token;

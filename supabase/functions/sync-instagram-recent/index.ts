@@ -4,7 +4,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getMetaToken } from "../_shared/meta.ts";
 import { getMetaPages } from "../_shared/meta-pages.ts";
-import { authorizeRequest, canAccessPage } from "../_shared/permissions.ts";
+import { authorizeRequest } from "../_shared/permissions.ts";
 import { getMetaBackgroundGuard, recordMetaUsage } from "../_shared/meta-rate.ts";
 
 const GRAPH_BASE = "https://graph.facebook.com/v22.0";
@@ -35,7 +35,7 @@ Deno.serve(async (req) => {
     if (!auth.ok) return json({ ok: false, error: auth.error }, auth.status);
     const body = await req.json().catch(() => ({}));
     const requested = [...new Set((Array.isArray(body?.page_ids) ? body.page_ids : []).map(String).filter(Boolean))];
-    if (auth.permission && requested.some((id) => !canAccessPage(auth.permission!, id))) return json({ ok: false, error: "ไม่มีสิทธิ์เข้าถึงเพจนี้" }, 403);
+    // สิทธิ์ตอบแชทไม่ผูกกับเพจ — ใครเข้าหน้าตอบแชทได้ ก็ตอบได้ทุกเพจและทุก LINE OA
 
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const guard = await getMetaBackgroundGuard(admin);
@@ -45,7 +45,6 @@ Deno.serve(async (req) => {
     const pagesData = await getMetaPages(GRAPH_BASE, token);
     let pages = (pagesData?.data ?? []).filter((p: any) => p.access_token && p.instagram_business_account?.id);
     if (requested.length) pages = pages.filter((p: any) => requested.includes(String(p.id)));
-    if (auth.permission && auth.permission.role !== "admin") pages = pages.filter((p: any) => canAccessPage(auth.permission!, String(p.id)));
     if (!pages.length) return json({ ok: true, upserted: 0, skipped: "no_instagram_pages" });
 
     // เดิมข้ามเพจที่ webhook "ปกติ" (มี event ล่าสุด) เพื่อประหยัด API — แต่ IG webhook ส่งเฉพาะข้อความจากบัญชีที่มี

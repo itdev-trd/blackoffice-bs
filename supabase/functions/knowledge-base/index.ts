@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { authorizeRequest, canAccessPage } from "../_shared/permissions.ts";
+import { authorizeRequest } from "../_shared/permissions.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -43,7 +43,7 @@ Deno.serve(async (req) => {
     if (action === "search" && !pageId) return json({ ok: false, error: "ต้องระบุเพจ" }, 400);
     const auth = await authorizeRequest(req, adminOnly ? { admin: true, setting: "chat" } : { tab: "inbox", pageId });
     if (!auth.ok) return json({ ok: false, error: auth.error }, auth.status);
-    if (pageId && auth.permission && !canAccessPage(auth.permission, pageId)) return json({ ok: false, error: "ไม่มีสิทธิ์เข้าถึงเพจนี้" }, 403);
+    // สิทธิ์ตอบแชทไม่ผูกกับเพจ — ใครเข้าหน้าตอบแชทได้ ก็ตอบได้ทุกเพจและทุก LINE OA (คลังคำตอบใช้ตอนตอบแชทจึงเปิดตามกัน)
     const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
     if (action === "search") {

@@ -11,7 +11,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import webpush from "npm:web-push@3.6.7";
-import { authorizeRequest, canAccessPage } from "../_shared/permissions.ts";
+import { authorizeRequest } from "../_shared/permissions.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -99,9 +99,7 @@ Deno.serve(async (req) => {
       const sub = body?.subscription;
       if (!sub?.endpoint || !sub?.keys?.p256dh || !sub?.keys?.auth) return json({ ok: false, error: "subscription ไม่ครบ" });
       const requestedPages = Array.isArray(body?.pages) ? body.pages.map(String) : [];
-      if (auth.permission!.role !== "admin" && requestedPages.some((pageId: string) => !canAccessPage(auth.permission!, pageId))) {
-        return json({ ok: false, error: "มีเพจที่อยู่นอกสิทธิ์ของผู้ใช้" }, 403);
-      }
+      // สิทธิ์ตอบแชทไม่ผูกกับเพจ — ใครเข้าหน้าตอบแชทได้ ก็ตอบได้ทุกเพจและทุก LINE OA — การแจ้งเตือนแชทค้างจึงเลือกเพจไหนก็ได้
       const deviceId = body?.device_id ? String(body.device_id).slice(0, 80) : null;
       const { error: upErr } = await admin.from("push_subscriptions").upsert({
         email, endpoint: String(sub.endpoint),

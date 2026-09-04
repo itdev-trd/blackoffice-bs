@@ -10,7 +10,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getMetaToken } from "../_shared/meta.ts";
 import { getMetaPages } from "../_shared/meta-pages.ts";
-import { authorizeRequest, canAccessPage } from "../_shared/permissions.ts";
+import { authorizeRequest } from "../_shared/permissions.ts";
 import { readJsonBody } from "../_shared/security.ts";
 
 const GRAPH_VERSION = "v22.0"; // อัปจาก v19 (sunset ต้นปี 2026)
@@ -77,9 +77,7 @@ Deno.serve(async (req) => {
     if (onlyId) {
       const { data } = await admin.from("chat_customers").select(COLS).eq("id", onlyId).maybeSingle();
       if (!data) throw new Error("ไม่พบลูกค้า id นี้");
-      if (auth.permission && !canAccessPage(auth.permission, data.page_id)) {
-        return json({ ok: false, error: "ไม่มีสิทธิ์เข้าถึงเพจนี้" }, 403);
-      }
+      // สิทธิ์ตอบแชทไม่ผูกกับเพจ — ส่งป้ายจากหน้าตอบแชทได้ทุกเพจ (โหมด bulk ยังเป็น admin เท่านั้น)
       if (data.source === "instagram") {
         return json({ ok: true, processed: 0, total: 1, done: true, results: [{ name: data.customer_name || data.psid, skipped: true, unsupported: "instagram_labels", error: null }], note: "Instagram API ไม่รองรับ Facebook Page custom labels — สถานะยังบันทึกในแอปตามปกติ" });
       }

@@ -113,7 +113,8 @@ Deno.serve(async (req) => {
     const after = body?.after ? String(body.after) : null;
     const job = body?.job ? String(body.job) : "sync";  // "sync" = ดึงข้อมูลอย่างเดียว | "classify" = AI เล็ก | "verify" = AI ใหญ่
     const auth = (job === "read_status" || job === "recent") && !full
-      ? await authorizeRequest(req, { tab: ["inbox", "chat"], pageId: onlyPage, allowService: true })
+      // สิทธิ์ตอบแชทไม่ผูกกับเพจ — ใครเข้าหน้าตอบแชทได้ ก็ตอบได้ทุกเพจและทุก LINE OA
+      ? await authorizeRequest(req, { tab: ["inbox", "chat"], allowService: true })
       : await authorizeRequest(req, { admin: true, setting: "synccfg", pageId: onlyPage, allowService: true });
     if (!auth.ok) {
       return new Response(JSON.stringify({ ok: false, error: auth.error }), { status: auth.status, headers: { ...corsHeaders, "content-type": "application/json" } });

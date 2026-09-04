@@ -2,7 +2,7 @@
 // บล็อก/ปลดบล็อกแชทลูกค้า (สแปม) — ตั้ง blocked_at ผ่าน service role (client แก้เองไม่ได้ตาม RLS)
 // body: { id: string, block: boolean, reason?: string }
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { authorizeRequest, canAccessPage } from "../_shared/permissions.ts";
+import { authorizeRequest } from "../_shared/permissions.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -24,12 +24,9 @@ Deno.serve(async (req) => {
 
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
-    // เช็คสิทธิ์เพจของแชทนี้ (admin ผ่านหมด, พนักงานเฉพาะเพจที่ได้รับสิทธิ์)
+    // สิทธิ์ตอบแชทไม่ผูกกับเพจ — ใครเข้าหน้าตอบแชทได้ ก็ตอบได้ทุกเพจและทุก LINE OA
     const { data: row } = await admin.from("chat_customers").select("id, page_id").eq("id", id).maybeSingle();
     if (!row) return json({ ok: false, error: "ไม่พบแชทนี้" }, 404);
-    if (auth.permission && auth.permission.role !== "admin" && !canAccessPage(auth.permission, String(row.page_id))) {
-      return json({ ok: false, error: "ไม่มีสิทธิ์เข้าถึงเพจนี้" }, 403);
-    }
 
     const nowIso = new Date().toISOString();
     const patch = block

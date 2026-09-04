@@ -2,7 +2,7 @@
 // แอดมินป้อนข้อมูลลูกค้าเองจากหน้าตอบแชท → บันทึกลง chat_customers + มาร์ค manual_data (ล็อกไม่ให้ AI แก้)
 // body: { id, trade_id?, username?, phone?, email? }  (ค่าว่าง = ล้างค่า)
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { authorizeRequest, canAccessPage } from "../_shared/permissions.ts";
+import { authorizeRequest } from "../_shared/permissions.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -24,9 +24,7 @@ Deno.serve(async (req) => {
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const { data: row } = await admin.from("chat_customers").select("id, page_id, psid, source, entry_ad_id").eq("id", id).maybeSingle();
     if (!row) return json({ ok: false, error: "ไม่พบแชทนี้" }, 404);
-    if (auth.permission && auth.permission.role !== "admin" && !canAccessPage(auth.permission, String(row.page_id))) {
-      return json({ ok: false, error: "ไม่มีสิทธิ์เข้าถึงเพจนี้" }, 403);
-    }
+    // สิทธิ์ตอบแชทไม่ผูกกับเพจ — ใครเข้าหน้าตอบแชทได้ ก็ตอบได้ทุกเพจและทุก LINE OA
 
     // DM ที่แอดมินเริ่มจากคอมเมนต์ Ads อาจได้ entry_ad_id แล้ว แต่ source เดิมยังเป็น null
     // ตรวจ referral ฝั่ง server ก่อนบันทึก เพื่อไม่เชื่อ ad id ที่ส่งมาจาก client

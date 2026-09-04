@@ -7,7 +7,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getMetaToken } from "../_shared/meta.ts";
 import { getMetaPages } from "../_shared/meta-pages.ts";
-import { authorizeRequest, canAccessPage } from "../_shared/permissions.ts";
+import { authorizeRequest } from "../_shared/permissions.ts";
 import { getLineConfig, lineApi } from "../_shared/line.ts";
 import { readJsonBody } from "../_shared/security.ts";
 import { getOpenAIKey } from "../_shared/openai.ts";
@@ -291,9 +291,7 @@ Deno.serve(async (req) => {
     if (action === "saved_replies") {
       const pageId = body?.page_id ? String(body.page_id) : null;
       if (!pageId) throw new Error("ต้องส่ง page_id");
-      if (auth.permission && !canAccessPage(auth.permission, pageId)) {
-        return json({ ok: false, error: "ไม่มีสิทธิ์เข้าถึงเพจนี้" }, 403);
-      }
+      // สิทธิ์ตอบแชทไม่ผูกกับเพจ — ใครเข้าหน้าตอบแชทได้ ก็ตอบได้ทุกเพจและทุก LINE OA
       const token = await getMetaToken();
       if (!token) throw new Error("ยังไม่ได้ตั้งค่า Meta access token");
       const pd = await getMetaPages(GRAPH_BASE, token, { mustIncludePageId: pageId });
@@ -317,9 +315,7 @@ Deno.serve(async (req) => {
 
     const { data: row } = await admin.from("chat_customers").select("id, page_id, page_name, psid, transcript, cust_lang, country, customer_name, profile_pic, unread, source, last_user_text, last_message_at, comment_post_id, comment_permalink, entry_ad_id, comment_ad_name").eq("id", id).maybeSingle();
     if (!row) throw new Error("ไม่พบบทสนทนา");
-    if (auth.permission && !canAccessPage(auth.permission, row.page_id)) {
-      return json({ ok: false, error: "ไม่มีสิทธิ์เข้าถึงเพจนี้" }, 403);
-    }
+    // สิทธิ์ตอบแชทไม่ผูกกับเพจ — ใครเข้าหน้าตอบแชทได้ ก็ตอบได้ทุกเพจและทุก LINE OA
     const transcript = Array.isArray(row.transcript) ? row.transcript : [];
 
     // ---------- แปลข้อความลูกค้าเป็นไทย + ตรวจภาษา/ประเทศ ----------

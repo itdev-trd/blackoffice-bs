@@ -76,7 +76,8 @@ Deno.serve(async (req) => {
     if (dateFilter === "custom" && (!/^\d{4}-\d{2}-\d{2}$/.test(dateFrom) || !/^\d{4}-\d{2}-\d{2}$/.test(dateTo) || dateFrom > dateTo)) {
       return json({ ok: false, error: "ช่วงวันที่กำหนดเองไม่ถูกต้อง" }, 400);
     }
-    const auth = await authorizeRequest(req, { tab: "customerdb", pageId });
+    // สิทธิ์ตอบแชทไม่ผูกกับเพจ — ใครเข้าหน้าตอบแชทได้ ก็ตอบได้ทุกเพจและทุก LINE OA (รีพอร์ตอ่านจากแชทชุดเดียวกัน จึงไม่จำกัดรายเพจ)
+    const auth = await authorizeRequest(req, { tab: "customerdb" });
     if (!auth.ok) return json({ ok: false, error: auth.error }, auth.status);
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const key = await cacheKey(pageId, dateFilter, dateFrom, dateTo);
