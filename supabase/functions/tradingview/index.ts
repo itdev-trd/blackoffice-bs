@@ -18,8 +18,12 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { authorizeRequest } from "../_shared/permissions.ts";
 import { readJsonBody } from "../_shared/security.ts";
+import { tvValidate, tvListUsers, tvCheckAccess, tvGrant, tvRevoke, tvPing } from "../_shared/tradingview-direct.ts";
 
 const URL_KEY = "n8n_tv_webhook_url";
+// สวิตช์เลือกทางคุยกับ TradingView: "direct" = ยิงตรงจากที่นี่ · "n8n" = ผ่าน webhook แบบเดิม
+// ค่าเริ่มต้นเป็น n8n เพื่อไม่ให้พฤติกรรมเปลี่ยนเองโดยไม่ได้ตั้งใจ — ต้องไปสลับในหน้าตั้งค่า
+const TRANSPORT_KEY = "tv_transport";
 const SECRET_KEY = "n8n_tv_secret";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -44,6 +48,14 @@ async function pineBrandId(pineId: string): Promise<number | null> {
   const { data } = await admin().from("tv_scripts").select("brand_id").eq("pine_id", pineId).maybeSingle();
   return data?.brand_id ?? null;
 }
+// บันทึกทุกครั้งที่คุยกับ TradingView ลง tv_api_log
+// ตอนใช้ n8n เราได้ execution log ของ n8n มาดูฟรี พอยิงตรงความสามารถนั้นหายไป
+// ถ้าไม่เก็บเอง เวลาให้สิทธิ์ไม่สำเร็จจะไม่มีทางรู้ว่า TradingView ตอบอะไร — ตารางนี้มาแทน
+// เขียน log ห้ามทำให้งานหลักล้ม จึงกลืน error ของตัวเองทิ้งเสมอ
+async function logTv(entry: Record<string, unknown>) {
+  try { await admin().from("tv_api_log").insert(entry); } catch { /* log พังไม่ควรทำให้การให้สิทธิ์พัง */ }
+}
+
 // เรียก n8n webhook (n8n เป็นตัวคุยกับ TradingView จริง) — ส่งคุกกี้ของแบรนด์ไปใน payload ให้ n8n ใช้
 async function callN8n(payload: Record<string, unknown>, cookie: BrandCookie = {}): Promise<any> {
   const url = await getSetting(URL_KEY);
@@ -60,6 +72,67 @@ async function callN8n(payload: Record<string, unknown>, cookie: BrandCookie = {
   } catch {
     // n8n ตอบไม่ใช่ JSON — มักคือ response ว่าง (workflow ไม่ active / ไม่มี node Respond / Respond ตั้งค่าผิด) หรือหน้า error ของ n8n
     return { ok: false, error: `n8n ตอบไม่ใช่ JSON (HTTP ${r.status}): ${txt.slice(0, 200) || "(ว่างเปล่า — เช็คว่า workflow Active + node Respond ต่อจาก TV Access + Webhook ตั้ง Respond = 'Using Respond to Webhook node')"}` };
+  }
+}
+
+// ---- ตัวกลางเลือกทาง: ยิงตรง หรือผ่าน n8n ----
+// ทุกเส้นทางเดิมที่เคยเรียก callN8n ย้ายมาเรียกตัวนี้แทน จะได้เปลี่ยนทางที่เดียวและได้ log ครบทั้งสองแบบ
+let TRANSPORT_CACHE: string | null = null;
+async function transport(): Promise<"direct" | "n8n"> {
+  if (TRANSPORT_CACHE === null) TRANSPORT_CACHE = (await getSetting(TRANSPORT_KEY)) || "n8n";
+  return TRANSPORT_CACHE === "direct" ? "direct" : "n8n";
+}
+
+async function callTv(payload: Record<string, unknown>, cookie: BrandCookie = {}, meta: { actor?: string | null; brand_id?: number | null } = {}): Promise<any> {
+  const action = String(payload.action || "");
+  const username = payload.username ? String(payload.username) : null;
+  const pine_id = payload.pine_id ? String(payload.pine_id) : null;
+  const mode = await transport();
+  const started = Date.now();
+  let res: any;
+  let endpoint = mode === "n8n" ? "(n8n webhook)" : "";
+  let http: number | null = null;
+
+  try {
+    if (mode === "direct") {
+      const exp = payload.expiration === undefined ? null : (payload.expiration as string | null);
+      const r =
+        action === "grant"        ? await tvGrant(username!, pine_id!, exp, cookie)
+      : action === "revoke"       ? await tvRevoke(username!, pine_id!, cookie)
+      : action === "validate"     ? await tvValidate(username!, cookie)
+      : action === "check_access" ? await tvCheckAccess(username!, pine_id!, cookie)
+      : action === "list_users"   ? await tvListUsers(pine_id!, cookie)
+      : action === "ping"         ? await tvPing(pine_id || "", cookie)
+      : { ok: false, endpoint: "-", error: `ไม่รองรับ action "${action}" ในโหมดยิงตรง` };
+      endpoint = String(r.endpoint || "");
+      http = (r.http_status as number) ?? null;
+      // ตัด raw ออกก่อนส่งต่อ — เก็บไว้ใน log อย่างเดียว ไม่ให้หลุดขึ้นหน้าเว็บ
+      const { raw, _full, ...clean } = r as Record<string, unknown>;
+      await logTv({ transport: mode, action, username, pine_id, brand_id: meta.brand_id ?? null, endpoint,
+        http_status: http, ok: !!r.ok, duration_ms: Date.now() - started,
+        error: r.ok ? null : String(r.error || ""), response: typeof raw === "string" ? raw.slice(0, 2000) : null, actor: meta.actor ?? null });
+      res = clean;
+    } else {
+      res = await callN8n(payload, cookie);
+      await logTv({ transport: mode, action, username, pine_id, brand_id: meta.brand_id ?? null, endpoint,
+        http_status: null, ok: !!res?.ok, duration_ms: Date.now() - started,
+        error: res?.ok ? null : String(res?.error || ""), response: JSON.stringify(res).slice(0, 2000), actor: meta.actor ?? null });
+    }
+    // ทั้งสองทางส่งชื่อฟิลด์ต่างกัน: ยิงตรงคืน has_access แต่ n8n คืน found
+    // ผู้เรียกอ่าน res.found อย่างเดียว จึงได้ undefined ทุกครั้งในโหมดยิงตรง
+    // แล้วสรุปว่า "ไม่พบสิทธิ์" ทั้งที่ TradingView ตอบว่าพบ — ปรับให้มีทั้งสองชื่อ
+    if (res && typeof res === "object") {
+      const r = res as Record<string, unknown>;
+      if (r.found === undefined && r.has_access !== undefined) r.found = r.has_access;
+      if (r.has_access === undefined && r.found !== undefined) r.has_access = r.found;
+    }
+    return res;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    await logTv({ transport: mode, action, username, pine_id, brand_id: meta.brand_id ?? null, endpoint,
+      http_status: http, ok: false, duration_ms: Date.now() - started, error: msg, actor: meta.actor ?? null });
+    // คงพฤติกรรมเดิม: callN8n เคย throw ผู้เรียกบางจุดดักไว้แล้ว
+    throw e;
   }
 }
 
@@ -103,7 +176,7 @@ async function verifyTvAccessRow(
   const nowIso = new Date().toISOString();
   let res: any;
   try {
-    res = await callN8n({ action: "check_access", username: row.username, pine_id: row.pine_id }, cookie);
+    res = await callTv({ action: "check_access", username: row.username, pine_id: row.pine_id }, cookie, { brand_id: row.brand_id ?? null });
   } catch (e) {
     res = { ok: false, error: String(e instanceof Error ? e.message : e) };
   }
@@ -152,7 +225,7 @@ Deno.serve(async (req) => {
       for (const r of rows ?? []) {
         try {
           const cookie = await getBrandCookie(r.brand_id ?? (await pineBrandId(r.pine_id)));
-          const res = await callN8n({ action: "revoke", username: r.username, pine_id: r.pine_id }, cookie);
+          const res = await callTv({ action: "revoke", username: r.username, pine_id: r.pine_id }, cookie);
           if (!res?.ok) throw new Error(res?.error || "n8n revoke failed");
           await db.from("tv_access").update({
             status: "expired",
@@ -190,7 +263,7 @@ Deno.serve(async (req) => {
         if (!pineId) continue;
         try {
           const cookie = await getBrandCookie(Number(script.brand_id) || null);
-          const res = await callN8n({ action: "list_users", pine_id: pineId }, cookie);
+          const res = await callTv({ action: "list_users", pine_id: pineId }, cookie);
           if (!res?.ok) throw new Error(String(res?.error || "n8n list_users failed"));
           if (res.complete !== true) throw new Error("TradingView ส่งรายการมาไม่ครบ จึงไม่เปลี่ยนสถานะสมาชิก");
           const tvUsers = tvUserMap(res.users);
@@ -254,7 +327,30 @@ Deno.serve(async (req) => {
 
     if (action === "get_webhook") {
       if (!isAdmin) return json({ ok: false, error: "เฉพาะแอดมิน" }, 403);
-      return json({ ok: true, url: await getSetting(URL_KEY), has_secret: !!(await getSetting(SECRET_KEY)) });
+      return json({ ok: true, url: await getSetting(URL_KEY), has_secret: !!(await getSetting(SECRET_KEY)), transport: await transport() });
+    }
+
+    // สลับทางคุยกับ TradingView: ยิงตรง (ไม่ต้องใช้ n8n) หรือผ่าน n8n แบบเดิม
+    if (action === "set_transport") {
+      if (!isAdmin) return json({ ok: false, error: "เฉพาะแอดมิน" }, 403);
+      const mode = body?.transport === "direct" ? "direct" : "n8n";
+      await admin().from("app_secrets").upsert({ key: TRANSPORT_KEY, value: mode }, { onConflict: "key" });
+      TRANSPORT_CACHE = mode;   // ล้างแคชในตัวเอง ไม่งั้นต้องรอ instance ตายก่อนถึงมีผล
+      return json({ ok: true, transport: mode });
+    }
+
+    // ประวัติการคุยกับ TradingView — มาแทน execution log ของ n8n
+    if (action === "logs") {
+      if (!isAdmin) return json({ ok: false, error: "เฉพาะแอดมิน" }, 403);
+      const limit = Math.min(200, Math.max(1, Number(body?.limit) || 50));
+      let q = admin().from("tv_api_log")
+        .select("id, at, transport, action, username, pine_id, endpoint, http_status, ok, duration_ms, error, response, actor")
+        .order("at", { ascending: false }).limit(limit);
+      if (body?.only_failed === true) q = q.eq("ok", false);
+      if (body?.username) q = q.eq("username", String(body.username));
+      const { data, error } = await q;
+      if (error) return json({ ok: false, error: error.message }, 500);
+      return json({ ok: true, rows: data ?? [] });
     }
 
     // ---- จัดการแบรนด์ TradingView (คุกกี้/เพจ/โชว์ในหน้าจัดการ) ----
@@ -316,7 +412,7 @@ Deno.serve(async (req) => {
       const q = db.from("tv_scripts").select("pine_id");
       const { data: sc } = await (brandId ? q.eq("brand_id", brandId) : q).limit(1).maybeSingle();
       try {
-        const res = await callN8n({ action: "ping", pine_id: sc?.pine_id || "" }, cookie);
+        const res = await callTv({ action: "ping", pine_id: sc?.pine_id || "" }, cookie);
         return json({ ok: true, reachable: true, authed: res?.authed === true, status_code: res?.status_code, sample: res?.sample, sid_len: res?.sid_len, sign_len: res?.sign_len });
       } catch (e) {
         return json({ ok: true, reachable: false, error: String(e instanceof Error ? e.message : e) });
@@ -380,7 +476,7 @@ Deno.serve(async (req) => {
         // ถอนชื่อเดิมก่อนตามเจตนาการแก้ไข แล้วให้สิทธิ์ชื่อใหม่ด้วยวันหมดอายุเดิม
         let revokeOld: any;
         try {
-          revokeOld = await callN8n({ action: "revoke", username: oldUsername, pine_id: current.pine_id }, cookie);
+          revokeOld = await callTv({ action: "revoke", username: oldUsername, pine_id: current.pine_id }, cookie);
         } catch (e) {
           return json({ ok: false, error: `ถอนสิทธิ์ USER TV เดิมไม่สำเร็จ: ${String(e instanceof Error ? e.message : e)}` });
         }
@@ -388,15 +484,15 @@ Deno.serve(async (req) => {
 
         let grantNew: any;
         try {
-          grantNew = await callN8n({ action: "grant", username: requestedUsername, pine_id: current.pine_id, expiration: current.expiration }, cookie);
+          grantNew = await callTv({ action: "grant", username: requestedUsername, pine_id: current.pine_id, expiration: current.expiration }, cookie);
         } catch (e) {
           // ไม่แน่ใจว่าปลายทางได้รับคำสั่งหรือไม่ จึงคืนสิทธิ์เดิมไว้ก่อน
-          await callN8n({ action: "grant", username: oldUsername, pine_id: current.pine_id, expiration: current.expiration }, cookie).catch(() => null);
+          await callTv({ action: "grant", username: oldUsername, pine_id: current.pine_id, expiration: current.expiration }, cookie).catch(() => null);
           return json({ ok: false, error: `ให้สิทธิ์ USER TV ใหม่ไม่สำเร็จ: ${String(e instanceof Error ? e.message : e)}` });
         }
         if (!grantNew?.ok) {
           // ชดเชยสิทธิ์เดิมทันที หากเพิ่มชื่อใหม่ไม่สำเร็จ
-          await callN8n({ action: "grant", username: oldUsername, pine_id: current.pine_id, expiration: current.expiration }, cookie).catch(() => null);
+          await callTv({ action: "grant", username: oldUsername, pine_id: current.pine_id, expiration: current.expiration }, cookie).catch(() => null);
           return json({ ok: false, error: `ให้สิทธิ์ USER TV ใหม่ไม่สำเร็จ: ${grantNew?.error || "ลองใหม่"}` });
         }
         patch.username = String(grantNew.username || requestedUsername).trim();
@@ -410,8 +506,8 @@ Deno.serve(async (req) => {
         if (usernameChanged) {
           // ฐานข้อมูลเขียนไม่สำเร็จ: คืนสภาพสิทธิ์ให้ชื่อเดิมและถอนชื่อใหม่
           const cookie = await getBrandCookie(Number(current.brand_id) || await pineBrandId(current.pine_id));
-          await callN8n({ action: "revoke", username: String(patch.username), pine_id: current.pine_id }, cookie).catch(() => null);
-          await callN8n({ action: "grant", username: current.username, pine_id: current.pine_id, expiration: current.expiration }, cookie).catch(() => null);
+          await callTv({ action: "revoke", username: String(patch.username), pine_id: current.pine_id }, cookie).catch(() => null);
+          await callTv({ action: "grant", username: current.username, pine_id: current.pine_id, expiration: current.expiration }, cookie).catch(() => null);
         }
         return json({ ok: false, error: error.message });
       }
@@ -444,7 +540,7 @@ Deno.serve(async (req) => {
       const nowIso = new Date().toISOString();
       let res: any;
       try {
-        res = await callN8n({ action: "check_access", username: row.username, pine_id: row.pine_id }, cookie);
+        res = await callTv({ action: "check_access", username: row.username, pine_id: row.pine_id }, cookie);
       } catch (e) {
         res = { ok: false, error: String(e instanceof Error ? e.message : e) };
       }
@@ -475,7 +571,7 @@ Deno.serve(async (req) => {
       const u = String(body?.username || "").trim();
       if (!u) return json({ ok: false, error: "ไม่มี username" });
       const cookie = await getBrandCookie(Number(body?.brand_id) || null);
-      const res = await callN8n({ action: "validate", username: u }, cookie);
+      const res = await callTv({ action: "validate", username: u }, cookie, { actor: auth.permission?.email ?? null });
       return json({ ok: true, exists: !!res?.username, username: res?.username || null });
     }
 
@@ -503,7 +599,7 @@ Deno.serve(async (req) => {
         try {
           const brand_id = await pineBrandId(pine_id);         // แบรนด์ของสคริปต์นี้ → ใช้คุกกี้ของแบรนด์นั้น
           const cookie = await getBrandCookie(brand_id);
-          const res = await callN8n({ action: "grant", username, pine_id, expiration }, cookie);
+          const res = await callTv({ action: "grant", username, pine_id, expiration }, cookie, { actor: auth.permission?.email ?? null, brand_id });
           if (!res?.ok) { results.push({ pine_id, ok: false, error: res?.error || `n8n ตอบ: ${JSON.stringify(res).slice(0, 250)}` }); continue; }
           realUser = res.username || username;
           // มีแถวเดิมอยู่แล้วไหม → ถ้ามี = "แก้ไข" (ไม่ทับคนเพิ่ม/วันเพิ่มเดิม แต่บันทึกคนแก้+เวลาแก้)
@@ -539,7 +635,7 @@ Deno.serve(async (req) => {
       const pine_id = String(body?.pine_id || "").trim();
       if (!username || !pine_id) return json({ ok: false, error: "ต้องมี username และ pine_id" });
       const cookie = await getBrandCookie(await pineBrandId(pine_id));
-      const res = await callN8n({ action: "revoke", username, pine_id }, cookie);
+      const res = await callTv({ action: "revoke", username, pine_id }, cookie, { actor: auth.permission?.email ?? null });
       if (!res?.ok) return json({ ok: false, error: res?.error || "n8n revoke failed" });
       // ถอนสิทธิ์บน TradingView ก่อน แล้วตรวจซ้ำทันทีเพื่อให้ตารางสะท้อนผลจริง
       const nowIso = new Date().toISOString();

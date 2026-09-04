@@ -41,20 +41,28 @@ function statusChip(effective) {
   return <span className={`inline-block rounded-full border px-2 py-0.5 text-[11px] font-medium ${cls}`}>{label}</span>;
 }
 
-const baht = (n) => (n || n === 0 ? `฿${Math.round(n).toLocaleString()}` : "—");
+// จำนวนเงินต้องแสดงทศนิยม 2 ตำแหน่งเสมอ — ตัวเลขพวกนี้ถูกเอาไปกระทบยอดกับฝ่ายบัญชี
+// เดิม baht() ปัดเป็นจำนวนเต็ม ทำให้ ฿9,331.87 กลายเป็น ฿9,332 ซึ่งไม่ตรงกับ Ads Manager
+// และ money2() เดิมใช้ toFixed ตรงๆ จึงไม่มีตัวคั่นหลักพัน (9331.87 แทน 9,331.87)
+const money = (n) =>
+  (n || n === 0 ? `฿${Number(n).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—");
 const int = (n) => (n || n === 0 ? Math.round(n).toLocaleString() : "—");
 const pct = (n) => (n || n === 0 ? `${n.toFixed(2)}%` : "—");
-const money2 = (n) => (n || n === 0 ? `฿${n.toFixed(2)}` : "—");
 
-// แคมเปญยิงให้คนทักแชทวัดผลด้วย "จำนวนบทสนทนา" แคมเปญเก็บลีดวัดด้วย "ลีด"
-// เลือกคอลัมน์ผลลัพธ์ให้ตรงกับสิ่งที่แคมเปญนั้นซื้อ ไม่งั้นเห็น "—" แล้วเข้าใจผิดว่าไม่มีผล
+// คอลัมน์ "ผลลัพธ์" ต้องตรงกับที่ Ads Manager นับ ซึ่งขึ้นกับ optimization_goal ของชุดโฆษณา
+// ตอนนี้ backend ตัดสินให้แล้ว (_shared/ad-metrics.ts) หน้าเว็บแค่แสดง
+//
+// เดิมตรงนี้ไล่ลำดับตายตัว leads > conversations > link_clicks ซึ่งผิดกับแคมเปญที่ซื้อบทสนทนา:
+// เทียบกับ Ads Manager แล้วของเราขึ้น 222 ลีด ทั้งที่ Meta รายงาน 386 บทสนทนา
+// ต้นทุน/ผลลัพธ์เลยเพี้ยนตาม (฿42.04 แทน ฿24.18) — ตัวเลขในแคชยังไม่มี result_* จึงคงทางเดิมไว้เป็น fallback
 function resultOf(m) {
   if (!m) return { label: "—", value: null, cost: null };
-  if (m.leads > 0) return { label: "ลีด", value: m.leads, cost: m.cpl };
-  if (m.conversations > 0) {
-    return { label: "บทสนทนา", value: m.conversations, cost: m.conversations > 0 ? m.spend / m.conversations : null };
+  if (m.result_type) {
+    return { label: m.result_label || m.result_type, value: m.result_value ?? 0, cost: m.result_cost ?? null };
   }
-  if (m.link_clicks > 0) return { label: "คลิกลิงก์", value: m.link_clicks, cost: m.link_clicks > 0 ? m.spend / m.link_clicks : null };
+  if (m.leads > 0) return { label: "ลีด", value: m.leads, cost: m.cpl };
+  if (m.conversations > 0) return { label: "บทสนทนา", value: m.conversations, cost: m.spend / m.conversations };
+  if (m.link_clicks > 0) return { label: "คลิกลิงก์", value: m.link_clicks, cost: m.spend / m.link_clicks };
   return { label: "—", value: null, cost: null };
 }
 
@@ -213,8 +221,11 @@ export default function AdsTable() {
     (a, r) => ({
       spend: a.spend + (r.metrics?.spend || 0),
       impressions: a.impressions + (r.metrics?.impressions || 0),
+      // การเข้าถึงเป็นจำนวนคน "ไม่ซ้ำ" การบวกข้ามแคมเปญจึงนับคนเดิมซ้ำได้
+      // Ads Manager เองก็รวมแบบ dedup ให้ ตัวเลขนี้จึงเป็นขอบบน ไม่ใช่ค่าจริง — กำกับไว้ในหัวข้อ
+      reach: a.reach + (r.metrics?.reach || 0),
     }),
-    { spend: 0, impressions: 0 }
+    { spend: 0, impressions: 0, reach: 0 }
   );
 
   return (
@@ -298,6 +309,7 @@ export default function AdsTable() {
               <th className="px-3 py-2.5 text-right font-medium">ต้นทุน/ผลลัพธ์</th>
               <th className="px-3 py-2.5 text-right font-medium">ใช้จ่ายไป</th>
               <th className="px-3 py-2.5 text-right font-medium">อิมเพรสชัน</th>
+              <th className="px-3 py-2.5 text-right font-medium">การเข้าถึง</th>
               <th className="px-3 py-2.5 text-right font-medium">CTR</th>
               <th className="px-3 py-2.5" />
             </tr>
@@ -340,14 +352,15 @@ export default function AdsTable() {
                     </div>
                   </td>
                   <td className="px-3 py-3">{statusChip(r.effective_status)}</td>
-                  <td className="px-3 py-3 text-right tabular-nums text-slate-600">{baht(r.daily_budget_thb)}</td>
+                  <td className="px-3 py-3 text-right tabular-nums text-slate-600">{money(r.daily_budget_thb)}</td>
                   <td className="px-3 py-3 text-right tabular-nums">
                     <div className="font-semibold text-slate-800">{int(res.value)}</div>
                     {res.value !== null && <div className="text-[11px] text-slate-400">{res.label}</div>}
                   </td>
-                  <td className="px-3 py-3 text-right tabular-nums text-slate-600">{money2(res.cost)}</td>
-                  <td className="px-3 py-3 text-right tabular-nums font-medium text-slate-800">{baht(r.metrics?.spend)}</td>
+                  <td className="px-3 py-3 text-right tabular-nums text-slate-600">{money(res.cost)}</td>
+                  <td className="px-3 py-3 text-right tabular-nums font-medium text-slate-800">{money(r.metrics?.spend)}</td>
                   <td className="px-3 py-3 text-right tabular-nums text-slate-600">{int(r.metrics?.impressions)}</td>
+                  <td className="px-3 py-3 text-right tabular-nums text-slate-600">{int(r.metrics?.reach)}</td>
                   <td className="px-3 py-3 text-right tabular-nums text-slate-600">{pct(r.metrics?.ctr)}</td>
                   <td className="px-3 py-3 text-right">
                     {canDrill && (
@@ -367,8 +380,11 @@ export default function AdsTable() {
                 <td className="px-4 py-2.5" colSpan={6}>
                   รวม {rows.length} รายการ
                 </td>
-                <td className="px-3 py-2.5 text-right tabular-nums">{baht(totals.spend)}</td>
+                <td className="px-3 py-2.5 text-right tabular-nums">{money(totals.spend)}</td>
                 <td className="px-3 py-2.5 text-right tabular-nums">{int(totals.impressions)}</td>
+                <td className="px-3 py-2.5 text-right tabular-nums" title="ผลรวมตรงๆ ยังไม่ตัดคนซ้ำระหว่างแคมเปญ จึงสูงกว่าตัวเลขรวมใน Ads Manager ได้">
+                  ~{int(totals.reach)}
+                </td>
                 <td colSpan={2} />
               </tr>
             )}
@@ -399,10 +415,10 @@ export default function AdsTable() {
                 </button>
               </div>
               <div className="grid grid-cols-2 gap-2 text-[12.5px]">
-                <div><span className="text-slate-400">ใช้จ่ายไป</span> <span className="font-medium text-slate-800">{baht(r.metrics?.spend)}</span></div>
-                <div><span className="text-slate-400">งบ/วัน</span> <span className="text-slate-700">{baht(r.daily_budget_thb)}</span></div>
+                <div><span className="text-slate-400">ใช้จ่ายไป</span> <span className="font-medium text-slate-800">{money(r.metrics?.spend)}</span></div>
+                <div><span className="text-slate-400">งบ/วัน</span> <span className="text-slate-700">{money(r.daily_budget_thb)}</span></div>
                 <div><span className="text-slate-400">{res.label}</span> <span className="font-medium text-slate-800">{int(res.value)}</span></div>
-                <div><span className="text-slate-400">ต้นทุน/ผล</span> <span className="text-slate-700">{money2(res.cost)}</span></div>
+                <div><span className="text-slate-400">ต้นทุน/ผล</span> <span className="text-slate-700">{money(res.cost)}</span></div>
                 <div><span className="text-slate-400">อิมเพรสชัน</span> <span className="text-slate-700">{int(r.metrics?.impressions)}</span></div>
                 <div><span className="text-slate-400">CTR</span> <span className="text-slate-700">{pct(r.metrics?.ctr)}</span></div>
               </div>

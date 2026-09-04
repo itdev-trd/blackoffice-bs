@@ -8,6 +8,7 @@ import { getMetaToken } from "../_shared/meta.ts";
 import { authorizeRequest, normAcc } from "../_shared/permissions.ts";
 import { cacheGet, cacheSet, listCacheTtlMs } from "../_shared/meta-cache.ts";
 import { errorResponse, readJsonBody } from "../_shared/security.ts";
+import { buildMetrics } from "../_shared/ad-metrics.ts";
 
 const GRAPH_VERSION = "v22.0"; // อัปจาก v19 (sunset ต้นปี 2026)
 const corsHeaders = {
@@ -15,38 +16,8 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// ตัวชี้วัดคำนวณแบบเดียวกับ list-children เป๊ะ เพื่อให้ตารางแคมเปญ/ชุดโฆษณา/โฆษณา
-// ใช้โค้ดแสดงผลชุดเดียวกันได้ ไม่ต้องมีสองมาตรฐานที่เลขไม่ตรงกัน
-const num = (v: unknown) => (v === null || v === undefined || v === "" ? 0 : Number(v) || 0);
-const LEAD_TYPES = ["lead", "onsite_conversion.lead_grouped", "offsite_conversion.fb_pixel_lead"];
-function leads(actions: any[]) {
-  return (actions || []).filter((a) => LEAD_TYPES.includes(a.action_type)).reduce((s, a) => s + num(a.value), 0);
-}
-function sumBy(actions: any[], m: (t: string) => boolean) {
-  return (actions || []).filter((a) => m(a.action_type)).reduce((s, a) => s + num(a.value), 0);
-}
-function buildMetrics(o: any) {
-  const spend = num(o.spend);
-  const lead = leads(o.actions);
-  const conversations = sumBy(o.actions, (t) => t.includes("messaging_conversation_started"));
-  const replies = sumBy(o.actions, (t) => t.includes("messaging_user_depth_2_message_send"));
-  return {
-    spend,
-    impressions: num(o.impressions),
-    reach: num(o.reach),
-    frequency: num(o.frequency),
-    clicks: num(o.clicks),
-    link_clicks: num(o.inline_link_clicks),
-    ctr: num(o.ctr),
-    cpm: num(o.cpm),
-    cpc: num(o.cpc),
-    leads: lead,
-    cpl: lead > 0 ? spend / lead : null,
-    conversations,
-    replies,
-    reply_rate: conversations > 0 ? replies / conversations : null,
-  };
-}
+// ตัวชี้วัดทั้งหมดย้ายไป _shared/ad-metrics.ts แล้ว — เดิมไฟล์นี้กับ list-children
+// คำนวณแยกกันและ LEAD_TYPES ไม่เท่ากันด้วย ทั้งที่คอมเมนต์เขียนว่า "เป๊ะเหมือนกัน"
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -88,7 +59,9 @@ Deno.serve(async (req) => {
       ? `insights.time_range(${JSON.stringify({ since: time_range.since, until: time_range.until })})`
       : `insights.date_preset(${typeof date_preset === "string" ? date_preset : "last_30d"})`;
     const insightFields = "spend,impressions,reach,frequency,clicks,ctr,cpm,cpc,inline_link_clicks,actions";
-    const fields = `id,name,status,effective_status,objective,daily_budget,lifetime_budget,start_time,stop_time,${rangeExpr}{${insightFields}}`;
+    // adsets{optimization_goal} = ตัวบอกว่า Meta นับอะไรเป็น "ผลลัพธ์" ของแคมเปญนี้
+    // ดึงมาพร้อมกันด้วย field expansion ไม่เสีย request เพิ่ม
+    const fields = `id,name,status,effective_status,objective,daily_budget,lifetime_budget,start_time,stop_time,adsets.limit(50){optimization_goal},${rangeExpr}{${insightFields}}`;
 
     const campaigns: Record<string, unknown>[] = [];
     let url =
@@ -105,11 +78,16 @@ Deno.serve(async (req) => {
           status: c.status,
           effective_status: c.effective_status,
           objective: c.objective,
-          daily_budget_thb: c.daily_budget ? Math.round(parseFloat(c.daily_budget) / 100) : null,
-          lifetime_budget_thb: c.lifetime_budget ? Math.round(parseFloat(c.lifetime_budget) / 100) : null,
+          // Meta ส่งงบมาเป็นหน่วยสตางค์ — หารร้อยแล้วห้ามปัดทิ้ง ไม่งั้นยอดไม่ตรงกับ Ads Manager
+          // (ฝ่ายบัญชีใช้ตัวเลขนี้กระทบยอด จึงต้องเก็บทศนิยมไว้)
+          daily_budget_thb: c.daily_budget ? Number((parseFloat(c.daily_budget) / 100).toFixed(2)) : null,
+          lifetime_budget_thb: c.lifetime_budget ? Number((parseFloat(c.lifetime_budget) / 100).toFixed(2)) : null,
           start_time: c.start_time ?? null,
           stop_time: c.stop_time ?? null,
-          metrics: buildMetrics(c.insights?.data?.[0] ?? {}),
+          metrics: buildMetrics(c.insights?.data?.[0] ?? {}, {
+            goals: (c.adsets?.data ?? []).map((a: any) => a?.optimization_goal).filter(Boolean),
+            objective: c.objective,
+          }),
         });
       }
       url = data?.paging?.next ?? "";

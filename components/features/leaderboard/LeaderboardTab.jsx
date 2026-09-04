@@ -67,11 +67,15 @@ export default function LeaderboardTab({ active = true }) {
   // พาเลตต์เฉพาะหน้ากระดานแต้ม — ทอง/เงิน/ทองแดงตรงกับเหรียญรางวัล
   // เป็นข้อยกเว้นที่มีเหตุผลจากพาเลตต์หลัก (accent น้ำเงิน) เพราะสีสื่ออันดับโดยตรง
   // ส่วนสีเน้นอื่นใช้ brand/สถานะชุดเดียวกับทั้งแอป
+  // เดิมค่าพวกนี้เป็น hex ธีมมืดฝังตาย (#0D1117 / #F8FAFC) หน้านี้จึงเป็นกล่องดำ
+  // กล่องเดียวในแอปที่เหลือสว่าง — ย้ายมาใช้ token กลางเพื่อให้เปลี่ยนตามธีมจริง
+  // ทอง/เงิน/ทองแดงคงไว้ตายตัว เพราะสีสื่อ "อันดับ" ไม่ใช่สีตกแต่งของธีม
   const C = {
-    bg: "#0D1117", ink: "#F8FAFC", border: "rgba(148,163,184,.18)", hair: "rgba(148,163,184,.14)",
+    bg: "var(--surface)", ink: "var(--surface)",
+    border: "var(--line)", hair: "var(--line)",
     gold: "#B98500", silver: "#64748B", bronze: "#A96022",
-    purple: "#3452E0", green: "#059669", red: "#DC2626",
-    t1: "#F8FAFC", t2: "#A5B4C7", t3: "#718096",
+    purple: "var(--brand)", green: "var(--ok)", red: "var(--bad)",
+    t1: "var(--ink)", t2: "var(--ink-2)", t3: "var(--ink-3)",
   };
   const FONT = "'Roboto','Noto Sans Thai',system-ui,-apple-system,sans-serif";
   const NUM = "'IBM Plex Mono',ui-monospace,monospace";
@@ -93,19 +97,19 @@ export default function LeaderboardTab({ active = true }) {
   const PAD = "clamp(20px,4.5vw,60px)";
 
   return (
-    <div className="leaderboard-shell w-full max-w-[1400px] mx-auto" style={{ fontFamily: FONT, background: C.bg, color: C.t1, borderRadius: 26, border: `1px solid ${C.border}`, boxShadow: "0 24px 70px -42px rgba(0,0,0,.65)", overflow: "hidden" }}>
+    <div className="leaderboard-shell w-full max-w-[1400px] mx-auto" style={{ fontFamily: FONT, background: C.bg, color: C.t1, borderRadius: 26, border: `1px solid ${C.border}`, boxShadow: "0 24px 70px -42px rgb(var(--n-ink) / .28)", overflow: "hidden" }}>
       <style>{`
         @keyframes lbPulse{0%,100%{opacity:.9;transform:scale(1)}50%{opacity:0;transform:scale(2.2)}}
         @keyframes lbFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-7px)}}
         @keyframes lbBreathe{0%,100%{opacity:.55}50%{opacity:.9}}
         @keyframes lbRise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
         .lb-row{transition:background .18s ease}
-        .lb-row:hover{background:rgba(148,163,184,.06)}
+        .lb-row:hover{background:rgb(var(--n-ink-3) / .07)}
         .lb-tab{transition:color .2s ease,background .2s ease,border-color .2s ease,box-shadow .2s ease}
-        .lb-tab:hover{color:#F8FAFC}
+        .lb-tab:hover{color:var(--ink)}
         .lb-ico{transition:all .2s ease}
-        .lb-ico:hover{color:${C.t1};border-color:rgba(148,163,184,.35)!important;background:rgba(148,163,184,.08)!important}
-        .lb-date{color-scheme:dark}
+        .lb-ico:hover{color:${C.t1};border-color:var(--line-strong)!important;background:rgb(var(--n-ink-3) / .09)!important}
+        /* ปล่อยให้ปฏิทินในช่องวันที่ใช้โทนตามธีมของหน้า ไม่บังคับ dark */
         .lb-date::-webkit-calendar-picker-indicator{filter:none;cursor:pointer}
         .lb-podium{animation:lbRise .6s cubic-bezier(.2,.8,.2,1) both}
         @media(max-width:640px){
@@ -147,7 +151,7 @@ export default function LeaderboardTab({ active = true }) {
           </div>
           {/* Total score — editorial figure, not a boxed card */}
           <div className="lb-total" style={{ textAlign: "right", position: "relative", paddingLeft: 30 }}>
-            <div className="lb-total-glow" style={{ position: "absolute", right: -8, top: -18, width: 200, height: 120, background: `radial-gradient(60% 60% at 70% 40%, ${C.purple}44, transparent 72%)`, filter: "blur(14px)", pointerEvents: "none", animation: "lbBreathe 4s ease-in-out infinite" }} />
+            <div className="lb-total-glow" style={{ position: "absolute", right: -8, top: -18, width: 200, height: 120, background: `radial-gradient(60% 60% at 70% 40%, rgb(var(--n-accent) / .27), transparent 72%)`, filter: "blur(14px)", pointerEvents: "none", animation: "lbBreathe 4s ease-in-out infinite" }} />
             <div style={{ position: "relative", fontSize: 11, letterSpacing: ".34em", textTransform: "uppercase", color: C.t3, fontWeight: 600, fontFamily: NUM }}>แต้มรวมทั้งหมด</div>
             <div className="lb-total-number" style={{ position: "relative", fontFamily: NUM, fontVariantNumeric: "tabular-nums", fontSize: "clamp(46px,7vw,84px)", fontWeight: 800, lineHeight: .92, letterSpacing: "-.03em", marginTop: 6, transition: "transform .35s cubic-bezier(.2,.8,.2,1)", transform: flash ? "scale(1.04)" : "scale(1)", color: C.t1, background: "none", WebkitBackgroundClip: "border-box", WebkitTextFillColor: C.t1, filter: "none" }}>
               {/* ตอนยังไม่มีข้อมูลเคยเรนเดอร์ "—" ที่ขนาด 84px ซึ่งอ่านเป็นแท่งดำ ไม่ใช่สถานะ
@@ -217,9 +221,9 @@ export default function LeaderboardTab({ active = true }) {
       {/* ═══ CINEMATIC PODIUM STAGE (hero) ═══ */}
       {board.length > 0 ? (
         <div style={{ position: "relative", overflow: "hidden", marginTop: 8, minHeight: 480,
-          background: "radial-gradient(130% 90% at 50% -10%, #1B2635 0%, #121A25 48%, #0F151E 100%)" }}>
+          background: "radial-gradient(130% 90% at 50% -10%, rgb(var(--n-accent) / .10) 0%, var(--surface) 55%)" }}>
           {/* atmospheric top haze */}
-          <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 240, background: "radial-gradient(70% 100% at 50% 0%, rgba(255,255,255,.05), transparent 70%)", pointerEvents: "none" }} />
+          <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 240, background: "radial-gradient(70% 100% at 50% 0%, rgb(var(--n-ink) / .04), transparent 70%)", pointerEvents: "none" }} />
           {/* faint ticker line horizon */}
           <svg viewBox="0 0 1200 300" preserveAspectRatio="none" style={{ position: "absolute", left: 0, right: 0, bottom: 96, width: "100%", height: 150, opacity: .18, pointerEvents: "none" }}>
             <defs><linearGradient id="lbLine" x1="0" x2="1"><stop offset="0" stopColor="transparent" /><stop offset=".5" stopColor={C.gold} /><stop offset="1" stopColor="transparent" /></linearGradient></defs>
@@ -227,8 +231,8 @@ export default function LeaderboardTab({ active = true }) {
               points={Array.from({ length: 60 }).map((_, i) => `${i * 20},${150 - ((Math.sin(i * .6) * 40) + ((i * 53) % 60))}`).join(" ")} />
           </svg>
           {/* reflective floor */}
-          <div style={{ position: "absolute", left: 0, right: 0, bottom: 88, height: 1, background: `linear-gradient(90deg,transparent, ${C.gold}88, rgba(255,255,255,.35), ${C.gold}88, transparent)`, opacity: .5 }} />
-          <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 96, background: "linear-gradient(180deg, rgba(15,21,30,0), #0F151E 70%)", pointerEvents: "none" }} />
+          <div style={{ position: "absolute", left: 0, right: 0, bottom: 88, height: 1, background: `linear-gradient(90deg,transparent, ${C.gold}88, ${C.gold}55, ${C.gold}88, transparent)`, opacity: .45 }} />
+          <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 96, background: "linear-gradient(180deg, transparent, var(--surface) 70%)", pointerEvents: "none" }} />
 
           <div className="lb-podium" style={{ position: "relative", display: "flex", alignItems: "flex-end", justifyContent: "center", gap: "clamp(14px,4vw,64px)", padding: `70px ${PAD} 96px`, zIndex: 2 }}>
             {order.map((rank, i) => {
@@ -244,12 +248,12 @@ export default function LeaderboardTab({ active = true }) {
                   {rank === 1 && <Crown size={30} fill={C.gold} style={{ color: C.gold, marginBottom: 6, filter: `drop-shadow(0 0 12px ${C.gold})`, animation: "lbFloat 3.2s ease-in-out infinite", zIndex: 3 }} />}
 
                   {/* avatar — floating, volumetric ring */}
-                  <div style={{ position: "relative", zIndex: 3, width: m.av, height: m.av, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: NUM, fontWeight: 800, fontSize: m.av * 0.3, color: "#F8FAFC",
-                    background: "radial-gradient(circle at 34% 28%, #313a4b, #10141d 78%)",
+                  <div style={{ position: "relative", zIndex: 3, width: m.av, height: m.av, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: NUM, fontWeight: 800, fontSize: m.av * 0.3, color: "var(--ink)",
+                    background: "radial-gradient(circle at 34% 28%, rgb(var(--n-ink-3) / .30), rgb(var(--n-ink-3) / .13) 78%)",
                     border: `2px solid ${m.ring}`,
-                    boxShadow: `0 0 0 6px rgba(0,0,0,.4), 0 22px 44px -16px ${m.glow}, 0 0 46px -6px ${m.glow}, inset 0 2px 6px rgba(255,255,255,.12)` }}>
+                    boxShadow: `0 0 0 6px rgb(var(--n-ink) / .10), 0 22px 44px -16px ${m.glow}, 0 0 46px -6px ${m.glow}, inset 0 2px 6px rgba(255,255,255,.12)` }}>
                     {nameOf(u.email).slice(0, 2).toUpperCase()}
-                    <span style={{ position: "absolute", bottom: -8, right: -8, width: 30, height: 30, borderRadius: "50%", background: C.ink, border: `1px solid ${m.ring}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, boxShadow: `0 6px 14px rgba(0,0,0,.6)` }}>{m.medal}</span>
+                    <span style={{ position: "absolute", bottom: -8, right: -8, width: 30, height: 30, borderRadius: "50%", background: C.ink, border: `1px solid ${m.ring}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, boxShadow: `0 6px 14px rgb(var(--n-ink) / .25)` }}>{m.medal}</span>
                   </div>
 
                   {/* name + score — editorial */}
@@ -285,7 +289,7 @@ export default function LeaderboardTab({ active = true }) {
           </div>
         </div>
       ) : (!busy && res) ? (
-        <div style={{ margin: `20px ${PAD} 40px`, textAlign: "center", padding: "72px 20px", borderRadius: 22, border: `1px solid ${C.hair}`, background: "radial-gradient(100% 100% at 50% 0%, #1B2635, #111820)" }}>
+        <div style={{ margin: `20px ${PAD} 40px`, textAlign: "center", padding: "72px 20px", borderRadius: 22, border: `1px solid ${C.hair}`, background: "radial-gradient(100% 100% at 50% 0%, rgb(var(--n-accent) / .07), var(--surface) 70%)" }}>
           <Trophy size={44} style={{ color: C.t3, margin: "0 auto 14px" }} />
           <div style={{ fontSize: 16, fontWeight: 700, color: C.t2 }}>ยังไม่มีแต้มในช่วงนี้</div>
           <div style={{ fontSize: 13.5, color: C.t3, marginTop: 6 }}>แต้มจะปรากฏเมื่อมีการตอบแชทนอกเวลาทำการ</div>
@@ -310,10 +314,10 @@ export default function LeaderboardTab({ active = true }) {
             <div key={u.email} className="lb-row" style={{ display: "grid", gridTemplateColumns: "44px 1fr 96px 96px 80px", alignItems: "center", padding: "16px 0", borderTop: `1px solid ${C.hair}`, borderRadius: 8 }}>
               <span style={{ fontFamily: NUM, fontVariantNumeric: "tabular-nums", fontSize: 15, color: C.t3, fontWeight: 300 }}>{String(i + 4).padStart(2, "0")}</span>
               <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
-                <span style={{ width: 38, height: 38, borderRadius: "50%", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, fontFamily: NUM, color: C.t2, background: "radial-gradient(circle at 34% 28%, #2a3242, #12161f)", border: `1px solid ${C.border}` }}>{nameOf(u.email).slice(0, 2).toUpperCase()}</span>
+                <span style={{ width: 38, height: 38, borderRadius: "50%", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, fontFamily: NUM, color: C.t2, background: "rgb(var(--n-ink-3) / .13)", border: `1px solid ${C.border}` }}>{nameOf(u.email).slice(0, 2).toUpperCase()}</span>
                 <span title={u.email} style={{ color: C.t1, fontWeight: 500, fontSize: 15, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{nameOf(u.email)}</span>
               </div>
-              <span style={{ textAlign: "right", fontFamily: NUM, fontVariantNumeric: "tabular-nums", fontWeight: 800, fontSize: 19, color: C.purple, textShadow: `0 0 18px ${C.purple}44` }}>{u.points.toLocaleString()}</span>
+              <span style={{ textAlign: "right", fontFamily: NUM, fontVariantNumeric: "tabular-nums", fontWeight: 800, fontSize: 19, color: C.purple, textShadow: `0 0 18px rgb(var(--n-accent) / .27)` }}>{u.points.toLocaleString()}</span>
               <span style={{ textAlign: "right", fontFamily: NUM, fontVariantNumeric: "tabular-nums", color: C.green, fontWeight: 600, fontSize: 15 }} className="lb-hide-sm">{u.in_time}</span>
               <span style={{ textAlign: "right", fontFamily: NUM, fontVariantNumeric: "tabular-nums", color: u.slow > 0 ? C.red : C.t3, fontWeight: u.slow > 0 ? 600 : 400, fontSize: 15 }} className="lb-hide-sm">{u.slow}</span>
             </div>

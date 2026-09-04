@@ -69,7 +69,7 @@ export default function DashboardNav({ children }) {
   }
 
   return (
-    <div className="min-h-screen md:flex">
+    <div className="min-h-screen lg:flex">
       {/* Sidebar ซ้าย — เดสก์ท็อป/แท็บเล็ต */}
       {/* Sidebar มีสองโหมด:
           - ปกติ = กว้าง มีชื่อเมนูกำกับทุกอัน (ไอคอนล้วนต้องอาศัยการจำ/hover ทีละอัน
@@ -77,9 +77,9 @@ export default function DashboardNav({ children }) {
           - หน้าตอบแชท = ยุบเหลือไอคอน เพราะหน้านั้นมี 3 คอลัมน์อยู่แล้ว ต้องสงวนพื้นที่แนวนอน
           โหมดยุบยังมี title ให้ hover อ่านชื่อได้ */}
       <aside
-        className={`hidden md:flex md:flex-col md:shrink-0 md:h-screen md:sticky md:top-0 bg-night-surface border-r border-night-border z-30 py-3 gap-1 transition-[width] duration-200 ease-ui ${
+        className={`hidden lg:flex lg:flex-col lg:shrink-0 lg:h-screen lg:sticky lg:top-0 bg-night-surface border-r border-night-border z-30 py-3 gap-1 transition-[width] duration-200 ease-ui ${
           // 168px = พอดีกับเมนูที่ยาวที่สุด ("สร้างคอนเทนต์" 85px + ไอคอน + ระยะขอบ) โดยไม่มีชื่อไหนโดนตัด
-          navCollapsed ? "md:w-[88px] items-center" : "md:w-[168px]"
+          navCollapsed ? "lg:w-[88px] items-center" : "lg:w-[168px]"
         }`}
       >
         <Link
@@ -157,7 +157,7 @@ export default function DashboardNav({ children }) {
 
       {/* คอลัมน์ขวา: header มือถือ + เนื้อหา */}
       <div className="flex-1 min-w-0 flex flex-col min-h-screen">
-        <header className="md:hidden app-header bg-night-surface border-b border-night-border sticky top-0 z-30">
+        <header className="lg:hidden app-header bg-night-surface border-b border-night-border sticky top-0 z-30">
           <div className="w-full px-4 sm:px-6 py-3 flex items-center justify-between gap-2">
             <Link href={ROUTE_PATH.overview} className="flex items-center gap-2 font-semibold text-night-ink hover:opacity-80 min-w-0" title="กลับหน้าแรก">
               <BrandMark className="h-7 w-7" />
@@ -165,6 +165,9 @@ export default function DashboardNav({ children }) {
             </Link>
             {/* เว้นระยะห่างรีเฟรช/ออกจากระบบให้มากพอ กันกดผิด (เดิมชิดกันเกินไป) */}
             <div className="flex items-center gap-2 shrink-0">
+              {/* สลับธีมอยู่ขวาบน กดได้ทันทีไม่ต้องเปิดเมนู "เพิ่มเติม"
+                  ใช้ไอคอนล้วนเพื่อไม่ให้แถวนี้แน่นจนชื่อแอปโดนบีบ */}
+              <ThemeToggle icon />
               <button
                 onClick={loadAll}
                 className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-sky-400/40 bg-sky-400/10 px-2.5 text-xs font-semibold text-sky-300 transition-colors hover:border-sky-300/70 hover:bg-sky-400/20"
@@ -189,7 +192,7 @@ export default function DashboardNav({ children }) {
 
         {/* หน้าตอบแชทบนมือถือ = ไม่มี padding รอบ (เต็มจอ) · หน้าอื่นและเดสก์ท็อปมี padding ปกติ
             เผื่อพื้นที่ด้านล่างให้แถบเมนูมือถือ (pb-24) ยกเว้นหน้าแชทที่ไม่โชว์แถบนี้อยู่แล้ว */}
-        <main className={`w-full ${isInboxRoute ? "px-0 py-0 md:px-0 md:py-0" : "dashboard-page-main flex justify-center items-start px-4 py-6 pb-24 sm:px-6 sm:py-6 md:pb-8 lg:px-10"}`}>
+        <main className={`w-full ${isInboxRoute ? "px-0 py-0 lg:px-0 lg:py-0" : "dashboard-page-main flex justify-center items-start px-4 py-6 pb-24 sm:px-6 sm:py-6 lg:pb-8 lg:px-10"}`}>
           {children}
         </main>
       </div>
@@ -198,7 +201,7 @@ export default function DashboardNav({ children }) {
           ตอนเปิดคุยกับลูกค้าเต็มจอ (หน้าแชท) ตัวหน้าต่างแชทจะซ้อนทับแถบนี้เอง (z-index สูงกว่า) ไม่ต้องซ่อนด้วยโค้ดตรงนี้ */}
       {perm && mobileNavItems.length > 0 && (
         <nav
-          className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-night-surface border-t border-night-border flex items-stretch"
+          className="lg:hidden fixed bottom-0 inset-x-0 z-30 bg-night-surface border-t border-night-border flex items-stretch"
           style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
         >
           {mobileNavItems.map((t) => {
@@ -228,7 +231,7 @@ export default function DashboardNav({ children }) {
       {/* แผงเมนูเพิ่มเติม — เลื่อนขึ้นจากล่าง แสดงแท็บที่เหลือ + อีเมล/รีเฟรช/ออกจากระบบ */}
       {menuOpen && (
         <div
-          className="md:hidden fixed inset-0 z-40 bg-black/40 flex items-end"
+          className="lg:hidden fixed inset-0 z-40 bg-black/40 flex items-end"
           onMouseDown={(e) => { if (e.target === e.currentTarget) setMenuOpen(false); }}
         >
           <div className="w-full bg-night-surface rounded-t-2xl shadow-2xl max-h-[80vh] overflow-y-auto" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
@@ -253,6 +256,26 @@ export default function DashboardNav({ children }) {
                   </Link>
                 )
               )}
+            </div>
+            {/* รีเฟรช / สลับธีม / ออกจากระบบ — เดิมมีแต่ใน sidebar ซึ่งจอมือถือกับแท็บเล็ตไม่มี
+                ทำให้สลับธีมไม่ได้เลยบนสองขนาดนี้ */}
+            <div className="border-t border-night-border p-3 grid grid-cols-2 gap-2">
+              <button
+                onClick={() => { loadAll(); setMenuOpen(false); }}
+                className="flex h-10 items-center justify-center gap-2 rounded-lg border border-sky-500/40 bg-sky-500/10 text-sky-700 dark:border-sky-400/30 dark:bg-sky-400/10 dark:text-sky-300"
+              >
+                <RefreshCw size={17} className="shrink-0" />
+                <span className="text-[13px] font-semibold">รีเฟรช</span>
+              </button>
+              {/* ThemeToggle โหมดปกติสูง h-10 เท่ากับปุ่มรีเฟรชพอดี */}
+              <ThemeToggle />
+              <button
+                onClick={handleLogout}
+                className="col-span-2 flex h-10 items-center justify-center gap-2 rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-700 dark:border-rose-400/30 dark:bg-rose-400/10 dark:text-rose-300"
+              >
+                <LogOut size={17} className="shrink-0" />
+                <span className="text-[13px] font-semibold">ออกจากระบบ</span>
+              </button>
             </div>
             {perm?.email && (
               <div className="border-t border-night-border p-3 flex items-center gap-2 min-w-0" title={perm.email}>

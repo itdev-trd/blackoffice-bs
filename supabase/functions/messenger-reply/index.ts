@@ -113,6 +113,15 @@ async function clearRelatedUnread(admin: any, row: any, nowIso: string, answered
 // งานในไฟล์นี้ไม่เท่ากันเรื่องความสำคัญ จึงแยกระดับ:
 //   translate / summarize = อ่านให้แอดมินเข้าใจ (ภายใน) -> "low" พอ ประหยัดได้เยอะเพราะยิงบ่อยสุด
 //   reply = ข้อความที่ "ลูกค้าได้รับจริง" -> ไม่ลด ปล่อยค่าเริ่มต้น เพราะแปลผิดคือเสียลูกค้า
+// reasoning_effort ใช้ได้เฉพาะ reasoning model (ตระกูล gpt-5 / o-series)
+// โมเดลเริ่มต้นจริงของระบบคือ gpt-4.1 ซึ่งตอบ 400 "Unrecognized request argument supplied:
+// reasoning_effort" ทำให้การแปลพังทั้งหมด — ต้องเช็คก่อนส่ง ไม่ใช่ส่งเสมอ
+// max_completion_tokens ก็เป็นพารามิเตอร์ของโมเดลรุ่นใหม่ รุ่นเก่าใช้ max_tokens
+function isReasoningModel(model: string) {
+  const m = String(model || "").toLowerCase();
+  return m.startsWith("gpt-5") || m.startsWith("o1") || m.startsWith("o3") || m.startsWith("o4");
+}
+
 async function openaiJson(
   model: string,
   sys: string,
@@ -120,13 +129,15 @@ async function openaiJson(
   opts: { effort?: "low" | "medium" | "high"; maxTokens?: number } = {}
 ): Promise<any> {
   const key = await getOpenAIKey();
+  const reasoning = isReasoningModel(model);
+  const tokenCap = opts.maxTokens ?? 2000;
   const resp = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
     body: JSON.stringify({
       model,
-      max_completion_tokens: opts.maxTokens ?? 2000,
-      ...(opts.effort ? { reasoning_effort: opts.effort } : {}),
+      ...(reasoning ? { max_completion_tokens: tokenCap } : { max_tokens: tokenCap }),
+      ...(reasoning && opts.effort ? { reasoning_effort: opts.effort } : {}),
       response_format: { type: "json_object" },
       messages: [{ role: "system", content: sys }, { role: "user", content: user }],
     }),

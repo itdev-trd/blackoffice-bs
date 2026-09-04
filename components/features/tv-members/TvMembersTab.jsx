@@ -105,21 +105,54 @@ export default function TvMembersTab({ active = true, embedded = false }) {
 
   const now = Date.now();
   const stats = {
+    // นับ "คน" ไม่ใช่ "แถว" ทั้งสองช่อง — คนเดียวที่มีสองสคริปต์ต้องนับหนึ่ง
+    // เดิม total นับคนแต่ activeCount นับแถว ทำให้ "กำลังใช้งาน" มากกว่า "สมาชิกทั้งหมด"
     total: new Set(access.map((a) => a.username)).size,
-    activeCount: access.filter((a) => a.status === "active").length,
-    soon: access.filter((a) => a.status === "active" && a.expiration && new Date(a.expiration).getTime() - now < 7 * 86400000 && new Date(a.expiration).getTime() > now).length,
+    activeCount: new Set(access.filter((a) => a.status === "active").map((a) => a.username)).size,
+    soon: new Set(access.filter((a) => a.status === "active" && a.expiration && new Date(a.expiration).getTime() - now < 7 * 86400000 && new Date(a.expiration).getTime() > now).map((a) => a.username)).size,
     scripts: scripts.length,
   };
   const expLabel = (a) => a.expiration ? new Date(a.expiration).toLocaleDateString("th-TH", { day: "2-digit", month: "short", year: "2-digit" }) : "ตลอดชีพ";
-  // สถานะใช้งาน: active (เขียว) / Expired (แดง) / ถอนสิทธิ์ (เทา) / error (เหลือง)
+  // สถานะใช้งาน — ป้ายเดียวจบ ไม่ซ้อนสองบรรทัดเหมือนเดิม
+  // เดิมโชว์ "active" แล้วต่อด้วย "TV: มีสิทธิ์" ใต้บรรทัด ซึ่งเป็นข้อมูลเดียวกัน
+  // (สถานะถูกคำนวณจาก TradingView อยู่แล้ว) กินที่และทำให้แถวสูงเกินจำเป็น
+  // เทียบแบบไม่สนตัวพิมพ์ เพราะข้อมูลที่นำเข้าจากระบบเก่าเขียน "Expired" ตัวใหญ่
+  const STATUS_TONE = {
+    active:  { bg: "rgb(var(--n-ok) / .13)",    fg: "var(--ok)" },
+    expired: { bg: "rgb(var(--n-bad) / .13)",   fg: "var(--bad)" },
+    warn:    { bg: "rgb(var(--n-warn) / .15)",  fg: "var(--warn)" },
+    muted:   { bg: "rgb(var(--n-ink-3) / .13)", fg: "var(--ink-3)" },
+  };
+  // key = ค่าคงที่สำหรับนับ/กรอง · label = ข้อความที่คนอ่าน (เปลี่ยนได้ไม่กระทบตัวนับ)
   const statusInfo = (a) => {
-    if (a.status === "revoked") return { label: "ถอนสิทธิ์", cls: "text-slate-400" };
-    if (a.status === "error") return { label: "error", cls: "text-amber-500" };
-    const expired = a.status === "expired" || (a.expiration && new Date(a.expiration).getTime() <= now);
-    return expired ? { label: "Expired", cls: "text-rose-500" } : { label: "active", cls: "text-emerald-600" };
+    const s = String(a.status || "").toLowerCase();
+    if (s === "revoked" || a.status === "ถอนสิทธิ์")
+      return { key: "revoked", label: "ถอนสิทธิ์", tone: "muted", hint: "ถอนสิทธิ์ออกจาก TradingView แล้ว" };
+    // error = ในฐานมีข้อมูลลูกค้า แต่ตรวจแล้วไม่พบสิทธิ์บน TradingView (ลูกค้าใช้อินดี้ไม่ได้)
+    if (s === "error")
+      return { key: "no_tv", label: "ไม่มีสิทธิ์บน TV", tone: "warn", hint: a.tv_verify_error || "ตรวจแล้วไม่พบชื่อนี้ในสคริปต์บน TradingView" };
+    const expired = s === "expired" || (a.expiration && new Date(a.expiration).getTime() <= now);
+    if (expired) return { key: "expired", label: "หมดอายุ", tone: "expired", hint: "สิทธิ์หมดอายุแล้ว" };
+    return { key: "active", label: "ใช้งานอยู่", tone: "active", hint: a.tv_verified_at ? "ตรวจกับ TradingView แล้วว่ามีสิทธิ์" : "มีสิทธิ์ตามข้อมูลในระบบ" };
   };
   const canSeeNewTv = isAdmin || released;   // ฟีเจอร์ใหม่ (คอลัมน์อีเมล): เห็นเฉพาะแอดมินจนกว่าจะกดปล่อย
   const filtered = (a) => !q.trim() || `${a.username} ${a.display_name || ""} ${a.trade_id || ""} ${a.email || ""}`.toLowerCase().includes(q.trim().toLowerCase());
+  // คอลัมน์ตรวจสอบย้อนหลัง (เพิ่มสิทธิ์บน TV / สร้างเมื่อ / คนเพิ่ม / แก้ไขโดย)
+  // ปิดไว้เป็นค่าเริ่มต้น — ใช้ตอนสอบย้อนหลังเท่านั้น ไม่ใช่ตอนทำงานปกติ
+  const [showAudit, setShowAudit] = useState(false);
+  // มือถือ: ตารางกว้างกว่าจอเสมอ ต้องเลื่อนซ้าย-ขวาทีละคอลัมน์กว่าจะเห็นข้อมูลคนเดียวครบ
+  // จึงเปลี่ยนเป็นการ์ดสรุป กดแล้วเปิดแผ่นรายละเอียดขึ้นมาแทน (ดูครบในหน้าจอเดียว)
+  const [isNarrow, setIsNarrow] = useState(false);
+  useEffect(() => {
+    // 1023px = แท็บเล็ตใช้หน้าตาชุดเดียวกับมือถือ (เมนูล่าง + การ์ด) ตรงกับ breakpoint lg: ของ nav
+    const mq = window.matchMedia?.("(max-width: 1023px)");
+    if (!mq) return;
+    const sync = () => setIsNarrow(mq.matches);
+    sync();
+    mq.addEventListener?.("change", sync);
+    return () => mq.removeEventListener?.("change", sync);
+  }, []);
+  const [sheetRow, setSheetRow] = useState(null);   // แถวที่กดดูรายละเอียดบนมือถือ
   // เรียงลำดับตามหัวคอลัมน์ (คลิกสลับ ขึ้น/ลง)
   const [sortKey, setSortKey] = useState("create");
   const [sortDir, setSortDir] = useState("desc");
@@ -144,16 +177,28 @@ export default function TvMembersTab({ active = true, embedded = false }) {
     return sortDir === "asc" ? c : -c;
   });
   // หัวคอลัมน์คลิกได้ + ลูกศรบอกทิศ (เป็น 1 ช่องใน grid ที่กำหนดความกว้างเอง)
+  // สีมาจาก token ธีม (--ink-3/--ink) ไม่ใช่ slate ตายตัว จะได้อ่านออกทั้งธีมสว่างและมืด
   const H = ({ k, children }) => (
-    <button type="button" onClick={() => toggleSort(k)} className={`min-w-0 flex items-center gap-0.5 uppercase text-left truncate hover:text-slate-600 ${sortKey === k ? "text-slate-600 font-semibold" : ""}`}>
+    <button type="button" onClick={() => toggleSort(k)}
+      className="min-w-0 flex items-center gap-0.5 uppercase text-left truncate transition-colors"
+      style={{ color: sortKey === k ? "var(--ink)" : "var(--ink-3)", fontWeight: sortKey === k ? 600 : 400 }}>
       <span className="truncate">{children}</span>{sortKey === k && <span className="shrink-0">{sortDir === "asc" ? "↑" : "↓"}</span>}
     </button>
   );
-  // ความกว้างคอลัมน์ (เลื่อนแนวนอนได้เมื่อจอแคบ) — ต่างกันตามมี/ไม่มีคอลัมน์อีเมล
-  const COLS = canSeeNewTv
-    ? "minmax(120px,1.4fr) minmax(110px,1.2fr) minmax(150px,1.5fr) 78px 96px 86px 112px 82px 100px 132px 84px"
-    : "minmax(140px,1.6fr) minmax(120px,1.3fr) 78px 96px 86px 112px 92px 108px 132px 84px";
-  const tableMinW = canSeeNewTv ? 1230 : 1090;
+  // ความกว้างคอลัมน์ — เดิมยัด 11 คอลัมน์เสมอ กว้าง 1,230px ต้องเลื่อนแนวนอนตลอด
+  // และช่องละ 80–90px ทำให้ตัดคำทุกช่อง อ่านยากมาก
+  // ตอนนี้แยกเป็น "คอลัมน์ที่ใช้ทุกวัน" กับ "คอลัมน์ตรวจสอบย้อนหลัง" (กดสวิตช์ดูได้)
+  const COLS = [
+    "minmax(150px,1.7fr)",                    // ชื่อลูกค้า
+    "minmax(120px,1.2fr)",                    // User TV
+    ...(canSeeNewTv ? ["minmax(160px,1.4fr)"] : []),   // อีเมล
+    "116px",                                  // สถานะ
+    "104px",                                  // Trade ID
+    "100px",                                  // หมดอายุ
+    ...(showAudit ? ["132px", "92px", "104px", "132px"] : []),
+    "96px",                                   // ปุ่มจัดการ
+  ].join(" ");
+  const tableMinW = (canSeeNewTv ? 750 : 590) + (showAudit ? 460 : 0);
   const createLabel = (a) => { const d = a.created_at || a.granted_at; return d ? new Date(d).toLocaleDateString("th-TH", { day: "2-digit", month: "short", year: "2-digit" }) : "—"; };
   const tvGrantedLabel = (a) => a.tv_granted_at
     ? new Date(a.tv_granted_at).toLocaleString("th-TH", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })
@@ -224,8 +269,8 @@ export default function TvMembersTab({ active = true, embedded = false }) {
   const scriptStat = (s) => {
     const rows = access.filter((a) => a.pine_id === s.pine_id && inRange(a));
     const soon = rows.filter((a) => a.status !== "revoked" && a.expiration && new Date(a.expiration).getTime() > now && new Date(a.expiration).getTime() - now < 7 * 86400000).length;
-    const expired = rows.filter((a) => statusInfo(a).label === "Expired").length;
-    return { total: rows.length, active: rows.filter((a) => statusInfo(a).label === "active").length, soon, expired };
+    const expired = rows.filter((a) => statusInfo(a).key === "expired").length;
+    return { total: rows.length, active: rows.filter((a) => statusInfo(a).key === "active").length, soon, expired };
   };
   // ป้ายสรุประยะเวลาต่อสคริปต์
   const durLabel = (d) => d.mode === "lifetime" ? "ตลอดชีพ"
@@ -357,7 +402,9 @@ export default function TvMembersTab({ active = true, embedded = false }) {
         : "—";
       rows.push([
         ...(includeIndicator ? [scriptNames.get(a.pine_id) || a.pine_id] : []),
-        a.display_name || "—", a.username || "", ...(canSeeNewTv ? [a.email || "—"] : []), st.label,
+        // CSV ใช้คำเดิม (active / expired / revoked) ไม่ใช่ป้ายไทยที่โชว์บนหน้าจอ
+        // เพราะไฟล์นี้ถูกวางต่อเข้าชีตของทีม เปลี่ยนคำแล้วสูตรฝั่งนั้นพัง
+        a.display_name || "—", a.username || "", ...(canSeeNewTv ? [a.email || "—"] : []), st.key,
         a.trade_id || "—", expLabel(a), tvGrantedLabel(a), createLabel(a), a.granted_by || "—", editedBy,
       ]);
     }
@@ -369,54 +416,27 @@ export default function TvMembersTab({ active = true, embedded = false }) {
   return (
     <div className="tv-members-shell space-y-4">
       <style>{`
-        /* TradingView manager ใช้โทนเดียวกับหน้าแชท — ไม่แยกเป็นการ์ดขาว/เทา */
-        .tv-members-shell .bg-white,
-        .tv-members-shell [class*="bg-slate-50"] {
-          background-color: #151C25 !important;
-        }
-        .tv-members-shell .border-slate-200,
-        .tv-members-shell .border-slate-300 {
-          border-color: rgba(148,163,184,.2) !important;
-        }
-        .tv-members-shell .divide-slate-100 > :not([hidden]) ~ :not([hidden]) {
-          border-color: rgba(148,163,184,.14) !important;
-        }
-        .tv-members-shell .text-slate-800 { color: #F8FAFC !important; }
-        .tv-members-shell .text-slate-700 { color: #D6DEE9 !important; }
-        .tv-members-shell .text-slate-600 { color: #A5B4C7 !important; }
-        .tv-members-shell .text-slate-500 { color: #8795A8 !important; }
-        .tv-members-shell .text-slate-400 { color: #718096 !important; }
-        .tv-members-shell input:not([type="checkbox"]):not([type="radio"]),
-        .tv-members-shell select {
-          background-color: #10161F !important;
-          color: #E5ECF5 !important;
-          border-color: rgba(148,163,184,.24) !important;
-        }
-        .tv-members-shell input::placeholder { color: #718096 !important; }
-        .tv-members-shell button:hover:not(:disabled) { border-color: rgba(96,165,250,.55); }
-        .tv-members-shell [class*="hover\\:bg-slate-50"]:hover { background-color: rgba(148,163,184,.08) !important; }
-        .tv-members-shell .bg-brand-50\\/40 { background-color: rgba(52,82,224,.16) !important; }
-        .tv-members-shell .bg-slate-100 { background-color: #202A37 !important; }
-        .tv-members-shell .tv-members-header { padding-bottom: 18px; border-bottom: 1px solid rgba(148,163,184,.14); }
-        .tv-members-shell .tv-members-form { background: linear-gradient(180deg, #192231 0%, #151C25 100%) !important; border-color: rgba(52,82,224,.42) !important; box-shadow: 0 18px 40px -30px rgba(31,111,235,.6); }
-        .tv-members-shell .tv-members-toolbar { background: #151C25 !important; box-shadow: 0 10px 30px -28px rgba(0,0,0,.8); }
+        /* เหลือเฉพาะกฎ "โครงสร้าง" ที่ Tailwind เขียนไม่ได้ (details marker, พับ/คลี่, sticky)
+           ส่วนสีทั้งหมดถูกลบออกแล้ว — เดิมบล็อกนี้บังคับ background #151C25 !important
+           กับ text-slate-* ทุกระดับ เพื่อให้หน้านี้เป็นโทนมืดเหมือนหน้าแชท
+           ผลคือเมื่อแอปมีธีมสว่าง หน้านี้ยังมืดอยู่ที่เดียว และ !important ทับ token
+           จนแก้ที่ไหนก็ไม่ขึ้น · ตอนนี้สีมาจาก --ink/--surface/--line ตามธีมจริง */
         .tv-members-shell .tv-members-search input { min-height: 42px; border-radius: 12px; }
-        .tv-members-shell .tv-date-picker { background: #182231 !important; border-color: rgba(148,163,184,.24) !important; }
-        .tv-members-shell .tv-date-trigger { background: #10161F !important; }
-        .tv-members-shell .tv-date-select { background: #10161F !important; color: #E5ECF5 !important; border: 1px solid rgba(148,163,184,.2); }
-        .tv-members-shell .tv-member-table { background: #151C25 !important; }
-        .tv-members-shell .tv-brand-heading { background: rgba(21,28,37,.72); border: 1px solid rgba(148,163,184,.12); border-radius: 14px; padding: 10px 12px; }
-        .tv-members-shell .tv-members-overview { background: #151C25 !important; border-color: rgba(148,163,184,.16) !important; }
-        .tv-members-shell .tv-members-summary { background: #151C25 !important; border-color: rgba(148,163,184,.16) !important; }
-        .tv-members-shell .tv-members-summary > summary::-webkit-details-marker { display: none; }
+        .tv-members-shell .tv-brand-heading {
+          background: var(--surface);
+          border: 1px solid var(--line);
+          border-radius: 14px;
+          padding: 10px 12px;
+        }
+        .tv-members-shell .tv-members-summary > summary::-webkit-details-marker,
+        .tv-members-shell .tv-add-member-panel > summary::-webkit-details-marker { display: none; }
         .tv-members-shell .tv-add-member-panel { transition: width .18s ease, border-color .18s ease; }
         .tv-members-shell .tv-add-member-panel:not([open]) { width: 250px !important; }
-        .tv-members-shell .tv-add-member-panel > summary::-webkit-details-marker { display: none; }
         .tv-members-shell .tv-add-member-panel[open] > summary .tv-add-member-chevron { transform: rotate(45deg); }
         .tv-members-shell .tv-add-member-chevron { transition: transform .18s ease; }
-        .tv-members-shell .tv-form-section { border-top: 1px solid rgba(148,163,184,.14); padding-top: 14px; margin-top: 14px; }
-        .tv-members-shell .tv-form-section-title { color: #D6DEE9; font-size: 12px; font-weight: 700; letter-spacing: .02em; }
-        .tv-members-shell .tv-form-section-title span { color: #60A5FA; margin-right: 6px; }
+        .tv-members-shell .tv-form-section { border-top: 1px solid var(--line); padding-top: 14px; margin-top: 14px; }
+        .tv-members-shell .tv-form-section-title { color: var(--ink); font-size: 12px; font-weight: 700; letter-spacing: .02em; }
+        .tv-members-shell .tv-form-section-title span { color: var(--brand); margin-right: 6px; }
         @media (max-width: 1023px) {
           .tv-members-shell > .flex.flex-col.lg\\:flex-row > .lg\\:w-80 { width: 100% !important; }
           .tv-members-shell .tv-add-member-panel:not([open]) { width: 100% !important; }
@@ -571,19 +591,25 @@ export default function TvMembersTab({ active = true, embedded = false }) {
         <StatCard icon={Tv} label="อินดิเคเตอร์" value={stats.scripts.toLocaleString()} tone="purple" />
       </div>
 
+      {/* แผงนี้เคยใช้สีธีมมืดฝังตาย (text-slate-200 / border-slate-700) วางบนการ์ดสีขาว
+          ในธีมสว่างจึงเป็นตัวหนังสือขาวบนพื้นขาว อ่านไม่ออกเลย — เปลี่ยนมาใช้ token ทั้งหมด */}
       <details className="tv-members-summary ds-card">
-        <summary className="px-4 py-3 cursor-pointer list-none flex items-center justify-between gap-3 text-sm font-semibold text-slate-200">
+        <summary className="px-4 py-3 cursor-pointer list-none flex flex-wrap items-center justify-between gap-2 text-sm font-semibold" style={{ color: "var(--ink)" }}>
           <span>สรุปตามอินดิเคเตอร์</span>
-          <span className="text-xs font-normal text-slate-500">ช่วง {rangeLabel} · กดเพื่อดูรายละเอียด</span>
+          <span className="text-xs font-normal" style={{ color: "var(--ink-3)" }}>ช่วง {rangeLabel} · กดเพื่อดูรายละเอียด</span>
         </summary>
-        <div className="overflow-x-auto border-t border-slate-700/50">
-          <div className="min-w-[620px] grid grid-cols-[1.8fr_repeat(4,1fr)] gap-3 px-4 py-2 text-[11px] text-slate-500">
+        <div className="overflow-x-auto" style={{ borderTop: "1px solid var(--line)" }}>
+          <div className="min-w-[560px] grid grid-cols-[1.8fr_repeat(4,1fr)] gap-3 px-4 py-2 text-[11px] uppercase" style={{ color: "var(--ink-3)" }}>
             <span>อินดิเคเตอร์</span><span>ทั้งหมด</span><span>ใช้งานอยู่</span><span>ใกล้หมดอายุ</span><span>หมดอายุแล้ว</span>
           </div>
-          {scripts.length === 0 ? <div className="px-4 py-4 text-xs text-slate-500">ยังไม่มีอินดิเคเตอร์</div> : scripts.map((s) => {
+          {scripts.length === 0 ? <div className="px-4 py-4 text-xs" style={{ color: "var(--ink-3)" }}>ยังไม่มีอินดิเคเตอร์</div> : scripts.map((s) => {
             const ss = scriptStat(s);
-            return <div key={"stat-" + s.pine_id} className="min-w-[620px] grid grid-cols-[1.8fr_repeat(4,1fr)] gap-3 px-4 py-2.5 text-sm border-t border-slate-800/70">
-              <span className="truncate text-slate-200">{s.name}</span><span className="text-slate-300">{ss.total}</span><span className="text-emerald-400">{ss.active}</span><span className="text-amber-400">{ss.soon}</span><span className="text-rose-400">{ss.expired}</span>
+            return <div key={"stat-" + s.pine_id} className="min-w-[560px] grid grid-cols-[1.8fr_repeat(4,1fr)] gap-3 px-4 py-2.5 text-sm tabular-nums" style={{ borderTop: "1px solid var(--line)" }}>
+              <span className="truncate font-medium" style={{ color: "var(--ink)" }}>{s.name}</span>
+              <span style={{ color: "var(--ink-2)" }}>{ss.total}</span>
+              <span className="font-semibold" style={{ color: "var(--ok)" }}>{ss.active}</span>
+              <span className="font-semibold" style={{ color: ss.soon ? "var(--warn)" : "var(--ink-3)" }}>{ss.soon}</span>
+              <span className="font-semibold" style={{ color: ss.expired ? "var(--bad)" : "var(--ink-3)" }}>{ss.expired}</span>
             </div>;
           })}
         </div>
@@ -591,15 +617,16 @@ export default function TvMembersTab({ active = true, embedded = false }) {
 
       <div className="flex flex-col lg:flex-row gap-4">
         {/* ซ้าย: ฟอร์มเพิ่มสมาชิก */}
-        <details className="tv-members-form tv-add-member-panel lg:w-80 shrink-0 bg-white rounded-2xl border border-slate-200 p-5 h-fit">
+        {/* เดิมเป็น bg-white คู่กับ text-slate-100 = ตัวหนังสือขาวบนพื้นขาวในธีมสว่าง */}
+        <details className="tv-members-form tv-add-member-panel ds-card lg:w-80 shrink-0 p-5 h-fit">
           <summary className="flex items-center justify-between gap-3 cursor-pointer list-none">
             <span>
-              <strong className="block font-semibold text-slate-100">เพิ่มสมาชิกใหม่</strong>
-              <span className="block text-[11px] text-slate-500 mt-1">กรอกข้อมูล ตรวจสอบ แล้วจึงให้สิทธิ์</span>
+              <strong className="block font-semibold" style={{ color: "var(--ink)" }}>เพิ่มสมาชิกใหม่</strong>
+              <span className="block text-[11px] mt-1" style={{ color: "var(--ink-3)" }}>กรอกข้อมูล ตรวจสอบ แล้วจึงให้สิทธิ์</span>
             </span>
-            <span className="tv-add-member-chevron text-slate-400 text-lg leading-none">+</span>
+            <span className="tv-add-member-chevron text-lg leading-none" style={{ color: "var(--ink-3)" }}>+</span>
           </summary>
-          <div className="tv-add-member-fields space-y-3 mt-4 pt-4 border-t border-slate-700/50">
+          <div className="tv-add-member-fields space-y-3 mt-4 pt-4" style={{ borderTop: "1px solid var(--line)" }}>
           <div className="tv-form-section-title"><span>1</span>ข้อมูลลูกค้า</div>
           <div>
             <label className="text-xs text-slate-500">TradingView username</label>
@@ -712,8 +739,18 @@ export default function TvMembersTab({ active = true, embedded = false }) {
               </div>
             )}
           </div>
-          <div className="tv-members-search flex gap-2">
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหา username, ชื่อ, หรือเลข trade id" className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+          <div className="tv-members-search flex flex-wrap items-center gap-2">
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหา username, ชื่อ, หรือเลข trade id"
+              className="min-w-[200px] flex-1 rounded-lg px-3 py-2 text-sm"
+              style={{ background: "var(--surface)", border: "1px solid var(--line)", color: "var(--ink)" }} />
+            <button type="button" onClick={() => setShowAudit((v) => !v)}
+              className="shrink-0 rounded-lg px-3 py-2 text-xs font-medium transition-colors"
+              style={{ background: showAudit ? "var(--brand-soft)" : "var(--surface)",
+                       border: `1px solid ${showAudit ? "var(--brand)" : "var(--line)"}`,
+                       color: showAudit ? "var(--brand)" : "var(--ink-2)" }}
+              title="แสดง/ซ่อนคอลัมน์ เพิ่มสิทธิ์บน TV · สร้างเมื่อ · คนเพิ่ม · แก้ไขโดย">
+              {showAudit ? "ซ่อนคอลัมน์ตรวจสอบ" : "ดูคอลัมน์ตรวจสอบ"}
+            </button>
           </div>
           {/* จัดกลุ่มตามแบรนด์ (เฉพาะแบรนด์ที่โชว์ในหน้าจัดการ) — นับ/แสดง/export แยกกัน ไม่ปน */}
           {brands.filter((b) => b.show_in_manager !== false).map((b) => {
@@ -724,12 +761,15 @@ export default function TvMembersTab({ active = true, embedded = false }) {
             <div key={"brand-" + b.id} className="space-y-3">
               <div className="tv-brand-heading flex items-center justify-between gap-2">
                 <button onClick={() => setCollapsed((c) => ({ ...c, ["brand:" + b.id]: !brCollapsed }))} className="flex items-center gap-2 min-w-0">
-                  {brCollapsed ? <ChevronDown size={18} className="text-slate-400 shrink-0" /> : <ChevronUp size={18} className="text-slate-400 shrink-0" />}
-                  <h2 className="text-lg font-bold text-slate-800 truncate">{b.name}</h2>
+                  {brCollapsed ? <ChevronDown size={18} className="shrink-0" style={{ color: "var(--ink-3)" }} /> : <ChevronUp size={18} className="shrink-0" style={{ color: "var(--ink-3)" }} />}
+                  <h2 className="text-lg font-bold truncate" style={{ color: "var(--ink)" }}>{b.name}</h2>
                 </button>
                 <div className="flex items-center gap-2 shrink-0">
-                  <span className="text-xs text-slate-400">{new Set(brMembers.map((a) => a.username)).size} สมาชิก · {brScripts.length} สคริปต์</span>
-                  <button onClick={() => { setExportSel(brScripts.map((s) => s.pine_id)); setExportOpen(true); }} className="px-2.5 py-1 rounded-lg border border-slate-300 text-xs text-slate-600 hover:bg-slate-50">Export</button>
+                  {/* เดิมเป็น text-slate-400 บนพื้นเทาอ่อน ตัวเลขสมาชิกจึงแทบมองไม่เห็น */}
+                  <span className="text-xs tabular-nums" style={{ color: "var(--ink-2)" }}>{new Set(brMembers.map((a) => a.username)).size} สมาชิก · {brScripts.length} สคริปต์</span>
+                  <button onClick={() => { setExportSel(brScripts.map((s) => s.pine_id)); setExportOpen(true); }}
+                    className="px-2.5 py-1 rounded-lg text-xs font-medium"
+                    style={{ background: "var(--surface)", border: "1px solid var(--line)", color: "var(--ink-2)" }}>Export</button>
                 </div>
               </div>
               {!brCollapsed && brScripts.length === 0 && <div className="bg-white rounded-2xl border border-slate-200 p-4 text-center text-xs text-slate-400">แบรนด์นี้ยังไม่มีสคริปต์ — เพิ่มที่ ตั้งค่า → ตั้งค่า TV</div>}
@@ -740,48 +780,82 @@ export default function TvMembersTab({ active = true, embedded = false }) {
             const page = Math.min(pageBy[s.pine_id] || 1, totalPages);
             const pageRows = allRows.slice((page - 1) * pageSize, page * pageSize);
             return (
-              <div key={s.pine_id} className="tv-member-table bg-white rounded-2xl border border-slate-200 overflow-hidden">
-                <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between gap-2">
+              <div key={s.pine_id} className="tv-member-table ds-card overflow-hidden">
+                <div className="px-4 py-3 flex items-center justify-between gap-2" style={{ borderBottom: "1px solid var(--line)", background: "var(--surface-2, var(--ground))" }}>
                   <div className="min-w-0">
-                    <div className="font-semibold text-slate-800 truncate">{s.name}</div>
-                    {s.script_key && <div className="text-[11px] text-slate-400 truncate">{s.script_key}</div>}
+                    <div className="font-semibold truncate" style={{ color: "var(--ink)" }}>{s.name}</div>
+                    {s.script_key && <div className="text-[11px] truncate" style={{ color: "var(--ink-3)" }}>{s.script_key}</div>}
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    <span className="text-xs text-slate-500">{allRows.length} สมาชิก</span>
+                    <span className="text-xs tabular-nums" style={{ color: "var(--ink-2)" }}>{allRows.length} สมาชิก</span>
                     {isAdmin && <button onClick={() => deleteScript(s)} className="flex items-center gap-1 text-[11px] font-medium text-rose-600 hover:bg-rose-50 rounded-md px-2 py-1" title="ลบสคริปต์นี้"><Trash2 size={13} /> ลบสคริปต์</button>}
                     <button onClick={() => setCollapsed((c) => ({ ...c, [s.pine_id]: open }))} className="text-slate-400 hover:text-slate-600">{open ? <ChevronUp size={16} /> : <ChevronDown size={16} />}</button>
                   </div>
                 </div>
                 {open && <>
-                <div className="overflow-x-auto">
-                  <div className="divide-y divide-slate-100" style={{ minWidth: tableMinW }}>
-                    <div className="grid gap-2 px-4 py-2 text-[11px] text-slate-400" style={{ gridTemplateColumns: COLS }}>
-                      <H k="name">ชื่อลูกค้า</H><H k="user">User TV</H>{canSeeNewTv && <H k="email">อีเมล</H>}<H k="status">สถานะ</H><H k="trade">Trade ID</H><H k="exp">หมดอายุ</H><H k="tvGranted">เพิ่มสิทธิ์บน TV</H><H k="create">Create</H><H k="by">คนเพิ่ม</H><H k="editby">แก้ไขโดย</H><span></span>
-                    </div>
-                    {pageRows.length === 0 ? <div className="px-4 py-6 text-center text-xs text-slate-500">ยังไม่มีสมาชิกในสคริปต์นี้</div> : pageRows.map((a) => {
+                {isNarrow ? (
+                  /* มือถือ: การ์ดสรุป 3 อย่างที่ต้องรู้ทันที (ใคร · สถานะ · หมดอายุเมื่อไร)
+                     ที่เหลือกดเข้าไปดูในแผ่นรายละเอียด ไม่ต้องเลื่อนตารางแนวนอน */
+                  <div className="tv-rows">
+                    {pageRows.length === 0 ? <div className="px-4 py-6 text-center text-xs" style={{ color: "var(--ink-3)" }}>ยังไม่มีสมาชิกในสคริปต์นี้</div> : pageRows.map((a) => {
                       const st = statusInfo(a);
                       const nearExp = a.expiration && new Date(a.expiration).getTime() - now < 7 * 86400000 && new Date(a.expiration).getTime() > now;
                       return (
-                      <div key={a.id} className="grid gap-2 px-4 py-2.5 text-sm items-center" style={{ gridTemplateColumns: COLS }}>
-                        {a.display_name && (a.trade_id || a.username)
-                          ? <a href={`${window.location.pathname}?tab=inbox&${a.trade_id ? `open_trade=${encodeURIComponent(a.trade_id)}` : `open_tv=${encodeURIComponent(a.username)}`}`} target="_blank" rel="noopener noreferrer" className="min-w-0 font-medium text-brand-600 hover:text-brand-700 hover:underline truncate" title={`เปิดแชทของ ${a.display_name}`}>{a.display_name}</a>
-                          : <span className="min-w-0 font-medium text-slate-800 truncate" title={a.display_name || ""}>{a.display_name || "—"}</span>}
-                        <span className="min-w-0 text-slate-600 truncate" title={a.username}>{a.username}</span>
-                        {canSeeNewTv && <span className="min-w-0 text-slate-500 truncate text-xs" title={a.email || ""}>{a.email || "—"}</span>}
-                        <span className="min-w-0 flex flex-col items-start gap-0.5 truncate">
-                          <span className={`text-xs font-semibold truncate ${st.cls}`}>{st.label}</span>
-                          {a.tv_verified_at && (
-                            <span className={`text-[10px] font-medium truncate ${a.tv_access_verified === true ? "text-emerald-600" : a.tv_access_verified === false ? "text-rose-500" : "text-amber-500"}`} title={a.tv_verify_error || "ตรวจสิทธิ์ล่าสุด"}>
-                              {a.tv_access_verified === true ? "TV: มีสิทธิ์" : a.tv_access_verified === false ? "TV: ไม่พบสิทธิ์" : "TV: ตรวจไม่ได้"}
+                        <button key={a.id} type="button" onClick={() => setSheetRow(a)}
+                          className="tv-row flex w-full items-center gap-3 px-4 py-3 text-left">
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-medium" style={{ color: "var(--ink)" }}>{a.display_name || a.username}</span>
+                            <span className="mt-0.5 block truncate text-[11px]" style={{ color: "var(--ink-3)" }}>
+                              {a.username}{a.trade_id ? ` · ${a.trade_id}` : ""}
                             </span>
-                          )}
+                          </span>
+                          <span className="shrink-0 text-right">
+                            <span className="inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                              style={{ background: STATUS_TONE[st.tone].bg, color: STATUS_TONE[st.tone].fg }}>{st.label}</span>
+                            <span className="mt-1 block text-[11px] tabular-nums"
+                              style={{ color: st.key === "expired" ? "var(--bad)" : nearExp ? "var(--warn)" : "var(--ink-3)",
+                                       fontWeight: (nearExp || st.key === "expired") ? 600 : 400 }}>{expLabel(a)}</span>
+                          </span>
+                          <ChevronRight size={16} className="shrink-0" style={{ color: "var(--ink-3)" }} />
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                <div className="overflow-x-auto">
+                  <div className="tv-rows" style={{ minWidth: tableMinW }}>
+                    <div className="grid gap-3 px-4 py-2 text-[11px]" style={{ gridTemplateColumns: COLS, borderBottom: "1px solid var(--line)" }}>
+                      <H k="name">ชื่อลูกค้า</H><H k="user">User TV</H>{canSeeNewTv && <H k="email">อีเมล</H>}<H k="status">สถานะ</H><H k="trade">Trade ID</H><H k="exp">หมดอายุ</H>
+                      {showAudit && <><H k="tvGranted">เพิ่มสิทธิ์บน TV</H><H k="create">สร้างเมื่อ</H><H k="by">คนเพิ่ม</H><H k="editby">แก้ไขโดย</H></>}
+                      <span></span>
+                    </div>
+                    {pageRows.length === 0 ? <div className="px-4 py-6 text-center text-xs" style={{ color: "var(--ink-3)" }}>ยังไม่มีสมาชิกในสคริปต์นี้</div> : pageRows.map((a) => {
+                      const st = statusInfo(a);
+                      const nearExp = a.expiration && new Date(a.expiration).getTime() - now < 7 * 86400000 && new Date(a.expiration).getTime() > now;
+                      return (
+                      <div key={a.id} className="tv-row grid gap-3 px-4 py-2.5 text-sm items-center" style={{ gridTemplateColumns: COLS }}>
+                        {a.display_name && (a.trade_id || a.username)
+                          ? <a href={`${window.location.pathname}?tab=inbox&${a.trade_id ? `open_trade=${encodeURIComponent(a.trade_id)}` : `open_tv=${encodeURIComponent(a.username)}`}`} target="_blank" rel="noopener noreferrer" className="min-w-0 font-medium hover:underline truncate" style={{ color: "var(--brand)" }} title={`เปิดแชทของ ${a.display_name}`}>{a.display_name}</a>
+                          : <span className="min-w-0 font-medium truncate" style={{ color: "var(--ink)" }} title={a.display_name || ""}>{a.display_name || "—"}</span>}
+                        <span className="min-w-0 truncate" style={{ color: "var(--ink-2)" }} title={a.username}>{a.username}</span>
+                        {canSeeNewTv && <span className="min-w-0 truncate text-xs" style={{ color: "var(--ink-3)" }} title={a.email || ""}>{a.email || "—"}</span>}
+                        <span className="min-w-0">
+                          <span className="inline-block max-w-full truncate rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                            style={{ background: STATUS_TONE[st.tone].bg, color: STATUS_TONE[st.tone].fg }}
+                            title={st.hint || ""}>{st.label}</span>
                         </span>
-                        <span className="text-slate-500 truncate text-xs" title={a.trade_id || ""}>{a.trade_id || "—"}</span>
-                        <span className={`text-xs truncate ${nearExp ? "text-amber-500" : "text-slate-500"}`}>{expLabel(a)}</span>
-                        <span className={`text-xs truncate ${a.tv_granted_at ? "text-violet-600" : "text-slate-400"}`} title={a.tv_granted_at ? "วันที่ที่ TradingView ระบุว่าเพิ่มสิทธิ์" : "การตรวจจาก TradingView ยังไม่ส่งวันที่เพิ่มสิทธิ์"}>{tvGrantedLabel(a)}</span>
-                        <span className="text-xs text-slate-500 truncate">{createLabel(a)}</span>
-                        <span className="text-xs text-slate-500 truncate" title={a.granted_by || ""}>{a.granted_by || "—"}</span>
-                        <span className="text-xs text-slate-500 truncate min-w-0" title={a.edited_by || ""}>{a.edited_at ? <>{a.edited_by || "—"} <span className="text-slate-400">· {new Date(a.edited_at).toLocaleDateString("th-TH", { day: "2-digit", month: "short" })}</span></> : "—"}</span>
+                        <span className="truncate text-xs tabular-nums" style={{ color: "var(--ink-2)" }} title={a.trade_id || ""}>{a.trade_id || "—"}</span>
+                        {/* สีวันหมดอายุมีความหมายเดียว: เหลือง = ใกล้หมดใน 7 วัน · แดง = หมดแล้ว
+                            เดิมใช้ทั้งเหลือง/ม่วง/ส้ม/เทาปนกันในแถวเดียว จนสีไม่สื่ออะไร */}
+                        <span className="truncate text-xs tabular-nums"
+                          style={{ color: st.key === "expired" ? "var(--bad)" : nearExp ? "var(--warn)" : "var(--ink-2)",
+                                   fontWeight: (nearExp || st.key === "expired") ? 600 : 400 }}>{expLabel(a)}</span>
+                        {showAudit && <>
+                          <span className="truncate text-xs" style={{ color: "var(--ink-3)" }} title={a.tv_granted_at ? "วันที่ที่ TradingView ระบุว่าเพิ่มสิทธิ์" : "การตรวจจาก TradingView ยังไม่ส่งวันที่เพิ่มสิทธิ์"}>{tvGrantedLabel(a)}</span>
+                          <span className="truncate text-xs" style={{ color: "var(--ink-3)" }}>{createLabel(a)}</span>
+                          <span className="truncate text-xs" style={{ color: "var(--ink-3)" }} title={a.granted_by || ""}>{a.granted_by || "—"}</span>
+                          <span className="truncate text-xs min-w-0" style={{ color: "var(--ink-3)" }} title={a.edited_by || ""}>{a.edited_at ? <>{a.edited_by || "—"} · {new Date(a.edited_at).toLocaleDateString("th-TH", { day: "2-digit", month: "short" })}</> : "—"}</span>
+                        </>}
                         <span className="flex items-center justify-end gap-1.5">
                           <button onClick={() => checkAccess(a)} disabled={!!checkingAccess[a.id]} className="text-slate-400 hover:text-emerald-600 disabled:opacity-50" title="ตรวจสิทธิ์บน TradingView">
                             {checkingAccess[a.id] ? <Loader2 size={14} className="animate-spin" /> : <Eye size={14} />}
@@ -795,6 +869,7 @@ export default function TvMembersTab({ active = true, embedded = false }) {
                     })}
                   </div>
                 </div>
+                )}
                 {allRows.length > pageSize && (
                   <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-slate-100 text-sm">
                     <div className="flex items-center gap-1.5">
@@ -817,6 +892,70 @@ export default function TvMembersTab({ active = true, embedded = false }) {
           {brands.filter((b) => b.show_in_manager !== false).length === 0 && <div className="bg-white rounded-2xl border border-slate-200 p-6 text-center text-sm text-slate-400">ยังไม่มีแบรนด์ที่โชว์ในหน้านี้ — เพิ่ม/ตั้งค่าแบรนด์ที่ <b>ตั้งค่า → ตั้งค่า TV</b></div>}
         </div>
       </div>
+
+      {/* แผ่นรายละเอียดบนมือถือ — เด้งขึ้นจากด้านล่าง เห็นข้อมูลลูกค้าครบในหน้าจอเดียว
+          พร้อมปุ่มจัดการขนาดนิ้วกดได้ (ในตารางเป็นไอคอน 14px ซึ่งเล็กเกินไปสำหรับมือถือ) */}
+      {sheetRow && (() => {
+        const a = sheetRow;
+        const st = statusInfo(a);
+        const Row = ({ k, v, tone }) => (
+          <div className="flex items-start justify-between gap-3 py-2" style={{ borderTop: "1px solid var(--line)" }}>
+            <span className="shrink-0 text-xs" style={{ color: "var(--ink-3)" }}>{k}</span>
+            <span className="min-w-0 break-words text-right text-[13px]" style={{ color: tone || "var(--ink)" }}>{v || "—"}</span>
+          </div>
+        );
+        const act = "flex flex-1 items-center justify-center gap-1.5 rounded-control py-2.5 text-xs font-semibold";
+        return (
+          <div className="fixed inset-0 z-[200] flex items-end bg-black/50" onClick={() => setSheetRow(null)}>
+            {/* เผื่อที่ท้ายแผ่นให้พ้นแถบเมนูล่างของมือถือ ไม่งั้นปุ่ม "ถอนสิทธิ์" ถูกทับ */}
+            <div className="max-h-[85vh] w-full overflow-y-auto rounded-t-2xl p-4 pb-[calc(5.5rem+env(safe-area-inset-bottom))]"
+              style={{ background: "var(--surface)" }} onClick={(e) => e.stopPropagation()}>
+              <div className="mx-auto mb-3 h-1 w-10 rounded-full" style={{ background: "var(--line-strong)" }} />
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="truncate text-base font-bold" style={{ color: "var(--ink)" }}>{a.display_name || a.username}</div>
+                  <div className="mt-1 inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                    style={{ background: STATUS_TONE[st.tone].bg, color: STATUS_TONE[st.tone].fg }}>{st.label}</div>
+                </div>
+                <button onClick={() => setSheetRow(null)} className="shrink-0 p-1" style={{ color: "var(--ink-3)" }}><X size={20} /></button>
+              </div>
+              {st.hint && <div className="mt-2 rounded-control px-2.5 py-2 text-[11px]" style={{ background: STATUS_TONE[st.tone].bg, color: STATUS_TONE[st.tone].fg }}>{st.hint}</div>}
+
+              <div className="mt-3">
+                <Row k="User TV" v={a.username} />
+                {canSeeNewTv && <Row k="อีเมล" v={a.email} />}
+                <Row k="Trade ID" v={a.trade_id} />
+                <Row k="หมดอายุ" v={expLabel(a)} tone={st.key === "expired" ? "var(--bad)" : undefined} />
+                <Row k="เพิ่มสิทธิ์บน TV" v={tvGrantedLabel(a)} />
+                <Row k="สร้างเมื่อ" v={createLabel(a)} />
+                <Row k="คนเพิ่ม" v={a.granted_by} />
+                <Row k="แก้ไขโดย" v={a.edited_at ? `${a.edited_by || "—"} · ${new Date(a.edited_at).toLocaleDateString("th-TH", { day: "2-digit", month: "short" })}` : null} />
+              </div>
+
+              {a.display_name && (a.trade_id || a.username) && (
+                <a href={`${window.location.pathname}?tab=inbox&${a.trade_id ? `open_trade=${encodeURIComponent(a.trade_id)}` : `open_tv=${encodeURIComponent(a.username)}`}`}
+                  target="_blank" rel="noopener noreferrer"
+                  className="mt-3 flex items-center justify-center gap-1.5 rounded-control py-2.5 text-xs font-semibold"
+                  style={{ background: "var(--brand-soft)", color: "var(--brand)" }}>เปิดแชทของลูกค้า</a>
+              )}
+
+              <div className="mt-2 flex gap-2">
+                <button onClick={() => checkAccess(a)} disabled={!!checkingAccess[a.id]} className={act}
+                  style={{ background: "var(--surface)", border: "1px solid var(--line)", color: "var(--ink-2)" }}>
+                  {checkingAccess[a.id] ? <Loader2 size={14} className="animate-spin" /> : <Eye size={14} />} ตรวจสิทธิ์
+                </button>
+                <button onClick={() => { setSheetRow(null); openEdit(a); }} className={act}
+                  style={{ background: "var(--surface)", border: "1px solid var(--line)", color: "var(--ink-2)" }}><Pencil size={14} /> แก้ไข</button>
+                <button onClick={() => { setSheetRow(null); openExpiry(a); }} className={act}
+                  style={{ background: "var(--surface)", border: "1px solid var(--line)", color: "var(--ink-2)" }}><Clock size={15} /> วันหมดอายุ</button>
+              </div>
+              <button onClick={() => { setSheetRow(null); revoke(a); }}
+                className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-control py-2.5 text-xs font-semibold"
+                style={{ background: "rgb(var(--n-bad) / .12)", color: "var(--bad)" }}><X size={15} /> ถอนสิทธิ์บน TradingView</button>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

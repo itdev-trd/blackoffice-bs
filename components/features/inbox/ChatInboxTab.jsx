@@ -8,6 +8,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   ChevronDown,
+  SlidersHorizontal,
   MessageSquare,
   Search,
   Menu,
@@ -38,6 +39,11 @@ const INBOX_INSTAGRAM_ENABLED = true;
 const INBOX_COMMENTS_ENABLED = false; // พักระบบ "ความคิดเห็น" (ซ่อนแท็บ + หยุดดึงความคิดเห็น) โดยไม่ลบข้อมูลเดิม
 const MSG_REPLY_ENABLED = true;
 const MSG_EMOJI_ENABLED = false;      // ซ่อนปุ่มอีโมจิในช่องตอบแชท ชั่วคราว (ไม่ลบโค้ด)
+
+// คอลัมน์ที่หน้าแชทใช้จริง — เลี่ยง select * ที่ลากคอลัมน์หนักอย่าง ads_context/hash มาด้วย
+// ประกาศไว้ระดับโมดูลเพราะทั้งตอนเปิดแชทและตอนโหลดล่วงหน้า (prefetch) ต้องใช้ชุดเดียวกันเป๊ะ
+// ไม่งั้นของในแคชจะขาดคอลัมน์แล้วหน้าแชทเรนเดอร์ไม่ครบ
+const CHAT_OPEN_COLS = "id, page_id, page_name, psid, customer_name, source, stage, stage_manual, classified_by, needs_ai, needs_verify, manual_data, manual_data_by, manual_data_at, trade_id, username, phone, email, awaiting_reply, unread, cust_read_at, cust_lang, country, profile_pic, transcript, account_opened_at, entry_ad_id, entry_ad_name, last_user_text, last_reply_text, last_reply_by, last_reply_at, last_message_at, comment_ad_name, comment_ad_ids, comment_ad_names, comment_is_ad, comment_promoted_to_inbox, comment_permalink, blocked_at, synced_at, updated_at, notes, tags, ai_summary, ai_summary_at";
 
 export default function ChatInboxTab({ allowedPages = null, alertAllowed = true, alertMin = 3, alertPages = [], alertSound = true, alertNew = true, gotoChat = null, onGotoDone, active = true }) {
   const isInstagramComment = (row) => String(row?.id || "").startsWith("igc_");
@@ -76,6 +82,12 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   const [unreadOnly, setUnreadOnly] = useState(false);   // กรองดูเฉพาะแชทที่ยังไม่อ่าน
   const [tagFilter, setTagFilter] = useState(null);      // กรองดูเฉพาะแชทที่ติดแท็กนี้ (null = ไม่กรอง)
   const [countryFilter, setCountryFilter] = useState(null); // กรองตามประเทศลูกค้า (null = ทุกประเทศ)
+  // แผงตัวกรอง — พับเก็บได้ เพราะแถวชิป + ช่องประเทศ + แท็ก กินความสูงราว 1 ใน 3 ของแผงซ้าย
+  // ทั้งที่ส่วนใหญ่ตั้งครั้งเดียวแล้วไม่แตะอีก · จำค่าที่เลือกไว้ในเครื่อง
+  // อ่าน localStorage หลัง mount เท่านั้น (อ่านตอน useState จะทำให้ SSR/client ไม่ตรงกัน)
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  useEffect(() => { setFiltersOpen(lsGet("ui.inbox.filtersOpen", false) === true); }, []);
+  const toggleFilters = () => setFiltersOpen((v) => { lsSet("ui.inbox.filtersOpen", !v); return !v; });
   const [adFilter, setAdFilter] = useState(null);           // กรองตามแอดที่ลูกค้าทักมาจาก (entry_ad_id)
   // เมนู "ไม่สนใจ" — อยู่ต่อจากบล็อกไว้ · ลูกค้าที่ถูกมาร์กจะออกจากกล่องหลักมาอยู่ที่นี่
   // ทักกลับมาเมื่อไหร่ระบบดึงกลับเข้ากล่องหลักเอง (ถือว่ายังสนใจ)
@@ -115,6 +127,37 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   const focusRefreshAtRef = useRef(0);
   const syncGuardRef = useRef({ inFlight: new Map(), lastRun: new Map() });
   const openRequestRef = useRef({ seq: 0, controller: null });
+  // แคชแชทที่โหลดแล้ว + โหลดล่วงหน้าตอนเอาเมาส์ชี้
+  // ฐานข้อมูลตอบใน ~2.5ms เวลาที่เหลือคือ round-trip ไป Supabase ทั้งหมด
+  // ชี้เมาส์ก่อนคลิกมักนำหน้าอยู่หลายร้อย ms จึงยิงล่วงหน้าได้ทัน กดแล้วขึ้นทันที
+  // บทสนทนาใหญ่สุดในระบบแค่ 12KB จึงเก็บทั้งก้อนในหน่วยความจำได้สบาย
+  const chatCacheRef = useRef(new Map());
+  const prefetchTimerRef = useRef(null);
+  const CHAT_CACHE_MS = 60 * 1000;   // สั้นพอที่จะไม่โชว์ของเก่า เพราะเปิดแล้วมี revalidate ตามหลังเสมอ
+
+  function cacheChat(row) {
+    if (!row?.id) return;
+    const c = chatCacheRef.current;
+    c.set(row.id, { at: Date.now(), row });
+    if (c.size > 40) c.delete(c.keys().next().value);
+  }
+  function cachedChat(id) {
+    const hit = chatCacheRef.current.get(id);
+    if (!hit) return null;
+    if (Date.now() - hit.at > CHAT_CACHE_MS) { chatCacheRef.current.delete(id); return null; }
+    return hit.row;
+  }
+  // ชี้ค้างสั้นๆ ก่อนค่อยยิง — กันการกวาดเมาส์ผ่านลิสต์แล้วยิงรัวทุกแถว
+  function prefetchChat(item) {
+    if (!item?.id || cachedChat(item.id)) return;
+    clearTimeout(prefetchTimerRef.current);
+    prefetchTimerRef.current = setTimeout(async () => {
+      if (cachedChat(item.id)) return;
+      const { data } = await supabase.from("chat_customers").select(CHAT_OPEN_COLS).eq("id", item.id).maybeSingle();
+      if (data) cacheChat(normalizeChatSource(data));
+    }, 120);
+  }
+  function cancelPrefetch() { clearTimeout(prefetchTimerRef.current); }
   const adSourceCacheRef = useRef(new Map());
   const [labelMsg, setLabelMsg] = useState(null);   // ผลการส่งป้ายไป Meta {type: loading|ok|err, text}
   const [tagMsg, setTagMsg] = useState("");
@@ -345,6 +388,25 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     return () => { stop = true; clearInterval(iv); document.title = "Besight"; };
   }, [alertAllowed, alertMin, alertPages.join(","), allowedPages ? allowedPages.join(",") : "", pageSel.mode, pageSel.single, pageSel.multi.join(",")]);
   const [infoOpen, setInfoOpen] = useState(false);         // มือถือ: ขยายรายละเอียดแอด
+  // โหมดของพื้นที่ใต้ห้องแชท — เดิมมีแค่กล่องพิมพ์ ส่วนเช็คไอดีเทรดกับกรอกข้อมูลลูกค้า
+  // อยู่แผงขวาสุดซึ่งจอแคบมองไม่เห็น ต้องเลื่อนไปมา · ย้ายมาสลับตรงนี้ให้จบในที่เดียว
+  // "reply" คือค่าเริ่มต้นเสมอ เพราะงานหลักคือตอบแชท ไม่ใช่กรอกข้อมูล
+  const [composeMode, setComposeMode] = useState("reply");
+  // แท็บนี้มีไว้สำหรับจอที่ "ไม่มีแผงขวา" เท่านั้น — มือถือกับแท็บเล็ต
+  // บนคอม (≥1024px) แผงข้อมูลลูกค้าอยู่ทางขวาอยู่แล้ว ถ้ามีแท็บอีกจะซ้ำซ้อนและกินที่กล่องพิมพ์
+  // ต้องผูกกับความกว้างจริง ไม่ใช่ซ่อนด้วย CSS เฉยๆ ไม่งั้นย่อจอตอนอยู่โหมดข้อมูลลูกค้า
+  // แล้วขยายกลับ จะเหลือแต่ที่ว่างเพราะกล่องพิมพ์ถูกเงื่อนไขซ่อนอยู่
+  const [hasSidePanel, setHasSidePanel] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia?.("(min-width: 1024px)");
+    if (!mq) return;
+    const sync = () => setHasSidePanel(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+  // จอที่มีแผงขวาแล้ว บังคับกลับโหมดตอบเสมอ
+  const activeCompose = hasSidePanel ? "reply" : composeMode;
   const [statusMenuOpen, setStatusMenuOpen] = useState(false); // มือถือ: เมนูแฮมเบอร์เกอร์ปรับสถานะ
   // โน้ต/แท็ก/สรุปบทสนทนา — เก็บ draft ของโน้ตแยกจาก selected เพราะพิมพ์แล้วค่อย save ตอน blur
   const [notesDraft, setNotesDraft] = useState("");
@@ -478,7 +540,9 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
 
   async function loadSavedReplies(pageId, openSeq = openRequestRef.current.seq) {
     setSavedErr("");
-    if (String(pageId || "").startsWith("line:")) { setSavedReplies([]); return; }
+    // เดิมตัดแชท LINE ทิ้งตรงนี้ ทำให้ไลน์ใช้คลังข้อความไม่ได้เลย
+    // แต่ฟังก์ชันนี้อ่านจากตาราง saved_replies ตรงๆ ไม่ได้พึ่ง Meta API จึงใช้กับ LINE ได้เหมือนกัน
+    // (page_id ของไลน์คือ "line:<id ของ OA>" ใช้เป็นคีย์แยกรายบัญชีได้ตามปกติ)
     const cacheKey = String(pageId || "__global__");
     const cached = savedCacheRef.current[cacheKey];
     if (cached && Date.now() - cached.at < 5 * 60 * 1000) {
@@ -493,7 +557,11 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     if (openSeq !== openRequestRef.current.seq) return;
     if (error) { setSavedErr(error.message); setSavedReplies([]); return; }
     const brandIds = new Set((pageBrands || []).filter((b) => Array.isArray(b.pages) && b.pages.map(String).includes(String(pageId))).map((b) => String(b.id)));
-    const items = (data || []).filter((r) => !r.brand_id || brandIds.has(String(r.brand_id))).map((r) => ({ id: r.id, title: r.title, message: r.message || "", image: r.image_url || null }));
+    const items = (data || []).filter((r) => !r.brand_id || brandIds.has(String(r.brand_id))).map((r) => ({
+      id: r.id, title: r.title, message: r.message || "",
+      // แถวเก่ามีแต่ image_url เดี่ยว แถวใหม่ใช้ image_urls — รวมเป็นรายการเดียวเสมอ
+      images: Array.isArray(r.image_urls) && r.image_urls.length ? r.image_urls : (r.image_url ? [r.image_url] : []),
+    }));
     savedCacheRef.current[cacheKey] = { at: Date.now(), items };
     setSavedReplies(items);
   }
@@ -765,6 +833,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
         if (payload.eventType === "DELETE") {
           const deletedId = String(payload.old?.id || "");
           if (deletedId) {
+            chatCacheRef.current.delete(deletedId);
             setList((items) => (items || []).filter((item) => item.id !== deletedId));
             if (selRef.current?.id === deletedId) setSelected(null);
           }
@@ -774,6 +843,8 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
         // ใช้ payload อัปเดตลิสต์โดยตรง ไม่โหลด 200 ห้องใหม่ทุกครั้งที่ข้อความ/สถานะเปลี่ยน
         if (row?.id) {
           recordInboxLatency("realtime_received", row);
+          // ห้องนี้เปลี่ยนแล้ว ของในแคช prefetch เก่าทันที ต้องทิ้ง ไม่งั้นกดเข้าไปเห็นข้อความเก่า
+          chatCacheRef.current.delete(row.id);
           const existingBefore = (listRef.current || []).find((item) => item.id === row.id);
           const countChanged = !existingBefore
             || existingBefore.unread !== row.unread
@@ -873,7 +944,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     const onVis = () => { if (document.visibilityState === "visible") onFocus(); };
     document.addEventListener("visibilitychange", onVis);
     window.addEventListener("focus", onFocus);
-    return () => { stopped = true; clearTimeout(unreadRefreshTimerRef.current); clearTimeout(transcriptRefreshTimerRef.current); clearInterval(fallback); clearInterval(readTimer); clearInterval(commentReplyTimer); clearInterval(instagramFallbackTimer); supabase.removeChannel(channel); window.removeEventListener("focus", onFocus); document.removeEventListener("visibilitychange", onVis); };
+    return () => { stopped = true; clearTimeout(unreadRefreshTimerRef.current); clearTimeout(transcriptRefreshTimerRef.current); clearTimeout(prefetchTimerRef.current); clearInterval(fallback); clearInterval(readTimer); clearInterval(commentReplyTimer); clearInterval(instagramFallbackTimer); supabase.removeChannel(channel); window.removeEventListener("focus", onFocus); document.removeEventListener("visibilitychange", onVis); };
   }, [active, alertMin]);
   useEffect(() => { setList(null); loadList(); }, [listTab, unreadOnly]);   // เปลี่ยนแท็บ/ตัวกรองยังไม่อ่าน = แสดงสถานะโหลด ไม่สรุปผิดว่าไม่มีแชท
   useEffect(() => { setSelected(null); setList(null); loadList(); }, [showBlocked, showDropped]);
@@ -1001,22 +1072,26 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     openRequestRef.current = { seq: openSeq, controller };
     const startedAt = performance.now();
     const timeout = setTimeout(() => controller.abort(), 12_000);
-    setSelected({ ...item, transcript: null });
+    // มีในแคชจากการชี้เมาส์ = โชว์เลย ไม่ต้องรอเน็ต (ยังยิง query ตามหลังเพื่อ revalidate)
+    const preloaded = cachedChat(item.id);
+    setSelected(preloaded || { ...item, transcript: null });
     logActivity("open_chat", { id: item.id, customer_name: item.customer_name, page_id: item.page_id });
-    setTranslations({}); setReply(""); setSendPreview(null); setSendMsg(""); setAdSources([]); setAdLoading(false); setSavedReplies([]); setSavedOpen(false); setKnowledgeOpen(false); setKnowledgeResults([]); setReplyTo(null); setMessageMenu(null); setKnowledgeCapture(null); setKnowledgeCaptureMsg(""); setEmojiOpen(false); setInfoOpen(false); setStatusMenuOpen(false); setLabelMsg(null); setQuickFillState({});
+    setTranslations({}); setReply(""); setSendPreview(null); setSendMsg(""); setAdSources([]); setAdLoading(false); setSavedReplies([]); setSavedOpen(false); setKnowledgeOpen(false); setKnowledgeResults([]); setReplyTo(null); setMessageMenu(null); setKnowledgeCapture(null); setKnowledgeCaptureMsg(""); setEmojiOpen(false); setInfoOpen(false); setComposeMode("reply"); setStatusMenuOpen(false); setLabelMsg(null); setQuickFillState({});
     setForceLang(item.source === "line" ? "Thai" : lsGet(`ui.forceLang.${item.id}`, "auto"));   // LINE เป็นภาษาไทย ไม่ต้องแปล
     // LINE OA ใช้ภาษาไทย ไม่ต้องเรียกตัวแปลหรือสร้างคำแปลใต้ข้อความ
     const translationPromise = item.source === "line" ? null : supabase.functions.invoke("messenger-reply", { body: { action: "translate", id: item.id } });
     setTranslating(!!translationPromise);
-    // ดึงเฉพาะคอลัมน์ที่หน้าแชทใช้จริง (เลี่ยง select * ที่ลากคอลัมน์หนักที่ไม่ได้ใช้ เช่น ads_context/hash → เปิดแชทไวขึ้นมากในแชทใหญ่)
-    const CHAT_COLS = "id, page_id, page_name, psid, customer_name, source, stage, stage_manual, classified_by, needs_ai, needs_verify, manual_data, manual_data_by, manual_data_at, trade_id, username, phone, email, awaiting_reply, unread, cust_read_at, cust_lang, country, profile_pic, transcript, account_opened_at, entry_ad_id, entry_ad_name, last_user_text, last_reply_text, last_reply_by, last_reply_at, last_message_at, comment_ad_name, comment_ad_ids, comment_ad_names, comment_is_ad, comment_promoted_to_inbox, comment_permalink, blocked_at, synced_at, updated_at, notes, tags, ai_summary, ai_summary_at";
-    if (translationPromise) try {
-      const { data, error } = await supabase.from("chat_customers").select(CHAT_COLS).eq("id", item.id).maybeSingle().abortSignal(controller.signal);
+    // ต้องดึงบทสนทนาทุกช่องทาง — เดิมบล็อกนี้ถูกครอบด้วย if (translationPromise) ซึ่งเป็น null เสมอสำหรับ LINE
+    // ผลคือเปิดแชท LINE แล้วไม่ยิง query เลย ต้องรอ poll รอบถัดไป (ทุก 10 วิ) ถึงจะเห็นข้อความ
+    // ที่ต้องข้ามสำหรับ LINE คือ "ส่วนแปล" เท่านั้น ซึ่งจัดการอยู่ท้ายฟังก์ชันแล้ว
+    try {
+      const { data, error } = await supabase.from("chat_customers").select(CHAT_OPEN_COLS).eq("id", item.id).maybeSingle().abortSignal(controller.signal);
       if (openSeq !== openRequestRef.current.seq) return;
       if (error) throw error;
       if (!data) throw new Error("ไม่พบข้อมูลแชทนี้");
       const normalized = normalizeChatSource(data);
-      recordInboxLatency("chat_opened", normalized, { query_ms: Math.round(performance.now() - startedAt) });
+      recordInboxLatency("chat_opened", normalized, { query_ms: Math.round(performance.now() - startedAt), from_cache: !!preloaded });
+      cacheChat(normalized);
       setSelected(normalized);
       void loadAdSources(normalized, openSeq);
       void loadSavedReplies(normalized.page_id, openSeq);
@@ -1041,7 +1116,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
       if (openSeq === openRequestRef.current.seq) {
         const aborted = error?.name === "AbortError";
         setSendMsg(aborted ? "โหลดแชทเกิน 12 วินาที กรุณากดลองใหม่" : `โหลดแชทไม่สำเร็จ: ${error?.message || error}`);
-        setSelected((s) => (s?.id === item.id ? { ...s, transcript: [] } : s));
+        if (!preloaded) setSelected((s) => (s?.id === item.id ? { ...s, transcript: [] } : s));
       }
     } finally {
       clearTimeout(timeout);
@@ -1509,6 +1584,14 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   }, {});
   const allAds = Object.values(adMap).sort((a, c) => c.n - a.n);
 
+  // สรุปตัวกรองที่เปิดค้างอยู่ — โชว์บนหัวแผงตอนพับ กันสับสนว่า "ทำไมแชทหายไป"
+  const activeFilterLabels = [
+    showBlocked ? "บล็อกไว้" : showDropped ? "ไม่สนใจ" : unreadOnly ? "ยังไม่อ่าน" : null,
+    countryFilter,
+    adFilter ? (allAds.find((a) => a.id === adFilter)?.name || "ตามแอด") : null,
+    tagFilter ? `🏷 ${tagFilter}` : null,
+  ].filter(Boolean);
+
   const filtered = (list || []).filter((x) =>
     (!unreadOnly || x.unread) &&
     (!tagFilter || (Array.isArray(x.tags) && x.tags.includes(tagFilter))) &&
@@ -1679,7 +1762,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
 
   return (
     // มือถือ: เต็มจอ (chat-shell ใช้ dvh ใน index.css) ไม่มีขอบมน — เดสก์ท็อป: การ์ด 82vh มีขอบมน
-    <div className={`chat-shell ${selected ? "is-selected" : ""} bg-night-surface md:rounded-2xl border-0 md:border border-night-border md:shadow-sm overflow-hidden flex relative`}>
+    <div className={`chat-shell ${selected ? "is-selected" : ""} bg-night-surface lg:rounded-2xl border-0 lg:border border-night-border lg:shadow-sm overflow-hidden flex relative`}>
       {/* ดูรูปแบบขยายเต็มจอ (คลิกรูปในแชท) — กดพื้นดำ/ปุ่ม X เพื่อปิด · คลิกขวาที่รูปเพื่อ Save ได้ */}
       {lightbox && (
         <div className="fixed inset-0 z-[200] bg-black/85 flex items-center justify-center p-4" onClick={() => setLightbox(null)}>
@@ -1742,7 +1825,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
         </div>
       )}
       {/* ซ้าย: หัวเพจ + แท็บ + ลิสต์ (มือถือ: เต็มจอ, ซ่อนเมื่อเปิดแชท) */}
-      <div className={`chat-inbox-list w-full md:w-[340px] xl:w-[423px] border-r border-night-border flex-col shrink-0 ${selected ? "hidden md:flex" : "flex"}`}>
+      <div className={`chat-inbox-list w-full lg:w-[300px] xl:w-[423px] border-r border-night-border flex-col shrink-0 ${selected ? "hidden lg:flex" : "flex"}`}>
         {/* หัว: โลโก้+ชื่อเพจ + dropdown เลือกเพจ */}
         <div className="chat-list-header p-2.5 border-b border-night-border relative">
           <button onClick={() => setPageMenuOpen((o) => !o)} className="flex items-center gap-2 w-full text-left hover:bg-night-surface2 rounded-lg p-1">
@@ -1804,6 +1887,18 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
           </div>
           <SearchInput value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหาชื่อ/ข้อความ/ประเทศ"
             inputClassName="!bg-night-surface2 !border-night-border !text-night-ink !placeholder-night-ink-3" />
+          {/* หัวแผงตัวกรอง — กดพับ/คลี่ · ตอนพับยังบอกว่ากรองอะไรค้างไว้อยู่ จะได้ไม่งงว่าทำไมแชทหาย */}
+          <button type="button" onClick={toggleFilters}
+            className="flex w-full items-center gap-1.5 rounded-control border border-night-border bg-night-surface2 px-2.5 py-1.5 text-[11px] font-medium text-night-ink-2 hover:text-night-ink">
+            <SlidersHorizontal size={12} className="shrink-0" />
+            <span className="shrink-0">ตัวกรอง</span>
+            {activeFilterLabels.length > 0 && (
+              <span className="min-w-0 flex-1 truncate text-left text-night-accent">· {activeFilterLabels.join(" · ")}</span>
+            )}
+            <ChevronDown size={14} className={`ml-auto shrink-0 transition-transform ${filtersOpen ? "rotate-180" : ""}`} />
+          </button>
+
+          {filtersOpen && <>
           <div className="flex gap-1.5 overflow-x-auto -mx-0.5 px-0.5 pb-0.5">
             <FilterPill active={!showBlocked && !unreadOnly} onClick={() => { setShowBlocked(false); setShowDropped(false); setUnreadOnly(false); }} className={!showBlocked && !unreadOnly ? "" : "!bg-night-surface2 !border-night-border !text-night-ink-2"}>แชทปกติ</FilterPill>
             <FilterPill active={unreadOnly} onClick={() => { setShowBlocked(false); setShowDropped(false); setUnreadOnly((v) => !v); }} className={unreadOnly ? "" : "!bg-night-surface2 !border-night-border !text-night-ink-2"}>ยังไม่อ่าน</FilterPill>
@@ -1876,6 +1971,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
               ))}
             </div>
           )}
+          </>}
           {/* แจ้งเตือนแชทค้างอ่าน — แอดมินคุมทั้งหมด ผู้ใช้ไม่มีปุ่มปรับ
               เหลือแค่แถบ "ขออนุญาตแจ้งเตือน" ที่ต้องให้ผู้ใช้กดเอง เพราะเบราว์เซอร์บังคับว่า
               ต้องมาจากการคลิกของผู้ใช้เท่านั้น สั่งเปิดจากโค้ดล่วงหน้าไม่ได้ */}
@@ -1930,7 +2026,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
               </div>
             )
               : filtered.map((x) => (
-                <button key={x.id} onClick={() => openChat(x)} className={`w-full text-left p-3 hover:bg-night-surface2 flex gap-2.5 ${selected?.id === x.id ? "bg-night-accent/15 chat-item-active" : ""}`}>
+                <button key={x.id} onClick={() => openChat(x)} onMouseEnter={() => prefetchChat(x)} onMouseLeave={cancelPrefetch} onFocus={() => prefetchChat(x)} className={`w-full text-left p-3 hover:bg-night-surface2 flex gap-2.5 ${selected?.id === x.id ? "bg-night-accent/15 chat-item-active" : ""}`}>
                   <div className="relative shrink-0">
                     <div className="w-9 h-9 rounded-full bg-night-surface2 text-night-ink-2 flex items-center justify-center text-sm font-semibold relative overflow-hidden">
                       <span>{initial(x.customer_name)}</span>
@@ -1997,8 +2093,8 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
       {/* กลาง: หน้าต่างแชท — มือถือ: fixed เต็มจอแบบ Messenger (header ติดบน / ข้อความเลื่อนกลาง / ช่องพิมพ์ติดล่าง)
           เดสก์ท็อป: inline ในการ์ดปกติ */}
       <div className={`chat-conversation-panel min-w-0 flex-col ${selected
-        ? "flex fixed inset-0 z-40 bg-night-surface h-[100dvh] md:static md:z-auto md:h-auto md:inset-auto md:flex-1"
-        : "hidden md:flex md:flex-1"}`}>
+        ? "flex fixed inset-0 z-40 bg-night-surface h-[100dvh] lg:static lg:z-auto lg:h-auto lg:inset-auto lg:flex-1"
+        : "hidden lg:flex lg:flex-1"}`}>
         {!selected ? (
           <div className="flex-1 flex items-center justify-center text-sm text-night-ink-3">เลือกลูกค้าเพื่อเริ่มตอบ</div>
         ) : (
@@ -2006,7 +2102,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
               {/* หัวแชท: back(มือถือ) + รูปลูกค้า + ชื่อ + มาจากแอด(กดขยาย) + แฮมเบอร์เกอร์
                   บนมือถือ (fixed เต็มจอ) เว้น safe-area บน กัน header ทับแถบสถานะ/นาฬิกา */}
               <div className="px-3 py-2.5 border-b border-night-border flex items-center gap-2 shrink-0 bg-night-surface" style={{ paddingTop: "calc(0.625rem + env(safe-area-inset-top))" }}>
-                <button className="chat-mobile-back md:hidden p-1 -ml-1 text-night-ink-2" onClick={() => { setSelected(null); setInfoOpen(false); setStatusMenuOpen(false); }}><ArrowLeft size={20} /></button>
+                <button className="chat-mobile-back lg:hidden p-1 -ml-1 text-night-ink-2" onClick={() => { setSelected(null); setInfoOpen(false); setStatusMenuOpen(false); }}><ArrowLeft size={20} /></button>
                 <div className="w-10 h-10 rounded-full bg-night-accent/25 text-brand-600 dark:text-night-accent-light flex items-center justify-center text-sm font-semibold shrink-0 relative overflow-hidden">
                   <span>{initial(selected.customer_name)}</span>
                   {selected.profile_pic && <img src={selected.profile_pic} alt="" className="absolute inset-0 w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display = "none"; }} />}
@@ -2029,7 +2125,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                       LINE/Instagram จะไม่เรนเดอร์ เพราะ Meta ผูกป้ายกับ PSID ของเพจ Facebook เท่านั้น */}
                   <div className="mt-1"><MetaLabels row={selected} /></div>
                 </div>
-                <button onClick={() => setStatusMenuOpen((o) => !o)} className="chat-mobile-status p-1.5 text-night-ink-2 hover:bg-night-surface2 rounded md:hidden"><Menu size={20} /></button>
+                <button onClick={() => setStatusMenuOpen((o) => !o)} className="chat-mobile-status p-1.5 text-night-ink-2 hover:bg-night-surface2 rounded lg:hidden"><Menu size={20} /></button>
               </div>
 
               {/* แผงรายละเอียดแอด (กดขยายจากหัวแชท) */}
@@ -2047,7 +2143,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                   เปลี่ยนเป็น bottom sheet ลอยทับแชท ปิดแล้วกลับมาที่ตำแหน่งเดิมทันที ไม่เสียตำแหน่งสกอลล์ */}
               {statusMenuOpen && (
                 <div
-                  className="md:hidden fixed inset-0 z-50 bg-black/40 flex items-end"
+                  className="chat-status-sheet lg:hidden fixed inset-0 z-50 bg-black/40 flex items-end"
                   onMouseDown={(e) => { if (e.target === e.currentTarget) setStatusMenuOpen(false); }}
                 >
                   <div className="w-full bg-night-surface rounded-t-2xl shadow-2xl max-h-[85vh] overflow-y-auto" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
@@ -2257,6 +2353,51 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
               {sendMsg && <div className="px-4 py-1.5 text-[11px] text-night-ink-2 border-t border-night-border-subtle whitespace-pre-wrap break-words">{sendMsg}</div>}
               {knowledgeCaptureMsg && !knowledgeCapture && <div className="px-4 py-1.5 text-[11px] font-medium text-emerald-400 border-t border-emerald-100 bg-emerald-500/15">{knowledgeCaptureMsg}</div>}
               <div className="p-3 border-t border-night-border relative shrink-0" style={{ paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom))" }}>
+                {/* สลับโหมด — งานที่ทำบ่อยที่สุดสามอย่างอยู่ที่เดียว ไม่ต้องเลื่อนไปแผงขวา
+                    ซึ่งบนจอแคบถูกซ่อนอยู่แล้ว ทำให้เช็คไอดี/กรอกข้อมูลไม่ได้เลย */}
+                {!hasSidePanel && (
+                <div className="mb-2 flex items-center gap-1 rounded-xl bg-night-surface2 p-1">
+                  {[
+                    ["reply", "ตอบแชท"],
+                    ...(isBeSightPage(selected) ? [["trade", "เช็คไอดีเทรด"]] : []),
+                    ["customer", "ข้อมูลลูกค้า"],
+                  ].map(([key, label]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setComposeMode(key)}
+                      className={`flex-1 rounded-lg px-2 py-1.5 text-[12px] font-medium transition ${
+                        composeMode === key
+                          ? "bg-night-accent text-white shadow-sm"
+                          : "text-night-ink-2 hover:text-night-ink"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                )}
+
+                {activeCompose === "trade" && (
+                  <div className="max-h-[46vh] overflow-y-auto rounded-xl border border-night-border p-3">
+                    <TradeIdChecker darkMode />
+                  </div>
+                )}
+                {activeCompose === "customer" && (
+                  <div className="max-h-[44vh] overflow-y-auto rounded-xl border border-night-border px-3 py-2.5">
+                    <CustomerDataForm
+                      darkMode
+                      compact
+                      row={selected}
+                      onSaved={(v) => {
+                        setSelected((sel) => (sel ? { ...sel, ...v } : sel));
+                        setList((l) => (l || []).map((x) => (x.id === selected.id ? { ...x, ...v } : x)));
+                      }}
+                    />
+                  </div>
+                )}
+
+                {activeCompose === "reply" && (<>
                 {selected.source !== "line" && (
                   <div className="chat-compose-guide flex items-center gap-2 mb-2 flex-wrap rounded-xl px-3 py-2">
                     <div className="text-[11px] font-medium">✦ พิมพ์ไทย — ระบบแปลแล้วส่ง <span className="opacity-60">(Ctrl/⌘+Enter = ส่ง)</span></div>
@@ -2273,10 +2414,15 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                 {savedOpen && (
                   <div className="absolute bottom-full left-3 right-3 mb-1 bg-night-surface border border-night-border rounded-lg shadow-lg max-h-64 overflow-y-auto z-10 divide-y divide-night-border-subtle">
                     {savedReplies.length === 0 ? (
-                      <div className="px-3 py-3 text-xs text-night-ink-2">{savedErr ? `ดึงไม่ได้: ${savedErr}` : "เพจนี้ยังไม่มีข้อความตอบกลับที่บันทึกไว้ (หรือ token ยังไม่มีสิทธิ์ pages_messaging)"}</div>
+                      <div className="px-3 py-3 text-xs text-night-ink-2">{savedErr ? `ดึงไม่ได้: ${savedErr}` : "ยังไม่มีข้อความบันทึกไว้สำหรับช่องทางนี้ — เพิ่มได้ที่ ตั้งค่า › ข้อความบันทึกไว้"}</div>
                     ) : savedReplies.map((s) => (
-                      <button key={s.id} onClick={() => { if (s.message) setReply((r) => (r ? r + "\n" + s.message : s.message)); if (s.image) setPendingFiles((p) => [...p, { url: s.image, name: "saved-image", type: "image", preview: s.image }]); setSavedOpen(false); }} className="w-full text-left px-3 py-2 hover:bg-night-surface2 flex gap-2">
-                        {s.image && <img src={s.image} alt="" className="w-9 h-9 rounded object-cover border border-night-border shrink-0" />}
+                      <button key={s.id} onClick={() => { if (s.message) setReply((r) => (r ? r + "\n" + s.message : s.message)); if (s.images.length) setPendingFiles((p) => [...p, ...s.images.map((u, i) => ({ url: u, name: `saved-image-${i + 1}`, type: "image", preview: u }))]); setSavedOpen(false); }} className="w-full text-left px-3 py-2 hover:bg-night-surface2 flex gap-2">
+                        {s.images.length > 0 && (
+                          <span className="relative shrink-0">
+                            <img src={s.images[0]} alt="" className="w-9 h-9 rounded object-cover border border-night-border" />
+                            {s.images.length > 1 && <span className="absolute -bottom-1 -right-1 rounded-full bg-night-accent px-1 text-[9px] font-bold text-white">{s.images.length}</span>}
+                          </span>
+                        )}
                         <div className="min-w-0">
                           <div className="text-xs font-medium text-night-ink truncate">{s.title || "(ไม่มีชื่อ)"}</div>
                           <div className="text-[11px] text-night-ink-2 line-clamp-2 whitespace-pre-wrap break-words">{s.message}</div>
@@ -2354,6 +2500,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                   <button onClick={openKnowledgeSearch} className={`chat-tool-button chat-tool-knowledge ${knowledgeOpen ? "is-active" : ""}`} title="ค้นหาคำตอบเก่าที่อนุมัติแล้ว"><Search size={16} /><span>คลังคำตอบ</span></button>
                   <span className="ml-auto text-[10px] text-night-ink-3 font-mono hidden sm:inline">Ctrl+↵ ส่ง</span>
                 </div>
+                </>)}
               </div>
               {knowledgeCapture && (
                 <div className="fixed inset-0 z-[90] bg-black/60 flex items-center justify-center p-4" onMouseDown={(e) => { if (e.target === e.currentTarget && !knowledgeCaptureSaving) setKnowledgeCapture(null); }}>
@@ -2447,7 +2594,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
 
         {/* ขวา: ข้อมูล + สถานะ (เดสก์ท็อปเท่านั้น — มือถือใช้แผงขยาย/แฮมเบอร์เกอร์) */}
         {selected && (
-          <div className="chat-customer-panel hidden md:block md:w-[280px] xl:w-[320px] border-l border-night-border p-3 space-y-3 shrink-0 overflow-y-auto">
+          <div className="chat-customer-panel hidden lg:block lg:w-[280px] xl:w-[320px] border-l border-night-border p-3 space-y-3 shrink-0 overflow-y-auto">
             <div className="flex items-center gap-3">
               <div className="w-12 h-12 rounded-full bg-night-accent/25 text-brand-600 dark:text-night-accent-light flex items-center justify-center text-lg font-semibold shrink-0 relative overflow-hidden">
                 <span>{initial(selected.customer_name)}</span>

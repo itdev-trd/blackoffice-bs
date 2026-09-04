@@ -10,9 +10,11 @@ import {
   BarChart3,
   Inbox,
   UsersRound,
+  ClipboardList,
   Trophy,
   Tv,
   Settings as SettingsIcon,
+  LibraryBig,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { lsSet } from "@/lib/utils/storage";
@@ -26,8 +28,12 @@ export const TABS = [
   { key: "review", label: "รออนุมัติ", icon: CheckCircle2 },
   { key: "campaigns", label: "แคมเปญ", icon: TrendingUp },
   { key: "analyze", label: "วิเคราะห์", icon: BarChart3 },
+  { key: "ad_library", label: "คลังโฆษณาคู่แข่ง", icon: LibraryBig },
   { key: "inbox", label: "ตอบแชท", icon: Inbox },
   { key: "customerdb", label: "จัดการลูกค้า", icon: UsersRound },
+  // หน้าดูอย่างเดียว — คอลัมน์ตรงกับชีตสรุปรายชื่อลูกค้าที่ทีมใช้อยู่
+  // แยกจาก "จัดการลูกค้า" เพราะหน้านั้นไว้แก้ไข/นำเข้า/เช็คไอดี ส่วนหน้านี้ไว้เปิดดูและส่งต่อ
+  { key: "customer_list", label: "รายชื่อลูกค้า", icon: ClipboardList },
   { key: "leaderboard", label: "กระดานแต้ม", icon: Trophy },
   // tv_members ไม่อยู่ในเมนูแล้ว — เนื้อหาเดียวกันเป๊ะกับแท็บ TradingView ในหน้า "ลูกค้า + TradingView"
   // แต่ "คีย์สิทธิ์" tv_members ยังต้องคงไว้ เพราะ edge function tradingview และ RLS ของ tv_external_snapshot
@@ -41,8 +47,10 @@ export const ROUTE_PATH = {
   review: "/review",
   campaigns: "/campaigns",
   analyze: "/analyze",
+  ad_library: "/ad-library",
   inbox: "/inbox",
   customerdb: "/customerdb",
+  customer_list: "/customer-list",
   leaderboard: "/leaderboard",
   tv_members: "/tv-members",
   settings: "/settings",
@@ -56,17 +64,37 @@ function keyFromPathname(pathname) {
 
 const DashboardCtx = createContext(null);
 
+// สำเนาสิทธิ์ในเครื่อง ใช้วาดเมนูทันทีระหว่างรอของจริง (ของจริงบังคับด้วย RLS ฝั่งฐานข้อมูล)
+const PERM_CACHE_KEY = "ui.perm";
+const PERM_CACHE_MS = 12 * 60 * 60 * 1000;
+
 export function DashboardProvider({ children }) {
   const router = useRouter();
   const pathname = usePathname();
   const tab = keyFromPathname(pathname);
 
   // สิทธิ์ผู้ใช้: null = กำลังโหลด, {role, allowed}
+  // เริ่มจากสำเนาที่เก็บไว้ครั้งก่อน เพื่อให้หน้าเว็บวาดได้ทันทีไม่ต้องรอ network
+  // (ไม่ใช่การตรวจสิทธิ์จริง — ตัวจริงคือ RLS ฝั่งฐานข้อมูล อันนี้แค่ทำให้เมนูขึ้นเร็ว)
   const [perm, setPerm] = useState(null);
+  // อ่านสำเนาหลัง mount เท่านั้น — ถ้าอ่านใน useState initializer ฝั่งเซิร์ฟเวอร์จะได้ null
+  // แต่ฝั่งเบราว์เซอร์ได้ค่าจริง ทำให้ HTML ไม่ตรงกันและเกิด hydration error
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(PERM_CACHE_KEY);
+      if (!raw) return;
+      const c = JSON.parse(raw);
+      if (c?.perm && Date.now() - c._at < PERM_CACHE_MS) setPerm((cur) => cur ?? c.perm);
+    } catch {}
+  }, []);
   useEffect(() => {
     (async () => {
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
-      if (userError || !user) {
+      // getSession() อ่าน JWT จากเครื่อง (ไม่ยิง network) — ต่างจาก getUser() ที่ต้องรอ
+      // เซิร์ฟเวอร์ตอบก่อน ทำให้ทุกหน้ามี round trip ส่วนเกิน 1 ชั้นก่อนวาดอะไรเลย
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
+      if (!user?.email) {
+        try { localStorage.removeItem(PERM_CACHE_KEY); } catch {}
         setPerm({ role: "denied", error: "ตรวจสอบผู้ใช้ไม่สำเร็จ" });
         return;
       }
@@ -76,6 +104,7 @@ export function DashboardProvider({ children }) {
         .eq("email", user.email.toLowerCase())
         .maybeSingle();
       if (error || !data || !["admin", "analyze_only"].includes(data.role)) {
+        try { localStorage.removeItem(PERM_CACHE_KEY); } catch {}
         setPerm({ role: "denied", email: user.email, error: error?.message || "บัญชีนี้ยังไม่ได้รับสิทธิ์ใช้งาน" });
         return;
       }
@@ -84,22 +113,30 @@ export function DashboardProvider({ children }) {
       const allowedTabs = Array.isArray(data?.allowed_tabs) ? data.allowed_tabs.map(String) : [];
       const allowedPages = Array.isArray(data?.allowed_pages) ? data.allowed_pages.map(String) : [];
       const allowedSettings = Array.isArray(data?.allowed_settings) ? data.allowed_settings.map(String) : [];
-      setPerm({
+      const next = {
         role, allowed, allowedTabs, allowedPages, allowedSettings, email: user.email,
         chatAlert: data?.chat_alert !== false,
         alertMinutes: Number(data?.alert_minutes) > 0 ? Number(data.alert_minutes) : 3,
         alertPages: Array.isArray(data?.alert_pages) ? data.alert_pages.map(String) : [],
         alertSound: data?.alert_sound !== false,
         alertNew: data?.alert_new !== false,
-      });
+      };
+      setPerm(next);
+      try { localStorage.setItem(PERM_CACHE_KEY, JSON.stringify({ _at: Date.now(), perm: next })); } catch {}
     })();
   }, []);
   const restricted = perm?.role === "analyze_only";
 
-  // การมองเห็นเมนู "ออฟฟิศจำลอง" (Game) — คุมจากหน้าตั้งค่า (settings.game_office)
+  // การมองเห็นเมนู "ออฟฟิศจำลอง" (Game) และ "กระดานแต้ม" (Leaderboard)
+  // ดึงสองคีย์ในคำขอเดียว — เดิมแยกเป็นสอง maybeSingle() ทำให้ทุกหน้ามี network ส่วนเกิน 1 ครั้ง
   const [officeCfg, setOfficeCfg] = useState(null);
+  const [lbCfg, setLbCfg] = useState(null);
   useEffect(() => {
-    supabase.from("settings").select("value").eq("key", "game_office").maybeSingle().then(({ data }) => setOfficeCfg(data?.value || { enabled: true, emails: [] }));
+    supabase.from("settings").select("key, value").in("key", ["game_office", "leaderboard"]).then(({ data }) => {
+      const by = Object.fromEntries((data || []).map((r) => [r.key, r.value]));
+      setOfficeCfg(by.game_office || { enabled: true, emails: [] });
+      setLbCfg(by.leaderboard || { enabled: true, emails: [] });
+    });
   }, []);
   const officeVisible = (() => {
     if (!officeCfg) return false;
@@ -109,11 +146,7 @@ export function DashboardProvider({ children }) {
     return true;
   })();
 
-  // การมองเห็นเมนู "กระดานแต้ม" (Leaderboard) — คุมจาก settings.leaderboard { enabled, emails[] }
-  const [lbCfg, setLbCfg] = useState(null);
-  useEffect(() => {
-    supabase.from("settings").select("value").eq("key", "leaderboard").maybeSingle().then(({ data }) => setLbCfg(data?.value || { enabled: true, emails: [] }));
-  }, []);
+  // กระดานแต้ม (Leaderboard) — คุมจาก settings.leaderboard { enabled, emails[] } ดึงมาพร้อมกันด้านบน
   const leaderboardVisible = (() => {
     if (!lbCfg) return false;
     if (lbCfg.enabled === false) return false;
@@ -123,7 +156,7 @@ export function DashboardProvider({ children }) {
   })();
 
   const allowedTabKeys = perm?.allowedTabs || [];
-  const visibleTabs = (!perm ? [] : restricted ? TABS.filter((t) => allowedTabKeys.includes(t.key) || (t.key === "leaderboard" && leaderboardVisible)) : TABS)
+  const visibleTabs = (!perm ? [] : restricted ? TABS.filter((t) => allowedTabKeys.includes(t.key) || (t.key === "ad_library" && allowedTabKeys.includes("analyze")) || (t.key === "leaderboard" && leaderboardVisible) || (t.key === "customer_list" && allowedTabKeys.includes("customerdb"))) : TABS)
     .filter((t) => t.key !== "office" || officeVisible)
     .filter((t) => t.key !== "leaderboard" || leaderboardVisible);
   const allowedPages = restricted ? (perm?.allowedPages || []) : null;
@@ -131,11 +164,16 @@ export function DashboardProvider({ children }) {
   const can = useCallback((k) => visibleTabs.some((t) => t.key === k), [visibleTabs]);
 
   // ถ้าเส้นทางปัจจุบันไม่มีสิทธิ์เข้า → เด้งไปแท็บแรกที่เข้าได้
+  // ต้องรอ officeCfg/lbCfg โหลดเสร็จก่อนตัดสิน — สองเมนูนี้ถูกซ่อนไว้ระหว่างที่ค่ายังเป็น null
+  // ตั้งแต่แคชสิทธิ์ไว้ในเครื่อง perm มาถึงทันทีตั้งแต่เฟรมแรก ถ้าไม่รอค่าพวกนี้
+  // คนที่เปิด /leaderboard ตรงๆ จะโดนเด้งออกไปหน้าแรกก่อนที่ค่าจะโหลดเสร็จ
+  const visibilityReady = officeCfg !== null && lbCfg !== null;
   useEffect(() => {
+    if (!visibilityReady) return;
     if (perm && perm.role !== "denied" && visibleTabs.length && tab && !visibleTabs.some((t) => t.key === tab)) {
       router.replace(ROUTE_PATH[visibleTabs[0].key]);
     }
-  }, [perm, tab, visibleTabs, router]);
+  }, [perm, tab, visibleTabs, router, visibilityReady]);
 
   useEffect(() => {
     if (tab) {
@@ -212,7 +250,9 @@ export function DashboardProvider({ children }) {
   }, [tab]);
 
   useEffect(() => {
-    if (!perm || perm.role === "denied") return;
+    // ไม่รอ perm ก่อนดึงข้อมูล — ยิงขนานไปกับการเช็คสิทธิ์ได้เลย เพราะ RLS คุมอยู่แล้ว
+    // เดิมรอ perm ทำให้เป็น network เรียงกัน 3 ชั้น (session → สิทธิ์ → ข้อมูล) ก่อนวาดหน้า
+    if (perm?.role === "denied") return;
     loadAll();
     if (!["overview", "review", "campaigns", "analyze"].includes(tab)) return;
     // realtime: รีเฟรชอัตโนมัติเมื่อมีการเปลี่ยนแปลงในตาราง ad_content/ad_copies/ad_images
@@ -222,7 +262,11 @@ export function DashboardProvider({ children }) {
       .on("postgres_changes", { event: "*", schema: "public", table: "ad_copies" }, () => loadAll())
       .on("postgres_changes", { event: "*", schema: "public", table: "ad_images" }, () => loadAll())
       .subscribe();
-    const interval = setInterval(loadAll, 60000);
+    // realtime ด้านบนรีเฟรชให้แล้วเมื่อข้อมูลเปลี่ยน ตัวจับเวลานี้เป็นแค่ตัวสำรอง
+    // จึงยืดเป็น 3 นาที และไม่ดึงตอนที่ผู้ใช้ไม่ได้เปิดดูแท็บนี้ (เดิมดึงทุก 60 วิ ตลอดเวลา)
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") loadAll();
+    }, 3 * 60 * 1000);
     return () => {
       supabase.removeChannel(channel);
       clearInterval(interval);

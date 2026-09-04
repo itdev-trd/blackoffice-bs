@@ -11,6 +11,7 @@ import { getMetaToken } from "../_shared/meta.ts";
 import { authorizeRequest } from "../_shared/permissions.ts";
 import { canAccessMetaNodes } from "../_shared/meta-authorization.ts";
 import { cacheGet, cacheSet, listCacheTtlMs } from "../_shared/meta-cache.ts";
+import { buildMetrics, num } from "../_shared/ad-metrics.ts";
 
 const GRAPH_VERSION = "v22.0"; // อัปจาก v19 (sunset ต้นปี 2026)
 const corsHeaders = {
@@ -18,14 +19,9 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const LEAD_TYPES = ["lead", "onsite_conversion.lead_grouped"];
-const num = (v: unknown) => (v == null ? 0 : parseFloat(String(v)) || 0);
-function leads(actions: any[]) {
-  return (actions || []).filter((a) => LEAD_TYPES.includes(a.action_type)).reduce((s, a) => s + num(a.value), 0);
-}
-function sumBy(actions: any[], m: (t: string) => boolean) {
-  return (actions || []).filter((a) => m(a.action_type)).reduce((s, a) => s + num(a.value), 0);
-}
+// ตัวชี้วัดใช้ร่วมกับ list-campaigns ที่ _shared/ad-metrics.ts
+// เดิม LEAD_TYPES ที่นี่ขาด offsite_conversion.fb_pixel_lead ทำให้เลขระดับชุดโฆษณา
+// ไม่ตรงกับระดับแคมเปญในบัญชีที่ยิงคอนเวอร์ชันผ่าน pixel
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -58,8 +54,8 @@ Deno.serve(async (req) => {
     const insightFields = "spend,impressions,reach,frequency,clicks,ctr,cpm,cpc,inline_link_clicks,actions";
     const baseFields =
       edge === "adsets"
-        ? `id,name,status,effective_status,daily_budget,${rangeExpr}{${insightFields}}`
-        : `id,name,status,effective_status,created_time,updated_time,creative{thumbnail_url},${rangeExpr}{${insightFields}}`;
+        ? `id,name,status,effective_status,daily_budget,optimization_goal,${rangeExpr}{${insightFields}}`
+        : `id,name,status,effective_status,created_time,updated_time,creative{thumbnail_url},adset{optimization_goal},${rangeExpr}{${insightFields}}`;
 
     const url = `https://graph.facebook.com/${GRAPH_VERSION}/${parent_id}/${edge}?fields=${encodeURIComponent(baseFields)}&limit=200&access_token=${token}`;
     const resp = await fetch(url);
@@ -68,10 +64,8 @@ Deno.serve(async (req) => {
 
     const nodes = (data?.data ?? []).map((n: any) => {
       const o = n.insights?.data?.[0] ?? {};
-      const spend = num(o.spend);
-      const lead = leads(o.actions);
-      const conversations = sumBy(o.actions, (t) => t.includes("messaging_conversation_started"));
-      const replies = sumBy(o.actions, (t) => t.includes("messaging_user_depth_2_message_send"));
+      // ระดับชุดโฆษณามี optimization_goal ตรงๆ · ระดับโฆษณาเอาของชุดแม่
+      const goal = n.optimization_goal || n.adset?.optimization_goal || null;
       return {
         id: n.id,
         name: n.name,
@@ -80,23 +74,9 @@ Deno.serve(async (req) => {
         created_time: n.created_time || null,
         updated_time: n.updated_time || null,
         thumbnail: n.creative?.thumbnail_url || null,
-        daily_budget_thb: n.daily_budget ? Math.round(num(n.daily_budget) / 100) : null,
-        metrics: {
-          spend,
-          impressions: num(o.impressions),
-          reach: num(o.reach),
-          frequency: num(o.frequency),
-          clicks: num(o.clicks),
-          link_clicks: num(o.inline_link_clicks),
-          ctr: num(o.ctr),
-          cpm: num(o.cpm),
-          cpc: num(o.cpc),
-          leads: lead,
-          cpl: lead > 0 ? spend / lead : null,
-          conversations,
-          replies,
-          reply_rate: conversations > 0 ? replies / conversations : null,
-        },
+        // งบเป็นสตางค์ — เก็บทศนิยมไว้ให้ตรงกับ Ads Manager (ดู list-campaigns)
+        daily_budget_thb: n.daily_budget ? Number((num(n.daily_budget) / 100).toFixed(2)) : null,
+        metrics: buildMetrics(o, { goals: goal ? [goal] : [] }),
       };
     });
 

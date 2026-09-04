@@ -34,6 +34,7 @@ import NumInput from "@/components/shared/NumInput";
 import { normalizeBrandConfig } from "@/components/features/generate/GenerateTab";
 import { SETTINGS_SECTIONS } from "@/lib/constants/settings";
 import AdTargetingCard from "@/components/features/settings/AdTargetingCard";
+import ImportOldDbPanel from "@/components/features/settings/ImportOldDbPanel";
 import ChatMenuPanel from "@/components/features/settings/ChatMenuPanel";
 import { EmptyState, SectionTitle } from "@/components/ui";
 import {
@@ -519,6 +520,8 @@ function TvAdminSettingsPanel() {
   const [pages, setPages] = useState([]);           // เพจแชททั้งหมด (page_lead_config)
   const [checkingId, setCheckingId] = useState(null);
   const [whOpen, setWhOpen] = useState(false);
+  // โหมดคุย TradingView: direct = ยิงตรงจาก Supabase · n8n = ผ่าน webhook แบบเดิม
+  const [tvTransport, setTvTransport] = useState("n8n");
   const [whUrl, setWhUrl] = useState("");
   const [whSecret, setWhSecret] = useState("");
   const [whSaving, setWhSaving] = useState(false);
@@ -543,10 +546,31 @@ function TvAdminSettingsPanel() {
     setReleased(next);
     setMsg(next ? "✓ ปล่อยอัปเดตให้ผู้ใช้ทุกคนแล้ว" : "✓ ซ่อนไว้ให้เห็นเฉพาะแอดมินแล้ว");
   }
+  // ประวัติการเรียก TradingView — มาแทน execution log ของ n8n ที่หายไปตอนเลิกใช้
+  const [logOpen, setLogOpen] = useState(false);
+  const [logRows, setLogRows] = useState(null);
+  const [logFail, setLogFail] = useState(false);
+  const [logBusy, setLogBusy] = useState(false);
+  async function loadLogs(onlyFailed = logFail) {
+    setLogBusy(true);
+    const { data, error } = await supabase.functions.invoke("tradingview", { body: { action: "logs", limit: 100, only_failed: onlyFailed } });
+    setLogBusy(false);
+    if (error || !data?.ok) { setLogRows([]); setMsg("✗ อ่าน log ไม่สำเร็จ: " + (data?.error || error?.message || "")); return; }
+    setLogRows(data.rows || []);
+  }
+  function openLogs() { setLogOpen(true); setLogRows(null); loadLogs(logFail); }
+
   async function openWebhook() {
     setWhOpen(true); setWhSecret("");
     const { data } = await supabase.functions.invoke("tradingview", { body: { action: "get_webhook" } });
-    if (data?.ok) setWhUrl(data.url || "");
+    if (data?.ok) { setWhUrl(data.url || ""); setTvTransport(data.transport || "n8n"); }
+  }
+  // สลับทางคุยกับ TradingView — ยิงตรงไม่ต้องพึ่ง n8n
+  async function saveTransport(mode) {
+    setTvTransport(mode);
+    const { data, error } = await supabase.functions.invoke("tradingview", { body: { action: "set_transport", transport: mode } });
+    if (error || !data?.ok) { setMsg("✗ สลับโหมดไม่สำเร็จ: " + (data?.error || error?.message || "")); return; }
+    setMsg(mode === "direct" ? "✓ เปลี่ยนเป็นยิงตรงจากระบบแล้ว (ไม่ใช้ n8n)" : "✓ กลับไปใช้ n8n แล้ว");
   }
   async function saveWebhook() {
     const url = whUrl.trim();
@@ -606,6 +630,86 @@ function TvAdminSettingsPanel() {
 
   return (
     <div className="space-y-4">
+      {/* ประวัติการเรียก TradingView — แทน execution log ของ n8n
+          เวลาให้สิทธิ์ไม่สำเร็จ ต้องตอบได้ว่า "ยิงไป URL ไหน ได้ status อะไร ใครกด ตอนไหน"
+          ไม่งั้นจะเดาไม่ออกเลยว่าพังเพราะคุกกี้ เพราะ endpoint เปลี่ยน หรือเพราะ username ผิด */}
+      {logOpen && (
+        <div className="fixed inset-0 z-[200] bg-black/60 flex items-center justify-center p-4" onClick={() => setLogOpen(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[88vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
+              <div>
+                <h3 className="font-semibold text-slate-800">ประวัติการเรียก TradingView</h3>
+                <p className="text-[11px] text-slate-500">100 รายการล่าสุด · บันทึกทั้งโหมดยิงตรงและโหมด n8n</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="flex items-center gap-1.5 text-[12px] text-slate-600">
+                  <input type="checkbox" checked={logFail} onChange={(e) => { setLogFail(e.target.checked); loadLogs(e.target.checked); }} />
+                  เฉพาะที่ล้มเหลว
+                </label>
+                <button onClick={() => loadLogs()} disabled={logBusy} className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-[12px] disabled:opacity-50">
+                  {logBusy ? "กำลังโหลด…" : "รีเฟรช"}
+                </button>
+                <button onClick={() => setLogOpen(false)} className="text-slate-400 hover:text-slate-700"><X size={20} /></button>
+              </div>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-auto">
+              {logRows === null ? (
+                <div className="p-8 text-center text-sm text-slate-500">กำลังโหลด…</div>
+              ) : logRows.length === 0 ? (
+                <div className="p-8 text-center text-sm text-slate-500">
+                  ยังไม่มีประวัติ{logFail ? "ที่ล้มเหลว" : ""} — จะเริ่มบันทึกเมื่อระบบเรียก TradingView ครั้งต่อไป
+                </div>
+              ) : (
+                <table className="w-full min-w-[860px] text-[12px]">
+                  <thead className="sticky top-0 bg-slate-50 text-left text-slate-600">
+                    <tr>
+                      {["เวลา", "ผล", "โหมด", "คำสั่ง", "username", "HTTP", "ใช้เวลา", "ใครกด"].map((h) => (
+                        <th key={h} className="whitespace-nowrap px-3 py-2 font-medium">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {logRows.map((r) => (
+                      <tr key={r.id} className="border-t border-slate-100 align-top">
+                        <td className="whitespace-nowrap px-3 py-2 text-slate-500">
+                          {new Date(r.at).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "medium" })}
+                        </td>
+                        <td className="px-3 py-2">
+                          <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${r.ok ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}`}>
+                            {r.ok ? "สำเร็จ" : "ล้มเหลว"}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-slate-600">{r.transport === "direct" ? "ยิงตรง" : "n8n"}</td>
+                        <td className="px-3 py-2 font-medium text-slate-800">{r.action}</td>
+                        <td className="px-3 py-2 text-slate-700">{r.username || "—"}</td>
+                        <td className="px-3 py-2 tabular-nums text-slate-600">{r.http_status ?? "—"}</td>
+                        <td className="px-3 py-2 tabular-nums text-slate-600">{r.duration_ms != null ? `${r.duration_ms} ms` : "—"}</td>
+                        <td className="px-3 py-2 text-slate-500">{r.actor ? String(r.actor).split("@")[0] : "ระบบ (cron)"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              {/* รายละเอียดของแถวที่ล้มเหลว วางแยกใต้ตาราง เพราะข้อความยาวเกินกว่าจะยัดในช่อง */}
+              {logRows?.some((r) => !r.ok) && (
+                <div className="space-y-2 border-t border-slate-200 p-4">
+                  <div className="text-[12px] font-semibold text-slate-700">รายละเอียดที่ล้มเหลว</div>
+                  {logRows.filter((r) => !r.ok).slice(0, 15).map((r) => (
+                    <div key={`d${r.id}`} className="rounded-lg bg-rose-50 p-2.5 text-[11px]">
+                      <div className="font-medium text-rose-800">{r.action} · {r.username || "—"} · {new Date(r.at).toLocaleString("th-TH", { timeStyle: "medium", dateStyle: "short" })}</div>
+                      <div className="mt-0.5 text-rose-700">{r.error || "(ไม่มีข้อความ)"}</div>
+                      {r.endpoint && <div className="mt-0.5 break-all font-mono text-[10px] text-slate-500">{r.endpoint}</div>}
+                      {r.response && <div className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap break-all font-mono text-[10px] text-slate-500">{r.response}</div>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* modal ตั้งค่า n8n webhook (global) */}
       {whOpen && (
         <div className="fixed inset-0 z-[200] bg-black/60 flex items-center justify-center p-4" onClick={() => setWhOpen(false)}>
@@ -614,7 +718,23 @@ function TvAdminSettingsPanel() {
               <h3 className="font-semibold text-slate-800">ตั้งค่า n8n Webhook (ใช้ร่วมทุกแบรนด์)</h3>
               <button onClick={() => setWhOpen(false)} className="text-slate-400 hover:text-slate-700"><X size={20} /></button>
             </div>
-            <p className="text-xs text-slate-500">n8n เป็นตัวยิง TradingView (ส่ง cookie ได้) — ใช้ workflow เดียวทุกแบรนด์ เพราะแอปส่งคุกกี้ของแต่ละแบรนด์ไปให้เอง</p>
+            {/* พิสูจน์แล้วว่า Deno บน Supabase Edge ส่ง header Cookie ได้จริง (ทดสอบยิงหาตัวเอง header ไปถึงครบ)
+                ข้ออ้างเดิมที่ว่าส่งไม่ได้จึงไม่จริง — n8n ไม่จำเป็นแล้ว แต่คงไว้เป็นทางสำรอง
+                จนกว่าจะยืนยันว่าโหมดยิงตรงใช้กับ TradingView ได้จริง */}
+            <div className="rounded-xl border border-slate-200 p-3 space-y-2">
+              <div className="text-xs font-semibold text-slate-700">วิธีคุยกับ TradingView</div>
+              {[["direct", "ยิงตรงจากระบบ (แนะนำ)", "ไม่ต้องมี n8n · คุกกี้ไม่ต้องเดินทางออกนอกระบบ"],
+                ["n8n", "ผ่าน n8n (แบบเดิม)", "ต้องมีเซิร์ฟเวอร์ n8n รันอยู่ + ตั้ง URL ด้านล่าง"]].map(([val, title, hint]) => (
+                <label key={val} className={`flex cursor-pointer items-start gap-2 rounded-lg border p-2 ${tvTransport === val ? "border-brand-600 bg-brand-50" : "border-slate-200"}`}>
+                  <input type="radio" name="tv-transport" checked={tvTransport === val} onChange={() => saveTransport(val)} className="mt-0.5" />
+                  <span className="min-w-0">
+                    <span className="block text-[13px] font-medium text-slate-800">{title}</span>
+                    <span className="block text-[11px] text-slate-500">{hint}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+            <p className="text-xs text-slate-500">ช่องด้านล่างใช้เฉพาะโหมด n8n — โหมดยิงตรงไม่ต้องกรอก</p>
             <div>
               <label className="text-xs text-slate-500">n8n Webhook URL</label>
               <input value={whUrl} onChange={(e) => setWhUrl(e.target.value)} placeholder="https://your-n8n/webhook/tv-access" className="w-full mt-1 rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono" />
@@ -696,6 +816,7 @@ function TvAdminSettingsPanel() {
             <p className="text-xs text-slate-500 mt-1">จัดการหลายแบรนด์ — แต่ละแบรนด์คุกกี้/สคริปต์แยกกัน · เลือกเพจแชทที่ให้โชว์ + จะโชว์ในหน้าจัดการ TV ไหม</p>
           </div>
           <div className="flex gap-2 shrink-0">
+            <button onClick={openLogs} className="px-3 py-2 rounded-lg border border-slate-300 text-sm text-slate-700 hover:bg-slate-50">ประวัติการเรียก TV</button>
             <button onClick={openWebhook} className="px-3 py-2 rounded-lg border border-slate-300 text-sm text-slate-700 hover:bg-slate-50">ตั้งค่า n8n</button>
             <button onClick={newBrand} className="px-3 py-2 rounded-lg bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700">+ เพิ่มแบรนด์</button>
           </div>
@@ -912,7 +1033,7 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
     { label: "AI และคอนเทนต์", keys: ["general", "ai_models", "ai_prompts", "brand"] },
     { label: "แคมเปญและการวิเคราะห์", keys: ["campaign", "decision", "prefetch", "replystats"] },
     { label: "งานอัตโนมัติและแจ้งเตือน", keys: ["jobs", "notifications"] },
-    { label: "ทีมและความปลอดภัย", keys: ["permissions", "activity"] },
+    { label: "ทีมและความปลอดภัย", keys: ["permissions", "activity", "import_old"] },
     { label: "TradingView และแต้มทีม", keys: ["tv_settings", "leaderboard"] },
   ];
   const groupedSections = settingsGroups.map((group) => ({
@@ -1041,6 +1162,7 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
       {section === "replystats" && <ReplyStatsPanel onOpenChat={onOpenChat} />}
       {section === "leaderboard" && <LeaderboardSettingsPanel />}
       {section === "activity" && <ActivityPanel />}
+      {section === "import_old" && <ImportOldDbPanel />}
 
       {section === "campaign" && (<>
       <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
@@ -1357,26 +1479,64 @@ export function SavedRepliesPanel({ allowedPages = null }) {
   }
   useEffect(() => {
     load();
-    supabase.from("page_lead_config").select("page_id, page_name").order("page_name").then(({ data }) =>
-      setPages((data || []).map((p) => ({ id: p.page_id, name: p.page_name || p.page_id })).filter((p) => pageOk(p.id))));
+    // page_lead_config มีแต่เพจ Facebook — บัญชี LINE OA ไม่ได้ถูกบันทึกไว้ที่นั่น
+    // ถ้าไม่รวมเข้ามาด้วย แอดมินจะผูกข้อความบันทึกกับ LINE รายบัญชีไม่ได้ เลือกได้แค่ "ทุกเพจ"
+    // จึงดึงบัญชี LINE ที่มีแชทจริงมาต่อท้าย (page_id = "line:<id>" ใช้เป็นคีย์เดียวกับหน้าตอบแชท)
+    Promise.all([
+      supabase.from("page_lead_config").select("page_id, page_name").order("page_name"),
+      supabase.from("chat_customers").select("page_id, page_name").eq("source", "line").limit(500),
+    ]).then(([fb, line]) => {
+      const seen = new Map();
+      for (const p of fb.data || []) seen.set(String(p.page_id), p.page_name || p.page_id);
+      for (const p of line.data || []) {
+        const id = String(p.page_id || "");
+        if (id && !seen.has(id)) seen.set(id, `${p.page_name || id} (LINE OA)`);
+      }
+      setPages([...seen].map(([id, name]) => ({ id, name })).filter((p) => pageOk(p.id)));
+    });
     supabase.from("tv_brands").select("id, name, active").eq("active", true).order("name").then(({ data }) =>
       setBrands(data || []));
   }, []);
-  const addNew = () => setItems((it) => [{ _new: true, tmp: Date.now(), title: "", message: "", image_url: null, page_id: null, brand_id: null }, ...(it || [])]);
+  const addNew = () => setItems((it) => [{ _new: true, tmp: Date.now(), title: "", message: "", image_urls: [], page_id: null, brand_id: null }, ...(it || [])]);
   const setField = (idx, k, v) => setItems((it) => it.map((x, i) => (i === idx ? { ...x, [k]: v } : x)));
-  async function uploadImg(idx, file) {
-    if (!file) return;
-    const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
-    const path = `saved/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-    const { error } = await supabase.storage.from("chat-media").upload(path, file, { contentType: file.type || "image/jpeg", upsert: false });
-    if (error) { alert("อัปโหลดรูปไม่สำเร็จ: " + error.message); return; }
-    setField(idx, "image_url", supabase.storage.from("chat-media").getPublicUrl(path).data.publicUrl);
+  // แถวเก่ามีแต่ image_url เดี่ยว — อ่านให้เป็นรายการเสมอ จะได้ไม่ต้องเช็คสองแบบทุกที่
+  const imagesOf = (it) => (Array.isArray(it.image_urls) && it.image_urls.length ? it.image_urls : it.image_url ? [it.image_url] : []);
+  const MAX_IMAGES = 9;
+  async function uploadImgs(idx, fileList) {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    const current = imagesOf(items[idx]);
+    const room = MAX_IMAGES - current.length;
+    if (room <= 0) { alert(`แนบได้สูงสุด ${MAX_IMAGES} รูปต่อข้อความ`); return; }
+    if (files.length > room) alert(`เหลือที่ว่างอีก ${room} รูป — จะอัปโหลดให้เท่าที่ใส่ได้`);
+    setSaving(items[idx].id || items[idx].tmp);
+    const added = [];
+    for (const file of files.slice(0, room)) {
+      const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+      const path = `saved/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+      const { error } = await supabase.storage.from("chat-media").upload(path, file, { contentType: file.type || "image/jpeg", upsert: false });
+      if (error) { alert(`อัปโหลด "${file.name}" ไม่สำเร็จ: ${error.message}`); continue; }
+      added.push(supabase.storage.from("chat-media").getPublicUrl(path).data.publicUrl);
+    }
+    setSaving("");
+    if (added.length) setField(idx, "image_urls", [...current, ...added]);
   }
+  const removeImg = (idx, url) => setField(idx, "image_urls", imagesOf(items[idx]).filter((u) => u !== url));
+  // เลื่อนลำดับรูป — ลำดับนี้คือลำดับที่จะถูกส่งให้ลูกค้าในแชท
+  const moveImg = (idx, from, dir) => {
+    const list = [...imagesOf(items[idx])];
+    const to = from + dir;
+    if (to < 0 || to >= list.length) return;
+    [list[from], list[to]] = [list[to], list[from]];
+    setField(idx, "image_urls", list);
+  };
   async function save(idx) {
     const it = items[idx];
-    if (!it.message?.trim() && !it.image_url) { alert("ต้องมีข้อความหรือรูปอย่างน้อยอย่างหนึ่ง"); return; }
+    const imgs = imagesOf(it);
+    if (!it.message?.trim() && !imgs.length) { alert("ต้องมีข้อความหรือรูปอย่างน้อยอย่างหนึ่ง"); return; }
     setSaving(it.id || it.tmp);
-    const payload = { page_id: it.page_id || null, brand_id: it.brand_id || null, title: it.title || null, message: it.message || "", image_url: it.image_url || null, updated_at: new Date().toISOString() };
+    // image_url เก็บรูปแรกไว้เสมอ เพื่อให้ระบบเก่าที่อ่านคอลัมน์เดี่ยวยังใช้ได้
+    const payload = { page_id: it.page_id || null, brand_id: it.brand_id || null, title: it.title || null, message: it.message || "", image_urls: imgs, image_url: imgs[0] || null, updated_at: new Date().toISOString() };
     if (it.id) await supabase.from("saved_replies").update(payload).eq("id", it.id);
     else await supabase.from("saved_replies").insert(payload);
     setSaving(""); load();
@@ -1418,10 +1578,33 @@ export function SavedRepliesPanel({ allowedPages = null }) {
               </select>
             </div>
             <textarea rows={3} value={it.message || ""} onChange={(e) => setField(idx, "message", e.target.value)} placeholder="ข้อความตอบกลับอัตโนมัติ/ข้อความสำเร็จรูป..." className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+            {/* รูปแนบ — เรียงตามลำดับที่จะถูกส่งในแชท กดลูกศรสลับตำแหน่งได้ */}
+            {imagesOf(it).length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {imagesOf(it).map((url, i) => (
+                  <div key={url} className="group relative">
+                    <img src={url} alt="" className="h-16 w-16 rounded-lg border border-slate-200 object-cover" />
+                    <span className="absolute left-1 top-1 rounded bg-black/60 px-1 text-[10px] font-semibold text-white">{i + 1}</span>
+                    <button onClick={() => removeImg(idx, url)} title="ลบรูปนี้"
+                      className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-rose-600 text-white shadow">
+                      <X size={12} />
+                    </button>
+                    <div className="mt-1 flex justify-center gap-1">
+                      <button onClick={() => moveImg(idx, i, -1)} disabled={i === 0} title="เลื่อนไปหน้า"
+                        className="rounded px-1 text-[11px] text-slate-500 hover:bg-slate-100 disabled:opacity-30">←</button>
+                      <button onClick={() => moveImg(idx, i, 1)} disabled={i === imagesOf(it).length - 1} title="เลื่อนไปหลัง"
+                        className="rounded px-1 text-[11px] text-slate-500 hover:bg-slate-100 disabled:opacity-30">→</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="flex items-center gap-3 flex-wrap">
-              {it.image_url && <img src={it.image_url} alt="" className="w-14 h-14 rounded object-cover border border-slate-200" />}
-              <label className="text-xs text-brand-600 hover:underline cursor-pointer">{it.image_url ? "เปลี่ยนรูป" : "แนบรูป"}<input type="file" accept="image/*" className="hidden" onChange={(e) => uploadImg(idx, e.target.files?.[0])} /></label>
-              {it.image_url && <button onClick={() => setField(idx, "image_url", null)} className="text-xs text-rose-500 hover:underline">ลบรูป</button>}
+              <label className="text-xs text-brand-600 hover:underline cursor-pointer">
+                {imagesOf(it).length ? `เพิ่มรูป (${imagesOf(it).length}/${MAX_IMAGES})` : "แนบรูป"}
+                <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => { uploadImgs(idx, e.target.files); e.target.value = ""; }} />
+              </label>
+              {imagesOf(it).length > 1 && <button onClick={() => setField(idx, "image_urls", [])} className="text-xs text-rose-500 hover:underline">ลบรูปทั้งหมด</button>}
               <div className="ml-auto flex items-center gap-2">
                 <button onClick={() => del(idx)} className="text-xs text-rose-600 hover:underline">ลบ</button>
                 <button onClick={() => save(idx)} disabled={saving === (it.id || it.tmp)} className="bg-brand-600 text-white rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-brand-700 disabled:opacity-60">{saving === (it.id || it.tmp) ? "กำลังบันทึก..." : "บันทึก"}</button>

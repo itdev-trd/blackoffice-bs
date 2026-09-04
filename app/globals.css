@@ -30,6 +30,12 @@
   --brand: #3452E0;
   --brand-strong: #2A41B8;
   --brand-soft: #EEF1FE;
+  /* สีบอกความหมาย (ผ่าน/เตือน/ผิด) — ก่อนหน้านี้แต่ละหน้าเลือก emerald-400/amber-500/rose-500
+     กันเอง ทำให้สีเดียวกันหมายความต่างกันคนละหน้า และเฉดของธีมมืดสว่างจ้าเกินไป
+     เก็บทั้ง hex (สำหรับตัวอักษร) และช่อง RGB (สำหรับพื้นโปร่งใส rgb(var(--n-ok)/.12)) */
+  --ok: #15803D;   --n-ok: 22 163 74;
+  --warn: #B54708; --n-warn: 217 119 6;
+  --bad: #B42318;  --n-bad: 220 38 38;
   /* สีของ sidebar/หน้าแชท (คลาส night-*) — เดิมเป็น hex ฝังตายใน tailwind.config
      ทำให้ธีมสว่างเปลี่ยนแต่เนื้อหา ส่วน sidebar ยังมืดอยู่
      เก็บเป็น "ช่อง RGB" ไม่ใช่ hex เพราะทั้งโปรเจกต์ใช้ opacity modifier (bg-night-accent/15) */
@@ -67,6 +73,11 @@ html.dark {
   --brand: #1F6FEB;
   --brand-strong: #388BFD;
   --brand-soft: rgba(31, 111, 235, .16);
+  /* ธีมมืดต้องใช้เฉดสว่างขึ้น ไม่ใช่เฉดเดียวกับธีมสว่าง — วัดบนพื้นการ์ด #161B22
+     ได้ 6.9 / 7.4 / 5.6 ตามลำดับ ผ่าน AA ทั้งสามสี */
+  --ok: #4ADE80;   --n-ok: 74 222 128;
+  --warn: #FBBF24; --n-warn: 251 191 36;
+  --bad: #FB7185;  --n-bad: 251 113 133;
   /* ธีมมืด — ค่าเดิมที่เคยฝังใน tailwind.config (GitHub-dark) */
   --n-base: 13 17 23;
   --n-surface: 22 27 34;
@@ -501,8 +512,8 @@ html:not(.dark) .chat-bubble-me * { color: #FFFFFF; }
 .chat-tool-button:hover,
 .chat-tool-button.is-active { color: var(--brand-strong); background: var(--brand-soft); }
 
-/* รายการแชทบนมือถือ — compact แต่ยังคงชื่อเพจ, ช่องทาง, ค้นหา และตัวกรองครบ */
-@media (max-width: 767px) {
+/* รายการแชทบนมือถือ/แท็บเล็ต — compact แต่ยังคงชื่อเพจ, ช่องทาง, ค้นหา และตัวกรองครบ */
+@media (max-width: 1023px) {
   .chat-list-header { padding: .5rem .65rem; }
   .chat-list-avatar { width: 2rem; height: 2rem; }
   .chat-list-title { font-size: .875rem; }
@@ -523,8 +534,9 @@ html:not(.dark) .chat-bubble-me * { color: #FFFFFF; }
   .chat-language-hint { flex: 0 0 auto; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
 
-/* ช่วง tablet แนวนอน: ยังมี 3 คอลัมน์ได้ แต่ต้องลดความกว้างก่อนที่แผงขวาจะถูกตัด */
-@media (min-width: 768px) and (max-width: 1100px) {
+/* เดสก์ท็อปจอเล็ก: ยังมี 3 คอลัมน์ได้ แต่ต้องลดความกว้างก่อนที่แผงขวาจะถูกตัด
+   (ต่ำกว่า 1024px ใช้หน้าตาแบบมือถือแล้ว จึงไม่เริ่มที่ 768px เหมือนเดิม) */
+@media (min-width: 1024px) and (max-width: 1200px) {
   .chat-inbox-list { width: 280px !important; }
   .chat-customer-panel { width: 280px !important; padding: .75rem !important; }
   .chat-customer-form .grid { grid-template-columns: minmax(0, 1fr); }
@@ -533,25 +545,9 @@ html:not(.dark) .chat-bubble-me * { color: #FFFFFF; }
   .chat-conversation-panel .chat-language-control select { width: 220px; }
 }
 
-/* Inbox ระหว่างมือถือกับ desktop: ไม่บีบ 3 คอลัมน์จนอ่าน/กดไม่ได้
-   ใช้รูปแบบเดียวกับมือถือ โดยเปิดทีละแผง */
-@media (min-width: 768px) and (max-width: 1023px) {
-  .chat-shell:not(.is-selected) .chat-inbox-list { width: 100% !important; }
-  .chat-shell:not(.is-selected) .chat-conversation-panel { display: none !important; }
-  .chat-shell.is-selected .chat-inbox-list,
-  .chat-shell.is-selected .chat-customer-panel { display: none !important; }
-  .chat-shell.is-selected .chat-conversation-panel {
-    display: flex !important;
-    position: fixed !important;
-    inset: 0 !important;
-    z-index: 40 !important;
-    width: 100% !important;
-    height: 100dvh !important;
-    max-width: none !important;
-  }
-  .chat-mobile-back,
-  .chat-mobile-status { display: inline-flex !important; }
-}
+/* แท็บเล็ตใช้หน้าตาชุดเดียวกับมือถือแล้ว — breakpoint lg: ใน JSX จัดการเอง
+   บล็อกที่เคยอยู่ตรงนี้บังคับให้แท็บเล็ตเป็น 2 คอลัมน์ (ลิสต์ค้างข้างห้องแชท)
+   ถ้าปล่อยไว้จะฝืนพฤติกรรมเต็มจอแบบมือถือ จึงถอดออกทั้งบล็อก */
 
 /* ความสูงห้องแชท — มือถือเต็มจอ เดสก์ท็อปเว้นขอบ
    มือถือ: เผื่อพื้นที่ด้านล่างให้แถบเมนูล่าง (~60px) เฉพาะตอนโชว์ลิสต์ —
@@ -562,10 +558,10 @@ html:not(.dark) .chat-bubble-me * { color: #FFFFFF; }
 body { padding-top: var(--update-banner-h); }
 
 .chat-shell { height: 82vh; }
-@media (min-width: 768px) {
+@media (min-width: 1024px) {
   .chat-shell { height: calc(100vh - var(--update-banner-h)); border-radius: 0 !important; border-width: 0 !important; }
 }
-@media (max-width: 767px) {
+@media (max-width: 1023px) {
   .chat-shell {
     height: calc(100vh - 60px - var(--update-banner-h) - env(safe-area-inset-bottom));
     height: calc(100dvh - 60px - var(--update-banner-h) - env(safe-area-inset-bottom));
@@ -708,7 +704,7 @@ body { padding-top: var(--update-banner-h); }
   select, input[type="date"] { min-height: 38px; }
 }
 
-@media (max-width: 767px) {
+@media (max-width: 1023px) {
   .dashboard-page-main { padding-inline: 12px; }
   .dashboard-page-main > * { width: 100%; }
   /* เดิมมี .dashboard-page-main .grid { grid-template-columns: minmax(0,1fr) } อยู่ตรงนี้
@@ -728,3 +724,16 @@ body { padding-top: var(--update-banner-h); }
   .ds-skeleton { animation: none; }
   * { transition-duration: .01ms !important; }
 }
+
+/* ===================================================================
+   ตารางสมาชิก TradingView
+   เดิมใช้ divide-slate-100 กับ text-slate-* ฝังตาย จึงจมหายในธีมมืด
+   และไม่มี hover เลย ทำให้กวาดตาข้ามคอลัมน์ในแถวเดียวกันหลุดบ่อย
+   =================================================================== */
+.tv-row { border-top: 1px solid var(--line); transition: background-color var(--dur, .15s) var(--ease, ease); }
+.tv-rows > .tv-row:first-of-type { border-top: 0; }
+.tv-row:hover { background: rgb(var(--n-ink-3) / .06); }
+
+/* แถวสลับสีอ่อนๆ ช่วยไล่สายตาในตารางกว้าง */
+.tv-row:nth-of-type(even) { background: rgb(var(--n-ink-3) / .028); }
+.tv-row:nth-of-type(even):hover { background: rgb(var(--n-ink-3) / .06); }

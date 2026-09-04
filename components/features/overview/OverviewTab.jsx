@@ -1,7 +1,77 @@
 "use client";
 
-import { BarChart3, CheckCircle2, PauseCircle, Sparkles, TrendingUp, Wand2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { BarChart3, CheckCircle2, Inbox, PauseCircle, Sparkles, Tv, TrendingUp, Wand2 } from "lucide-react";
 import { Badge, Button, Card, EmptyState, SectionTitle, StatCard } from "@/components/ui";
+import { supabase } from "@/lib/supabase/client";
+
+// ---- ตัวเลขจริงจากงานที่ใช้อยู่ทุกวัน ----
+// การ์ดชุดเดิมด้านล่างอ่านจาก ad_content / metrics_log ซึ่งเป็นตารางของ "ระบบยิงแอดในตัวแอป"
+// ที่ยังไม่เคยถูกใช้ (0 แถว) หน้าภาพรวมจึงว่างเปล่าทั้งที่ระบบมีข้อมูลจริงเยอะมาก
+// ส่วนนี้จึงดึงจากแหล่งที่มีของจริง: แชทลูกค้า · สิทธิ์ TradingView · ยอดโฆษณาจากแคช Meta
+const thb = (n) => `฿${Number(n || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const int = (n) => Number(n || 0).toLocaleString("th-TH");
+
+function LiveSummary({ onNavigate }) {
+  const [d, setD] = useState(null);
+
+  useEffect(() => {
+    let dead = false;
+    (async () => {
+      const [counts, cache] = await Promise.all([
+        // ตัวนับทั้ง 6 ตัวมาในคำขอเดียว (ดู function overview_counts ในฐานข้อมูล)
+        // เดิมแยกเป็น 6 คำขอ ตัวนับ tv_external_members ตัวเดียวใช้เวลาถึง 1.1 วินาที
+        supabase.rpc("overview_counts"),
+        // ตาราง ad_insights_cache ปิดไม่ให้ client อ่าน (RLS ไม่มี policy) ซึ่งถูกต้องแล้ว
+        // จึงเรียกผ่าน edge function ที่ตรวจสิทธิ์อยู่แล้ว — ฟังก์ชันจะคืนจากแคชเอง ไม่ยิง Meta ซ้ำ
+        // ใช้บัญชีเดียวกับที่เลือกค้างไว้ในหน้าแคมเปญ ถ้ายังไม่เคยเลือกก็ข้ามไป
+        (() => {
+          // ค่าใน localStorage บางครั้งถูกเก็บเป็น JSON บางครั้งเป็นสตริงดิบ — รับได้ทั้งสองแบบ
+          const stored = localStorage.getItem("ui.campaigns.adAccount") || "";
+          let acct = stored;
+          try { const j = JSON.parse(stored); if (j) acct = String(j); } catch { /* สตริงดิบ ใช้ได้เลย */ }
+          acct = String(acct || "").replace(/^"|"$/g, "").trim();
+          if (!acct) return Promise.resolve({ data: null });
+          return supabase.functions.invoke("list-campaigns", { body: { ad_account_id: acct, date_preset: "last_30d" } });
+        })(),
+      ]);
+
+      let spend = 0, results = 0, hasAds = false;
+      for (const c of cache?.data?.campaigns || []) {
+        const m = c?.metrics || {};
+        spend += Number(m.spend || 0);
+        results += Number(m.result_value || 0);
+        hasAds = true;
+      }
+      const c = counts?.data || {};
+      if (!dead) setD({
+        customers: c.customers ?? 0, unanswered: c.unanswered ?? 0, fresh7: c.fresh7 ?? 0,
+        tvAll: c.tvAll ?? 0, tvSoon: c.tvSoon ?? 0, tvExpired: c.tvExpired ?? 0,
+        spend, results, hasAds,
+      });
+    })().catch(() => { if (!dead) setD({ error: true }); });
+    return () => { dead = true; };
+  }, []);
+
+  if (!d) return <Card className="p-5 text-sm text-slate-500">กำลังโหลดตัวเลขล่าสุด…</Card>;
+  if (d.error) return <Card className="p-5 text-sm text-rose-600">โหลดตัวเลขไม่สำเร็จ</Card>;
+
+  return (
+    <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <StatCard icon={Inbox} label="ลูกค้าทั้งหมด" value={int(d.customers)}
+        sub={`ทักใหม่ 7 วัน ${int(d.fresh7)} คน`} tone="brand" onClick={() => onNavigate?.("customer_list")} />
+      <StatCard icon={Inbox} label="ยังไม่ได้ตอบ" value={int(d.unanswered)}
+        sub={d.unanswered > 0 ? "รอแอดมินตอบอยู่" : "ตอบครบแล้ว"}
+        tone={d.unanswered > 0 ? "gold" : "brand"} onClick={() => onNavigate?.("inbox")} />
+      <StatCard icon={Tv} label="สิทธิ์ใกล้หมดใน 7 วัน" value={int(d.tvSoon)}
+        sub={`ทั้งหมด ${int(d.tvAll)} · หมดแล้ว ${int(d.tvExpired)}`}
+        tone={d.tvSoon > 0 ? "red" : "brand"} onClick={() => onNavigate?.("customerdb")} />
+      <StatCard icon={BarChart3} label="ค่าโฆษณา 30 วัน" value={d.hasAds ? thb(d.spend) : "—"}
+        sub={d.hasAds ? `ได้ผลลัพธ์ ${int(d.results)} ครั้ง` : "เปิดหน้าแคมเปญเพื่อดึงข้อมูล"}
+        tone="brand" onClick={() => onNavigate?.("campaigns")} />
+    </div>
+  );
+}
 
 // หน้าแรกของระบบ — ต้องตอบคำถามเดียวให้ได้ในสายตาแรก: "ตอนนี้มีอะไรต้องทำ"
 // เรียงเป็น ตัวเลขสรุป → เงินไปลงที่แอดตัวไหน → คิวงานที่ต้องมีคนกด
@@ -67,6 +137,8 @@ export default function OverviewTab({ adContent = [], adCopies = [], adImages = 
           </Button>
         }
       />
+
+      <LiveSummary onNavigate={onNavigate} />
 
       {/* ตัวเลขสรุป — ค่าโฆษณามาก่อน เพราะเป็นตัวเดียวที่เป็นเงินไหลออกจริง */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">

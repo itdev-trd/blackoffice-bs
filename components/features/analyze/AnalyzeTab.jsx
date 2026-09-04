@@ -29,6 +29,7 @@ import Spinner from "@/components/shared/Spinner";
 import StatusBadge from "@/components/shared/StatusBadge";
 import { GhostAlert, useArchive, ArchiveBar } from "@/components/features/campaigns/CampaignsTab";
 import { SectionTitle } from "@/components/ui";
+import AdKeywordCountryScanner from "@/components/features/analyze/AdKeywordCountryScanner";
 
 const VERDICT_META = {
   underperform: { label: "ต่ำกว่าเป้า", cls: "bg-rose-100 text-rose-700", Icon: ArrowDownCircle },
@@ -53,6 +54,12 @@ function fmtNum(n, digits = 0) {
   if (n === null || n === undefined || Number.isNaN(Number(n))) return "-";
   return Number(n).toLocaleString("th-TH", { maximumFractionDigits: digits });
 }
+// จำนวนเงินต้องคงทศนิยม 2 ตำแหน่งเสมอ (บังคับให้มีเลขศูนย์ท้ายด้วย) เพราะตัวเลขพวกนี้
+// ถูกเอาไปกระทบยอดกับฝ่ายบัญชี — fmtNum ปัดทิ้งทำให้ ฿9,331.87 กลายเป็น 9,332 ไม่ตรงกับ Ads Manager
+function fmtMoney(n) {
+  if (n === null || n === undefined || Number.isNaN(Number(n))) return "-";
+  return Number(n).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
 
 // ---------------------------------------------------------------
 // แดชบอร์ดเจาะลึกรายแอด (charts / gauges แบบ SVG ไม่พึ่งไลบรารีนอก)
@@ -69,6 +76,95 @@ function KpiTile({ label, value, sub, tone = "slate", secondaryLabel, secondaryV
           <span className="text-[11px] text-slate-500">{secondaryLabel}</span>
           <span className={`text-sm font-semibold tabular-nums whitespace-nowrap ${tones[tone]}`}>{secondaryValue}</span>
         </div>
+      )}
+    </div>
+  );
+}
+
+// ---- ชิ้นส่วนแดชบอร์ดแบบอ่านง่าย ----
+// เดิมแดชบอร์ดวางตัวเลข 8 ช่องน้ำหนักเท่ากันหมด แล้วใช้ศัพท์เทคนิคล้วน (CPM/CTR/CPC/Conv. rate)
+// คนที่ไม่ได้ยิงแอดเป็นอ่านแล้วไม่รู้ว่าควรดูตัวไหนก่อน จึงจัดลำดับใหม่:
+//   1) ผลลัพธ์ที่ซื้อจริง + ต้นทุนต่อครั้ง = ตัวใหญ่สุด
+//   2) ที่เหลือจัดเป็นกลุ่มมีหัวข้อ พร้อมชื่อภาษาคน ศัพท์เทคนิคย้ายไปเป็นตัวเล็ก
+
+// เลือกว่า "ผลลัพธ์" ของแอดชิ้นนี้คืออะไร — หลักเดียวกับตารางแคมเปญ
+function headlineResult(o) {
+  if (!o) return null;
+  if (o.conversations > 0) return { label: "คนทักแชท", hint: "บทสนทนาที่เริ่มจากโฆษณา", value: o.conversations };
+  if (o.leads > 0) return { label: "ลีด", hint: "คนที่กรอกข้อมูลติดต่อ", value: o.leads };
+  if (o.link_clicks > 0) return { label: "คนกดลิงก์", hint: "คลิกไปยังปลายทาง", value: o.link_clicks };
+  return { label: "ผลลัพธ์", hint: "ยังไม่มีผลลัพธ์ในช่วงนี้", value: 0 };
+}
+
+function HeroResult({ o, rangeText }) {
+  const res = headlineResult(o);
+  const perUnit = res.value > 0 ? o.spend / res.value : null;
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-6">
+      <div className="text-xs font-medium text-slate-500">{rangeText} · โฆษณาชิ้นนี้ได้อะไรมา</div>
+      <div className="mt-3 flex flex-wrap items-end gap-x-8 gap-y-4">
+        <div>
+          <div className="text-4xl sm:text-5xl font-bold tabular-nums text-slate-900">{fmtNum(res.value)}</div>
+          <div className="mt-1 text-sm font-semibold text-slate-700">{res.label}</div>
+          <div className="text-[11px] text-slate-500">{res.hint}</div>
+        </div>
+        <div className="h-12 w-px bg-slate-200 hidden sm:block" />
+        <div>
+          <div className="text-2xl font-semibold tabular-nums text-slate-900">{fmtMoney(o.spend)}฿</div>
+          <div className="mt-1 text-sm font-medium text-slate-600">จ่ายไปทั้งหมด</div>
+        </div>
+        <div>
+          <div className="text-2xl font-semibold tabular-nums text-slate-900">{perUnit != null ? `${fmtMoney(perUnit)}฿` : "—"}</div>
+          <div className="mt-1 text-sm font-medium text-slate-600">เฉลี่ยครั้งละ</div>
+        </div>
+      </div>
+      {/* สรุปเป็นประโยคเดียว — คนที่ไม่เคยยิงแอดอ่านบรรทัดนี้บรรทัดเดียวก็เข้าใจ
+          ไม่ตัดสินว่าดีหรือแย่ เพราะยังไม่มีเป้าหมายให้เทียบ ปล่อยให้ส่วน AI เป็นคนสรุป */}
+      <p className="mt-4 text-sm leading-relaxed text-slate-600">
+        {res.value > 0
+          ? <>จ่ายไป <b className="text-slate-900">{fmtMoney(o.spend)}฿</b> ได้ <b className="text-slate-900">{res.label} {fmtNum(res.value)}</b> ราย เฉลี่ยรายละ <b className="text-slate-900">{fmtMoney(perUnit)}฿</b> · มีคนเห็นโฆษณา {fmtNum(o.reach)} คน</>
+          : <>ช่วงนี้ยังไม่มีผลลัพธ์เข้ามา {o.spend > 0 ? `แม้จะใช้เงินไปแล้ว ${fmtMoney(o.spend)}฿` : "และยังไม่มีการใช้เงิน"}</>}
+      </p>
+    </div>
+  );
+}
+
+function MetricGroup({ title, hint, children }) {
+  return (
+    <section>
+      <div className="mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <h4 className="text-sm font-semibold text-slate-800">{title}</h4>
+        {hint && <span className="text-[11px] text-slate-500">{hint}</span>}
+      </div>
+      <div className="grid grid-cols-1 min-[420px]:grid-cols-2 lg:grid-cols-4 gap-2">{children}</div>
+    </section>
+  );
+}
+
+// ชื่อภาษาคนเป็นตัวหลัก ศัพท์เทคนิคเป็นตัวเล็กใต้ค่า — คนที่รู้ศัพท์อยู่แล้วยังหาเจอ
+function PlainTile({ name, value, jargon, note, tone = "slate" }) {
+  const tones = { slate: "text-slate-900", green: "text-emerald-700", rose: "text-rose-700", blue: "text-blue-700" };
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-3 min-w-0">
+      <div className="text-[11px] font-medium text-slate-600">{name}</div>
+      <div className={`mt-0.5 text-xl font-semibold tabular-nums break-words ${tones[tone]}`}>{value}</div>
+      {jargon && <div className="text-[10px] uppercase tracking-wide text-slate-400">{jargon}</div>}
+      {note && <div className="mt-1 text-[11px] text-slate-500">{note}</div>}
+    </div>
+  );
+}
+
+function EmptyRange({ rangeText, onWiden }) {
+  return (
+    <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-12 text-center">
+      <div className="text-base font-semibold text-slate-800">{rangeText}นี้ยังไม่มีข้อมูล</div>
+      <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-slate-600">
+        โฆษณาชิ้นนี้ยังไม่มีการใช้เงินหรือยอดการมองเห็นในช่วงที่เลือก — ลองขยายช่วงเวลาให้กว้างขึ้น
+      </p>
+      {onWiden && (
+        <button onClick={onWiden} className="mt-4 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700">
+          ดูย้อนหลัง 30 วัน
+        </button>
       )}
     </div>
   );
@@ -267,11 +363,14 @@ function DailyMultiChart({ points, series }) {
   );
 }
 
-function Funnel({ impressions, clicks, leads }) {
+// ขั้นสุดท้ายต้องเป็น "ผลลัพธ์ที่แคมเปญนั้นซื้อจริง" ไม่ใช่ลีดเสมอไป
+// เดิมตรึงเป็น "ลีด" ทำให้แคมเปญที่ซื้อบทสนทนาเห็น 222 ลีด ขณะที่หัวแดชบอร์ดเห็น 386 คนทักแชท
+// ตัวเลขสองอันในหน้าเดียวกันไม่ตรงกัน อ่านแล้วไม่รู้จะเชื่ออันไหน
+function Funnel({ impressions, clicks, result }) {
   const stages = [
-    { label: "การมองเห็น (Impressions)", value: impressions, color: "#6366f1" },
-    { label: "คลิก (Clicks)", value: clicks, color: "#0ea5e9" },
-    { label: "ลีด (Leads)", value: leads, color: "#10b981" },
+    { label: "คนเห็นโฆษณา", jargon: "Impressions", value: impressions, color: "#6366f1" },
+    { label: "กดโฆษณา", jargon: "Clicks", value: clicks, color: "#0ea5e9" },
+    { label: result?.label || "ผลลัพธ์", jargon: result?.hint || "", value: result?.value ?? 0, color: "#10b981" },
   ];
   const top = Math.max(1, impressions);
   return (
@@ -281,8 +380,11 @@ function Funnel({ impressions, clicks, leads }) {
         const conv = prev && prev > 0 ? Math.round((s.value / prev) * 100 * 10) / 10 : null;
         return (
           <div key={s.label}>
-            <div className="flex justify-between text-xs text-slate-600">
-              <span>{s.label}</span>
+            <div className="flex items-baseline justify-between gap-2 text-xs text-slate-600">
+              <span className="min-w-0">
+                {s.label}
+                {s.jargon && <span className="ml-1 text-[10px] uppercase tracking-wide text-slate-400">{s.jargon}</span>}
+              </span>
               <span className="font-medium text-slate-800">
                 {fmtNum(s.value)}
                 {conv != null && <span className="text-slate-400 font-normal"> · {conv}%</span>}
@@ -746,7 +848,10 @@ function FullConfigPanel({ adId, level, onNavigate }) {
 }
 
 function AdDashboardModal({ ad, ai, onClose, onNavigate }) {
-  const [range, setRange] = useState({ preset: "today", since: "", until: "" }); // เริ่มที่ "วันนี้" ให้ตรงกับการ์ด
+  // เดิมตั้งต้นที่ "วันนี้" ให้ตรงกับการ์ดหน้าแคมเปญ แต่ผลคือเปิดแดชบอร์ดมาเห็น 0 ทั้งหน้า
+  // เพราะยอดของวันปัจจุบันมักยังไม่เข้า — กำแพงเลขศูนย์ไม่ได้บอกอะไรและทำให้เข้าใจผิดว่าแอดไม่ทำงาน
+  // 30 วันคือช่วงเดียวกับที่ Ads Manager เปิดมาให้ จึงเห็นของจริงตั้งแต่วินาทีแรก
+  const [range, setRange] = useState({ preset: "last_30d", since: "", until: "" });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [data, setData] = useState(null);
@@ -909,7 +1014,9 @@ function AdDashboardModal({ ad, ai, onClose, onNavigate }) {
   return (
     <div className="fixed inset-0 z-50 bg-slate-50 overflow-y-auto" onClick={(e) => e.stopPropagation()}>
       <div className="safe-top sticky top-0 z-10 bg-white border-b border-slate-200">
-        <div className="w-full px-4 sm:px-6 py-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        {/* เดิมสลับเป็นแถวเดียวตั้งแต่ 640px — ช่วงแท็บเล็ตชื่อโฆษณาจึงโดน truncate กลางคำ
+            เลื่อนไปสลับที่ 1024px แทน แท็บเล็ตจะได้ชื่อเต็มบรรทัดแล้วปุ่มลงบรรทัดล่าง */}
+        <div className="w-full px-4 sm:px-6 py-3 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-center gap-3 min-w-0">
             <button onClick={onClose} className="text-slate-500 hover:text-slate-800 flex items-center gap-1 text-sm shrink-0">
               <ArrowLeft size={18} /> กลับ
@@ -923,7 +1030,7 @@ function AdDashboardModal({ ad, ai, onClose, onNavigate }) {
               <div className="text-[11px] text-slate-400">Ad ID: {ad.ad_id || "-"}</div>
             </div>
           </div>
-          <div className="flex items-center gap-2 flex-wrap sm:shrink-0 sm:justify-end">
+          <div className="flex items-center gap-2 flex-wrap lg:shrink-0 lg:justify-end">
             <button
               onClick={runDashboardAI}
               disabled={!data || aiBusy}
@@ -1012,16 +1119,33 @@ function AdDashboardModal({ ad, ai, onClose, onNavigate }) {
                 </div>
               ) : null; })()}
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                <KpiTile label="ค่าใช้จ่าย" value={`${fmtNum(o.spend)}฿`} />
-                <KpiTile label="การมองเห็น" value={fmtNum(o.impressions)} sub={`เข้าถึง ${fmtNum(o.reach)} คน`} />
-                <KpiTile label="ลีด" value={fmtNum(o.leads)} tone="green" sub={o.cpl ? `CPL ${fmtNum(o.cpl)}฿` : "—"} />
-                <KpiTile label="CTR" value={`${fmtNum(o.ctr, 2)}%`} tone="blue" sub={`CPC ${fmtNum(o.cpc)}฿`} />
-                <KpiTile label="CPM" value={`${fmtNum(o.cpm)}฿`} />
-                <KpiTile label="คลิก" value={fmtNum(o.clicks)} sub={`ลิงก์ ${fmtNum(o.link_clicks)}`} />
-                <KpiTile label="ความถี่" value={fmtNum(o.frequency, 2)} tone={o.frequency > 3 ? "rose" : "slate"} sub="ครั้ง/คน" />
-                <KpiTile label="Conv. rate" value={o.cvr != null ? `${fmtNum(o.cvr, 1)}%` : "—"} sub="ลีด/คลิกลิงก์" />
-              </div>
+              {/* ไม่มียอดเลยในช่วงนี้ = บอกตรงๆ ดีกว่าโชว์ศูนย์เต็มหน้าให้เดาเอง */}
+              {(o.spend === 0 && o.impressions === 0) ? (
+                <EmptyRange
+                  rangeText={rangeLabel(range)}
+                  onWiden={range.preset === "last_30d" ? null : () => setRange({ preset: "last_30d", since: "", until: "" })}
+                />
+              ) : (
+                <>
+                  <HeroResult o={o} rangeText={rangeLabel(range)} />
+
+                  <MetricGroup title="มีคนเห็นโฆษณาแค่ไหน" hint="โฆษณาไปถึงคนกี่คน และซ้ำแค่ไหน">
+                    <PlainTile name="จำนวนครั้งที่ถูกเห็น" value={fmtNum(o.impressions)} jargon="Impressions" />
+                    <PlainTile name="เห็นกี่คน (ไม่นับซ้ำ)" value={fmtNum(o.reach)} jargon="Reach" />
+                    <PlainTile name="คนหนึ่งเห็นกี่ครั้ง" value={fmtNum(o.frequency, 2)} jargon="Frequency"
+                      tone={o.frequency > 3 ? "rose" : "slate"} note={o.frequency > 3 ? "เกิน 3 ครั้ง คนเริ่มเบื่อโฆษณา" : null} />
+                    <PlainTile name="จ่ายต่อการเห็น 1,000 ครั้ง" value={`${fmtMoney(o.cpm)}฿`} jargon="CPM" />
+                  </MetricGroup>
+
+                  <MetricGroup title="คนสนใจแค่ไหน" hint="เห็นแล้วกดต่อหรือเปล่า">
+                    <PlainTile name="กดโฆษณา" value={fmtNum(o.clicks)} jargon="Clicks" note={`กดลิงก์ ${fmtNum(o.link_clicks)}`} />
+                    <PlainTile name="เห็นแล้วกด กี่ %" value={`${fmtNum(o.ctr, 2)}%`} jargon="CTR" tone="blue" />
+                    <PlainTile name="จ่ายต่อการกด 1 ครั้ง" value={`${fmtMoney(o.cpc)}฿`} jargon="CPC" />
+                    <PlainTile name="กดแล้วกลายเป็นลีด กี่ %" value={o.cvr != null ? `${fmtNum(o.cvr, 1)}%` : "—"} jargon="Conversion rate"
+                      tone="green" note={o.cpl ? `ลีดละ ${fmtMoney(o.cpl)}฿` : null} />
+                  </MetricGroup>
+                </>
+              )}
 
               {/* งบยิงโฆษณา (ป้อนเอง + บันทึกจำไว้) */}
               <div className="rounded-xl border border-slate-200 bg-white p-4">
@@ -1047,14 +1171,24 @@ function AdDashboardModal({ ad, ai, onClose, onNavigate }) {
                     tone="blue"
                     sub={`งบรวม ${fmtNum(budgetTotalWithVat, 2)}฿ − VAT ${fmtNum(budgetVatAmount, 2)}฿`}
                   />
-                  <KpiTile
-                    label="งบคงเหลือ (รวม VAT)"
-                    value={`${fmtNum(budgetRemainWithVat, 2)}฿`}
-                    tone={budgetRemainWithVat >= 0 ? "green" : "rose"}
-                    sub={`หักค่าใช้จ่ายรวม VAT ${fmtNum(spentWithVat, 2)}฿`}
-                    secondaryLabel="คงเหลือก่อน VAT 7%"
-                    secondaryValue={`${fmtNum(budgetRemainBeforeVat, 2)}฿`}
-                  />
+                  {/* ยังไม่ได้ตั้งงบ = คงเหลือติดลบเท่าค่าใช้จ่ายทั้งหมด ซึ่งอ่านแล้วตกใจว่าใช้งบเกิน
+                      ทั้งที่จริงคือ "ยังไม่ได้กรอกงบ" — บอกตรงๆ ดีกว่าโชว์เลขแดงให้เข้าใจผิด */}
+                  {budgetTotalWithVat > 0 ? (
+                    <KpiTile
+                      label="งบคงเหลือ (รวม VAT)"
+                      value={`${fmtNum(budgetRemainWithVat, 2)}฿`}
+                      tone={budgetRemainWithVat >= 0 ? "green" : "rose"}
+                      sub={`หักค่าใช้จ่ายรวม VAT ${fmtNum(spentWithVat, 2)}฿`}
+                      secondaryLabel="คงเหลือก่อน VAT 7%"
+                      secondaryValue={`${fmtNum(budgetRemainBeforeVat, 2)}฿`}
+                    />
+                  ) : (
+                    <KpiTile
+                      label="งบคงเหลือ (รวม VAT)"
+                      value="—"
+                      sub="กรอกงบทางซ้ายก่อน ระบบถึงจะคำนวณให้"
+                    />
+                  )}
                 </div>
                 <div className="text-[11px] text-slate-400 mt-2">งบที่กรอกคือยอดรวม VAT 7% แล้ว · ตัวเลขในการ์ดสีน้ำเงินคือยอดก่อน VAT ที่นำไปตั้งงบยิง Ads ได้ · งบคงเหลือหักค่าใช้จ่ายจาก Meta หลังบวก VAT 7% แล้ว · ระบบบันทึกตัวเลขไว้ให้อัตโนมัติ</div>
               </div>
@@ -1080,8 +1214,11 @@ function AdDashboardModal({ ad, ai, onClose, onNavigate }) {
               </div>
 
               <div className="rounded-xl border border-slate-200 bg-white p-4">
-                <div className="font-medium text-slate-800 text-sm mb-2">ช่องทางการเปลี่ยนผู้ชมเป็นลีด (Funnel)</div>
-                <Funnel impressions={o.impressions} clicks={o.link_clicks || o.clicks} leads={o.leads} />
+                <div className="mb-2">
+                  <div className="text-sm font-medium text-slate-800">เส้นทางจากคนเห็นโฆษณา → {headlineResult(o).label}</div>
+                  <div className="text-[11px] text-slate-500">แต่ละขั้นเหลือกี่ % จากขั้นก่อนหน้า</div>
+                </div>
+                <Funnel impressions={o.impressions} clicks={o.link_clicks || o.clicks} result={headlineResult(o)} />
               </div>
 
               <div className="rounded-xl border border-slate-200 bg-white p-4">
@@ -1506,7 +1643,9 @@ function MetaBrowsePanel({ settings, restricted = false, allowedAccounts = [] })
   const [campMeta, setCampMeta] = useState(null);   // { cached, fetched_at } ของรายการแคมเปญ
   const [selected, setSelected] = useState(() => lsGet("meta.selected", [])); // campaign ids
   const [textModel, setTextModel] = useState(settings.ai_models?.analyze_ads || "openai");
-  const [range, setRange] = useState({ preset: "today", since: "", until: "" });   // ล็อกเป็น "วันนี้" — ซ่อน picker
+  // เดิมล็อกไว้ที่ "วันนี้" ทำให้ดึงรายงานมาแล้วเห็น 0 ทุกช่อง เพราะยอดของวันปัจจุบันมักยังไม่เข้า
+  // ผู้ใช้อ่านแล้วเข้าใจผิดว่าแคมเปญไม่ทำงาน — เปลี่ยนเป็น 30 วันให้ตรงกับแดชบอร์ดและ Ads Manager
+  const [range, setRange] = useState({ preset: "last_30d", since: "", until: "" });
   const [analyzing, setAnalyzing] = useState(false);
   const [result, setResult] = useState(() => lsGet("meta.result", null));
   const [error, setError] = useState("");
@@ -1723,10 +1862,24 @@ function MetaBrowsePanel({ settings, restricted = false, allowedAccounts = [] })
                 <span>เลือกแล้ว {selected.length}</span>
               </div>
               {campaigns.map((c) => (
-                <label key={c.id} className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-slate-50">
-                  <input type="checkbox" checked={selected.includes(c.id)} onChange={() => toggle(c.id)} />
-                  <span className="flex-1 min-w-0 truncate text-slate-700">{c.name}</span>
-                  <span className={`text-[11px] px-1.5 py-0.5 rounded-full ${c.effective_status === "ACTIVE" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{c.effective_status}</span>
+                /* เดิมโชว์แค่ชื่อ + สถานะดิบอย่าง PAUSED — เลือกไม่ถูกว่าอันไหนคืออันที่ต้องการ
+                   เพิ่มบรรทัดบอกว่าแคมเปญนี้ "ซื้ออะไร" และแปลสถานะเป็นภาษาคน */
+                <label
+                  key={c.id}
+                  className={`flex items-start gap-2.5 px-3 py-2.5 text-sm cursor-pointer transition ${
+                    selected.includes(c.id) ? "bg-brand-50" : "hover:bg-slate-50"
+                  }`}
+                >
+                  <input type="checkbox" checked={selected.includes(c.id)} onChange={() => toggle(c.id)} className="mt-0.5" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-slate-800">{c.name}</span>
+                    {c.objective && <span className="block text-[11px] text-slate-500">{OBJECTIVE_LABEL(c.objective)}</span>}
+                  </span>
+                  <span className={`shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                    c.effective_status === "ACTIVE" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"
+                  }`}>
+                    {c.effective_status === "ACTIVE" ? "กำลังแสดง" : c.effective_status === "PAUSED" ? "หยุดชั่วคราว" : c.effective_status}
+                  </span>
                 </label>
               ))}
             </div>
@@ -1827,22 +1980,53 @@ function CampaignOverviewView({ initialResult, campaignIds, range, textModel, on
                 </span>
                 <span className="min-w-0">
                   <span className="block font-medium text-slate-800 text-sm truncate group-hover:underline">{c.name}</span>
-                  <span className="block text-[11px] text-slate-400">{c.objective} · {c.effective_status} · แตะเพื่อดูชุดโฆษณา</span>
+                  <span className="block text-[11px] text-slate-500">
+                    {OBJECTIVE_LABEL(c.objective) || c.objective}
+                    {" · "}
+                    {c.effective_status === "ACTIVE" ? "กำลังแสดง" : c.effective_status === "PAUSED" ? "หยุดชั่วคราว" : c.effective_status}
+                    {" · แตะเพื่อดูชุดโฆษณา"}
+                  </span>
                 </span>
               </button>
               <button onClick={() => setDashItem({ ad_id: c.campaign_id, headline: c.name, level: "campaign" })} className="text-xs border border-slate-300 rounded-lg px-2.5 py-1 text-slate-600 hover:bg-slate-50 flex items-center gap-1 shrink-0">
                 <BarChart3 size={13} /> แดชบอร์ด
               </button>
             </div>
-            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600">
-              <span>Spend: <b>{fmtNum(c.metrics.spend)}฿</b></span>
-              <span>Leads: <b>{fmtNum(c.metrics.leads)}</b></span>
-              <span>CPL: <b>{c.metrics.cpl ? fmtNum(c.metrics.cpl) + "฿" : "—"}</b></span>
-              <span>CTR: {fmtNum(c.metrics.ctr, 2)}%</span>
-              <span>CPM: {fmtNum(c.metrics.cpm)}฿</span>
-              <span>คลิก: {fmtNum(c.metrics.clicks)}</span>
-              {c.metrics.reply_rate != null && <span className={c.metrics.reply_rate < 0.4 ? "text-rose-600" : ""}>อัตราตอบ: {Math.min(100, Math.round(c.metrics.reply_rate * 100))}%</span>}
-            </div>
+            {/* เดิมยัดตัวเลข 7 ตัวเป็นบรรทัดเดียวด้วยศัพท์อังกฤษล้วน (Spend/Leads/CPL/CTR/CPM)
+                อ่านแล้วไม่รู้ว่าควรดูตัวไหนก่อน และตัว "Leads" ก็ผิดกับแคมเปญที่ซื้อบทสนทนา
+                จัดใหม่: ผลลัพธ์ที่ซื้อจริงเป็นตัวเด่น ที่เหลือเป็นตัวรอง ใช้ชื่อภาษาคน */}
+            {(() => {
+              const res = headlineResult(c.metrics);
+              const per = res.value > 0 ? c.metrics.spend / res.value : null;
+              return (
+                <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-3">
+                  <div className="flex flex-wrap items-end gap-x-6 gap-y-2">
+                    <div>
+                      <div className="text-xl font-bold tabular-nums text-slate-900">{fmtNum(res.value)}</div>
+                      <div className="text-[11px] font-medium text-slate-600">{res.label}</div>
+                    </div>
+                    <div>
+                      <div className="text-base font-semibold tabular-nums text-slate-900">{fmtMoney(c.metrics.spend)}฿</div>
+                      <div className="text-[11px] text-slate-500">จ่ายไป</div>
+                    </div>
+                    <div>
+                      <div className="text-base font-semibold tabular-nums text-slate-900">{per != null ? `${fmtMoney(per)}฿` : "—"}</div>
+                      <div className="text-[11px] text-slate-500">เฉลี่ยครั้งละ</div>
+                    </div>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 border-t border-slate-200 pt-2 text-[11px] text-slate-600">
+                    <span>เห็นแล้วกด <b className="text-slate-800">{fmtNum(c.metrics.ctr, 2)}%</b> <span className="text-slate-400">CTR</span></span>
+                    <span>กด <b className="text-slate-800">{fmtNum(c.metrics.clicks)}</b> ครั้ง</span>
+                    <span>จ่ายต่อการเห็นพันครั้ง <b className="text-slate-800">{fmtMoney(c.metrics.cpm)}฿</b> <span className="text-slate-400">CPM</span></span>
+                    {c.metrics.reply_rate != null && (
+                      <span className={c.metrics.reply_rate < 0.4 ? "text-rose-600" : ""}>
+                        คุยต่อจริง <b>{Math.min(100, Math.round(c.metrics.reply_rate * 100))}%</b>
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
             {c.result_th && <div className="text-sm text-slate-700 bg-slate-50 rounded-lg px-2.5 py-1.5">{c.result_th}</div>}
             {c.recommendation_th && <div className="text-sm text-emerald-800 bg-emerald-50 rounded-lg px-2.5 py-1.5">แนะนำ: {c.recommendation_th}</div>}
 
@@ -1987,6 +2171,7 @@ function AnalyzeTab({ adContent, metricsHistoryByAd, settings, onChanged, restri
         title="วิเคราะห์"
         subtitle="ดูผลโฆษณาจริงจาก Meta เทียบแคมเปญ และให้ AI สรุปว่าอะไรควรหยุดหรือขยายงบ"
       />
+      <AdKeywordCountryScanner restricted={restricted} allowedAccounts={allowedAccounts} />
       <MetaBrowsePanel settings={settings} restricted={restricted} allowedAccounts={allowedAccounts} />
 
       {false && !restricted && (<>   {/* ซ่อนส่วน "วิเคราะห์ผลโฆษณา" ออกจากหน้านี้ทั้งหมด */}

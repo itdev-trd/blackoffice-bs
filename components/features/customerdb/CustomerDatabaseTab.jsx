@@ -86,7 +86,9 @@ export function TradeIdChecker({ darkMode = false, standalone = false }) {
 
 // แอดมินป้อนข้อมูลลูกค้าเอง (ไอดีเทรด/TradingView/เบอร์/อีเมล) จากหน้าตอบแชท
 // บันทึกผ่าน save-lead-fields → มาร์ค manual_data + ผู้ป้อน · AI/sync/webhook จะไม่แก้ทับ
-export function CustomerDataForm({ row, onSaved, darkMode = false }) {
+// compact = เวอร์ชันย่อสำหรับกล่องตอบแชท ซึ่งพื้นที่จำกัดและมีแท็บบอกอยู่แล้วว่านี่คือ "ข้อมูลลูกค้า"
+// จึงตัดหัวข้อซ้ำ ย่อคำอธิบาย และลดระยะห่าง — ที่อื่น (แผงขวา/หน้าจัดการลูกค้า) ยังเหมือนเดิม
+export function CustomerDataForm({ row, onSaved, darkMode = false, compact = false }) {
   const [f, setF] = useState({ trade_id: "", username: "", phone: "", email: "" });
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);   // {ok, text}
@@ -178,29 +180,39 @@ export function CustomerDataForm({ row, onSaved, darkMode = false }) {
       if (ve || !vt?.ok) { setBusy(false); setMsg({ ok: false, text: "เช็คไอดีเทรดไม่สำเร็จ: " + (vt?.error || "ลองใหม่") }); return; }
       if (!vt.pass) { setBusy(false); setMsg({ ok: false, text: `ไอดีเทรด "${tradeId}" ไม่ผ่าน — ยังไม่บันทึก` }); return; }
 
-      // 2) ป้อนแค่ไอดีเทรด (ไม่มี user TV) → บันทึกลงฐานข้อมูลอย่างเดียว ไม่แตะหน้าจัดการ TV
+      // 2) ไอดีเทรดผ่านแล้ว → บันทึกข้อมูลลูกค้าทันที ก่อนแตะ TradingView
+      //
+      // เดิมบันทึกเป็นขั้นสุดท้าย และถ้าให้สิทธิ์ TV ไม่สำเร็จจะ return ทิ้งไปเลย
+      // ผลคือข้อมูลที่แอดมินอุตส่าห์กรอก/ให้ AI สแกนมา หายทั้งชุด ทั้งที่ไอดีเทรดผ่านแล้ว
+      // (เจอจริง: ลูกค้า Patcharachot ไอดี 450137298 กรอกครบแต่ฐานข้อมูลยังว่าง เพราะ n8n ยังไม่ได้ตั้ง)
+      // ข้อมูลลูกค้ากับสิทธิ์อินดิเคเตอร์เป็นคนละเรื่องกัน อันหลังล้มไม่ควรลากอันแรกไปด้วย
+      setMsg({ ok: true, text: "ไอดีเทรดผ่าน — กำลังบันทึกข้อมูลลูกค้า..." });
+      const saved = await saveLeadFields();
+      if (!saved.ok) { setBusy(false); setMsg({ ok: false, text: "บันทึกข้อมูลลูกค้าไม่สำเร็จ: " + saved.error }); return; }
+
+      // ไม่ได้ใส่ user TV = จบแค่บันทึก ไม่ต้องยุ่งกับสิทธิ์อินดิเคเตอร์
       if (!userTv) {
-        const r = await saveLeadFields();
         setBusy(false);
-        setMsg(r.ok ? { ok: true, text: "✓ ไอดีเทรดผ่าน + บันทึกลงฐานข้อมูลแล้ว (ไม่ได้เพิ่ม TV — ไม่ได้ใส่ user TV)" } : { ok: false, text: "ไอดีเทรดผ่าน แต่บันทึกไม่สำเร็จ: " + r.error });
+        setMsg({ ok: true, text: "✓ ไอดีเทรดผ่าน + บันทึกลงฐานข้อมูลแล้ว (ไม่ได้เพิ่ม TV — ไม่ได้ใส่ user TV)" });
         return;
       }
 
-      // 3) มี user TV → เช็ค user TV ต้องผ่าน
-      setMsg({ ok: true, text: "ไอดีเทรดผ่าน — กำลังเช็ค user TV..." });
+      // 3) มี user TV → เช็ค user TV ก่อนให้สิทธิ์
+      //    ตั้งแต่จุดนี้ไป ข้อมูลลูกค้าบันทึกแล้ว ล้มตรงไหนก็ไม่หาย
+      setMsg({ ok: true, text: "บันทึกข้อมูลแล้ว — กำลังเช็ค user TV..." });
       const vBrandId = scripts.find((s) => s.pine_id === pineIds[0])?.brand_id || null;
       const { data: vu, error: vue } = await supabase.functions.invoke("tradingview", { body: { action: "validate_user", username: userTv, brand_id: vBrandId } });
-      if (vue || !vu?.ok) { setBusy(false); setMsg({ ok: false, text: "เช็ค user TV ไม่สำเร็จ: " + (vu?.error || "ลองใหม่") }); return; }
-      if (!vu.exists) { setBusy(false); setMsg({ ok: false, text: `user TV "${userTv}" ไม่ผ่าน (ไม่พบผู้ใช้นี้) — ยังไม่บันทึก` }); return; }
+      if (vue || !vu?.ok) { setBusy(false); setMsg({ ok: false, text: "✓ บันทึกข้อมูลลูกค้าแล้ว · แต่เช็ค user TV ไม่สำเร็จ: " + (vu?.error || "ลองใหม่") }); return; }
+      if (!vu.exists) { setBusy(false); setMsg({ ok: false, text: `✓ บันทึกข้อมูลลูกค้าแล้ว · แต่ไม่พบ user TV "${userTv}" จึงยังไม่ได้ให้สิทธิ์` }); return; }
 
-      // 4) ผ่านทั้งคู่ → ให้สิทธิ์ทีละสคริปต์ (แต่ละตัวใช้วันหมดอายุของตัวเอง)
+      // 4) ให้สิทธิ์ทีละสคริปต์ (แต่ละตัวใช้วันหมดอายุของตัวเอง)
       const summ = []; const fails = [];
       for (const pid of pineIds) {
         const d = getDur(pid);
         const expIso = d.mode === "date" && d.expDate ? new Date(`${beToCe(d.expDate)}T23:59:59+07:00`).toISOString() : null;
         const effDays = d.mode === "days" ? (Number(d.days) || 30) : 0;
         const name = scripts.find((s) => s.pine_id === pid)?.name || pid;
-        setMsg({ ok: true, text: `ผ่านทั้งคู่ — กำลังเพิ่ม "${name}"...` });
+        setMsg({ ok: true, text: `กำลังเพิ่มสิทธิ์ "${name}"...` });
         const { data: g, error: ge } = await supabase.functions.invoke("tradingview", { body: {
           action: "grant", username: userTv, display_name: row?.customer_name || null, email: f.email.trim() || null,
           pine_ids: [pid], lifetime: d.mode === "lifetime", days: effDays, expiration: expIso, trade_id: tradeId,
@@ -208,16 +220,16 @@ export function CustomerDataForm({ row, onSaved, darkMode = false }) {
         if (ge || !g?.ok) fails.push(`${name}: ${g?.error || g?.results?.[0]?.error || "ลองใหม่"}`);
         else summ.push(`${name} (${durLabel(d)})`);
       }
-      if (!summ.length) { setBusy(false); setMsg({ ok: false, text: "เพิ่มสิทธิ์ TV ไม่สำเร็จ: " + (fails.join(" · ") || "ลองใหม่") }); return; }
-      logActivity("tv_grant_from_chat", { id: row.id, username: userTv });
-
-      // 5) บันทึกลงฐานข้อมูลลูกค้าด้วย (เก็บแยกกัน)
-      const r = await saveLeadFields();
+      if (summ.length) logActivity("tv_grant_from_chat", { id: row.id, username: userTv });
       setBusy(false);
-      setMsg(r.ok
-        ? { ok: true, text: `✓ เพิ่ม user TV: ${summ.join(", ")}${fails.length ? ` · ไม่สำเร็จ: ${fails.join(" · ")}` : ""} + บันทึกฐานข้อมูลแล้ว` }
-        : { ok: false, text: "เพิ่มสิทธิ์ TV แล้ว แต่บันทึกฐานข้อมูลไม่สำเร็จ: " + r.error });
-      return;
+      // ข้อมูลลูกค้าบันทึกไปแล้วแน่นอน จึงขึ้นต้นด้วย ✓ เสมอ แล้วค่อยบอกผลฝั่งสิทธิ์
+      setMsg(
+        summ.length && !fails.length
+          ? { ok: true, text: `✓ บันทึกข้อมูลลูกค้า + เพิ่มสิทธิ์: ${summ.join(", ")}` }
+          : summ.length
+            ? { ok: true, text: `✓ บันทึกข้อมูลลูกค้า + เพิ่มสิทธิ์: ${summ.join(", ")} · ไม่สำเร็จ: ${fails.join(" · ")}` }
+            : { ok: false, text: `✓ บันทึกข้อมูลลูกค้าแล้ว · แต่เพิ่มสิทธิ์ TV ไม่สำเร็จ: ${fails.join(" · ") || "ลองใหม่"}` }
+      );      return;
     }
 
     // เส้นทางเดิม — บันทึกฐานข้อมูลตรงๆ
@@ -255,11 +267,17 @@ export function CustomerDataForm({ row, onSaved, darkMode = false }) {
   };
 
   return (
-    <div className={`${darkMode ? "chat-customer-form" : ""} border-t border-slate-200 pt-3 mt-1 space-y-2`}>
+    <div className={`${darkMode ? "chat-customer-form" : ""} ${compact ? "space-y-2" : "border-t border-slate-200 pt-3 mt-1 space-y-2"}`}>
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <label className="text-xs font-medium text-slate-500 flex items-center gap-1"><CheckCircle2 size={13} /> ข้อมูลลูกค้า (แอดมินป้อนเอง)</label>
+        {compact ? (
+          <span className="text-[11px] text-slate-500">
+            {row?.manual_data && row?.manual_data_by ? `บันทึกโดย ${String(row.manual_data_by).split("@")[0]}` : "ยังไม่เคยบันทึก"}
+          </span>
+        ) : (
+          <label className="text-xs font-medium text-slate-500 flex items-center gap-1"><CheckCircle2 size={13} /> ข้อมูลลูกค้า (แอดมินป้อนเอง)</label>
+        )}
         <div className="flex items-center gap-2">
-          {row?.manual_data && row?.manual_data_by && (
+          {!compact && row?.manual_data && row?.manual_data_by && (
             <span className="text-[10px] text-emerald-600 font-medium">✓ ป้อนโดย {String(row.manual_data_by).split("@")[0]}</span>
           )}
           <button type="button" onClick={askAi} disabled={aiBusy || !row?.id}
@@ -272,10 +290,25 @@ export function CustomerDataForm({ row, onSaved, darkMode = false }) {
 
       {/* ข้อเสนอจาก AI — ต้องกดรับก่อนถึงจะลงช่อง และยังต้องกด "บันทึกข้อมูล" อีกที
           ไม่เขียนอะไรเองเลย เพราะระบบสกัดอัตโนมัติเคยทำข้อมูลลูกค้าเพี้ยนมาก่อน */}
-      {ai && (
+      {/* AI ใช้เวลาอ่านราว 8-10 วินาที เดิมระหว่างนั้นไม่มีอะไรขึ้นเลยนอกจากสปินเนอร์ 11px ในปุ่ม
+          คนกดแล้วเห็นหน้าจอนิ่งจึงสรุปว่าปุ่มเสีย แล้วกดซ้ำ — ต้องมีที่ว่างบอกสถานะให้ชัด */}
+      {aiBusy && (
+        <div className="flex items-center gap-2 rounded-lg border border-brand-400/40 bg-brand-50/40 p-2.5 text-[11px] text-slate-600">
+          <Loader2 size={13} className="animate-spin text-brand-600" />
+          กำลังให้ AI อ่านบทสนทนา… ใช้เวลาประมาณ 10 วินาที
+        </div>
+      )}
+
+      {ai && !aiBusy && (
         <div className="rounded-lg border border-brand-400/40 bg-brand-50/40 p-2.5 space-y-1.5">
           {ai.error ? (
             <div className="text-[11px] text-rose-600">{ai.error}</div>
+          ) : !ai.suggestion || !Object.values(ai.suggestion).some(Boolean) ? (
+            /* อ่านสำเร็จแต่ไม่เจออะไร — เดิมจะขึ้นกล่องเปล่าที่มีแค่หัวข้อ ดูเหมือนค้าง */
+            <div className="text-[11px] text-slate-600">
+              AI อ่านแล้วแต่ไม่พบไอดีเทรด อีเมล หรือ User TradingView ในบทสนทนานี้
+              {ai.note && <div className="mt-1 text-[10.5px] text-slate-500">{ai.note}</div>}
+            </div>
           ) : (
             <>
               <div className="flex items-center justify-between gap-2">
@@ -324,9 +357,9 @@ export function CustomerDataForm({ row, onSaved, darkMode = false }) {
       {/* ตัวเลือก TV (เหมือนหน้าจัดการสมาชิก TV) — เห็นเฉพาะแอดมินจนกว่าจะปล่อย */}
       {tvOn && (
         <div className="rounded-lg border border-slate-300 p-2.5 space-y-2">
-          <div className="text-[11px] font-semibold text-slate-600 flex items-center gap-1"><Tv size={12} /> เพิ่มสิทธิ์ TradingView (ถ้าใส่ user TV จะเช็คไอดีเทรด+user TV แล้วเพิ่มให้)</div>
+          <div className="text-[11px] font-semibold text-slate-600 flex items-center gap-1"><Tv size={12} /> เพิ่มสิทธิ์ TradingView</div>
           <div>
-            <label className="text-[11px] text-slate-400">Indicator (สคริปต์) — เลือกได้หลายอัน · กำหนดวันหมดอายุแยกแต่ละตัว</label>
+            <label className="text-[11px] text-slate-400">เลือกสคริปต์ที่จะให้สิทธิ์</label>
             <div className="mt-0.5 rounded-lg border border-slate-300 divide-y divide-slate-100 max-h-60 overflow-y-auto bg-white">
               {scripts.length === 0 && <div className="px-2 py-1.5 text-sm text-slate-400">ยังไม่มีสคริปต์</div>}
               {scripts.map((s) => {
@@ -393,6 +426,8 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
   const [dateFrom, setDateFrom] = useState(() => initialView?.dateFrom ?? "");          // กำหนดเอง (YYYY-MM-DD)
   const [dateTo, setDateTo] = useState(() => initialView?.dateTo ?? "");
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  // รูปแบบไฟล์: "raw" = คอลัมน์เดิมของระบบ · "sheet" = ตรงกับชีต "รายชื่อลูกค้า" ที่ทีมใช้สรุปอยู่
+  const [exportFormat, setExportFormat] = useState("sheet");
   const [exportDateFilter, setExportDateFilter] = useState("");
   const [exportDateFrom, setExportDateFrom] = useState("");
   const [exportDateTo, setExportDateTo] = useState("");
@@ -416,7 +451,42 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
 
   // map ปุ่มเรียง → คอลัมน์จริงใน DB
   const SORT_COL = { customer_name: "customer_name", page_name: "page_name", trade_id: "trade_id", phone: "phone", email: "email", username: "username", psid: "psid", source: "source", messages: "user_message_count", stage: "stage", first_customer_message_at: "first_customer_message_at", last_message_at: "first_customer_message_at", synced_at: "first_customer_message_at" };
-  const EXPORT_DB_COLS = ["customer_name", "page_name", "trade_id", "phone", "email", "username", "psid", "source", "entry_ad_id", "first_customer_message_at"];
+  const EXPORT_DB_COLS = ["customer_name", "page_name", "trade_id", "phone", "email", "username", "psid", "source", "entry_ad_id", "first_customer_message_at", "stage", "stage_manual", "comment_ad_name", "comment_is_ad", "entry_ad_name"];
+  // สถานะในชีตใช้คำของทีม ไม่ใช่ค่า stage ดิบ — แมปให้ตรงกับที่กรอกมือกันอยู่
+  const SHEET_STATUS = {
+    account_opened: "เปิดบัญชีแล้ว",
+    converted: "เปิดบัญชีแล้ว",
+    qualified: "สนใจ",
+    new: "สนใจ",
+    disqualified: "ไม่สนใจ",
+  };
+  // sourceText() ตอบแค่ "โฆษณา/ออร์แกนิก/ไม่ทราบ" — แชท LINE จึงตกเป็น "ไม่ทราบ" ทั้งหมด
+  // ช่องนี้ในชีตหมายถึง "ติดต่อกันทางไหน" จึงต้องตอบเป็นช่องทางแชทจริง
+  const contactChannel = (row) => {
+    const src = String(row.source || "");
+    if (src === "line") return "LINE";
+    if (src === "instagram") return "Instagram";
+    if (src === "comment" || row.comment_is_ad) return "คอมเมนต์";
+    if (src === "ad" || row.entry_ad_id) return `โฆษณา${row.entry_ad_name ? ` (${row.entry_ad_name})` : ""}`;
+    return "Messenger";
+  };
+  const sheetDate = (t) => { if (!t) return ""; try { const d = new Date(t); return `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`; } catch { return ""; } };
+  // ชีตที่ทีมใช้สรุป — คอลัมน์เรียงตามของจริง เพื่อวางทับได้เลยไม่ต้องสลับคอลัมน์
+  // tvByUser มาจากตาราง tv_access (สิทธิ์อินดิเคเตอร์) join ด้วย username ของ TradingView
+  const SHEET_COLUMNS = (tvByUser) => [
+    ["ลำดับ", (row, i) => String(i + 1)],
+    ["ชื่อ", (row) => row.customer_name || ""],
+    ["สถานะ", (row) => SHEET_STATUS[row.stage_manual || row.stage] || "สนใจ"],
+    ["เลขบัญชีเทรด", (row) => row.trade_id || ""],
+    ["อีเมล", (row) => row.email || ""],
+    ["User TradingView", (row) => row.username || ""],
+    ["สถานะอินดี้", (row) => (tvByUser.get(String(row.username || "").toLowerCase()) ? "เพิ่มแล้ว" : "")],
+    ["วันที่เริ่มใช้", (row) => sheetDate(tvByUser.get(String(row.username || "").toLowerCase())?.tv_granted_at)],
+    ["วันหมดอายุ", (row) => sheetDate(tvByUser.get(String(row.username || "").toLowerCase())?.expiration)],
+    ["ช่องทางการติดต่อ", (row) => contactChannel(row)],
+    ["วันที่ติดต่อ", (row) => sheetDate(row.first_customer_message_at)],
+  ];
+
   const EXPORT_COLUMNS = [
     ["ชื่อเฟสบุค", (row) => row.customer_name || ""],
     ["เพจ", (row) => row.page_name || ""],
@@ -430,10 +500,22 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
   ];
 
   // รายชื่อเพจจาก page_lead_config (คงอยู่แม้ตารางลูกค้าจะแบ่งหน้า)
+  // page_lead_config เก็บแต่เพจ Facebook — บัญชี LINE OA ไม่เคยถูกบันทึกไว้ที่นั่น
+  // ทำให้เลือกเพจไม่ได้ จึงกด "ดึงรายงาน"/Export สำหรับลูกค้า LINE ไม่ได้เลย
+  // ทั้งที่ชีตสรุปที่ทีมใช้อยู่เป็นลูกค้า LINE — จึงต้องเอาบัญชี LINE ที่มีแชทจริงมารวมด้วย
   useEffect(() => {
     (async () => {
-      const { data } = await supabase.from("page_lead_config").select("page_id, page_name").order("page_name");
-      setPageOpts((data || []).map((p) => ({ id: p.page_id, name: p.page_name || p.page_id })));
+      const [fb, line] = await Promise.all([
+        supabase.from("page_lead_config").select("page_id, page_name").order("page_name"),
+        supabase.from("chat_customers").select("page_id, page_name").eq("source", "line").limit(500),
+      ]);
+      const seen = new Map();
+      for (const p of fb.data || []) seen.set(String(p.page_id), p.page_name || p.page_id);
+      for (const p of line.data || []) {
+        const id = String(p.page_id || "");
+        if (id && !seen.has(id)) seen.set(id, `${p.page_name || id} (LINE OA)`);
+      }
+      setPageOpts([...seen].map(([id, name]) => ({ id, name })));
     })();
   }, []);
 
@@ -647,12 +729,23 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
         if (!data || data.length < B) break;
         from += B;
       }
+      // รูปแบบชีตต้องมีสถานะอินดิเคเตอร์ด้วย — อยู่คนละตาราง (tv_access) join ด้วย username ของ TradingView
+      // ดึงทีเดียวทั้งก้อนแล้วทำ Map ไว้ เร็วกว่ายิงต่อแถว และตาราง tv_access เล็กมาก
+      const tvByUser = new Map();
+      if (exportFormat === "sheet") {
+        const { data: tv } = await supabase.from("tv_access").select("username, status, tv_granted_at, expiration");
+        for (const t of tv || []) {
+          const key = String(t.username || "").toLowerCase();
+          if (key) tvByUser.set(key, t);
+        }
+      }
+      const columns = exportFormat === "sheet" ? SHEET_COLUMNS(tvByUser) : EXPORT_COLUMNS;
       const esc = (v) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-      const csv = [EXPORT_COLUMNS.map(([header]) => esc(header)).join(","), ...all.map((row) => EXPORT_COLUMNS.map(([, getValue]) => esc(getValue(row))).join(","))].join("\n");
+      const csv = [columns.map(([header]) => esc(header)).join(","), ...all.map((row, i) => columns.map(([, getValue]) => esc(getValue(row, i))).join(","))].join("\n");
       const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url; a.download = `customers_${bangkokDate()}.csv`;
+      a.href = url; a.download = exportFormat === "sheet" ? `รายชื่อลูกค้า_${bangkokDate()}.csv` : `customers_${bangkokDate()}.csv`;
       a.click(); URL.revokeObjectURL(url);
       setExportDialogOpen(false);
     } finally {
@@ -831,6 +924,30 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
               <button type="button" onClick={() => !exporting && setExportDialogOpen(false)} className="customer-export-modal-close" aria-label="ปิด"><X size={20} /></button>
             </div>
             <div className="customer-export-modal-body px-5 py-5 sm:px-6 space-y-4">
+              {/* เลือกรูปแบบไฟล์ — ค่าเริ่มต้นเป็นรูปแบบชีตที่ทีมใช้สรุปอยู่ เพราะเป็นงานประจำ */}
+              <div>
+                <span className="customer-export-modal-label">รูปแบบไฟล์</span>
+                <div className="mt-1.5 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {[
+                    ["sheet", "ชีตสรุปรายชื่อลูกค้า", "ลำดับ · ชื่อ · สถานะ · เลขบัญชีเทรด · อีเมล · TradingView · สถานะอินดี้ · วันเริ่ม/หมดอายุ"],
+                    ["raw", "คอลัมน์ดิบของระบบ", "ชื่อ · เพจ · ไอดีเทรด · เบอร์ · อีเมล · TradingView · PSID · แหล่งที่มา"],
+                  ].map(([val, title, hint]) => (
+                    <button
+                      key={val}
+                      type="button"
+                      onClick={() => setExportFormat(val)}
+                      className={`rounded-xl border px-3 py-2.5 text-left transition ${
+                        exportFormat === val
+                          ? "border-brand-600 bg-brand-600/10"
+                          : "border-slate-300 hover:border-slate-400 dark:border-night-border"
+                      }`}
+                    >
+                      <div className="text-sm font-medium">{title}</div>
+                      <div className="mt-0.5 text-[11px] leading-snug opacity-70">{hint}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
               <label className="customer-export-modal-label" htmlFor="customer-export-date-range">ช่วงเวลาของข้อมูล</label>
               <select id="customer-export-date-range" value={exportDateFilter} onChange={(e) => setExportDateFilter(e.target.value)} className="customer-export-modal-select w-full rounded-xl px-4 py-3.5 text-sm">
                 <option value="">— เลือกช่วงเวลา —</option>
