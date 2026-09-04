@@ -544,6 +544,16 @@ html:not(.dark) .chat-bubble-me * { color: #FFFFFF; }
   .chat-language-control { margin-left: auto; width: auto; flex: 0 0 auto; padding: .2rem .35rem; gap: .25rem; }
   .chat-language-control select { min-width: 0; max-width: 10.5rem; padding: .25rem .35rem; }
   .chat-language-hint { flex: 0 0 auto; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* บนมือถือแถบนี้กินความสูงจนเห็นแชทได้น้อย — ตัดทุกอย่างที่ไม่จำเป็นออก
+     เหลือแค่ตัวเลือกภาษา  ข้อความ "Ctrl/⌘+Enter = ส่ง" ไม่มีความหมายบนมือถืออยู่แล้ว
+     และภาษาหัวแชทดูได้จากแผงข้อมูลลูกค้า
+     ตัวอักษรใน select ต้องคง 16px ไว้ ไม่งั้น iOS ซูมหน้าจอตอนกด จึงลดที่ padding แทน */
+  .chat-compose-guide { padding: .25rem .45rem; margin-bottom: .35rem; }
+  .chat-compose-guide > div:first-child { display: none; }
+  .chat-language-control { padding: 0 .3rem; }
+  .chat-language-control select { min-height: 32px; padding: .1rem .3rem; max-width: 12rem; }
+  .chat-language-hint { display: none; }
 }
 
 /* เดสก์ท็อปจอเล็ก: ยังมี 3 คอลัมน์ได้ แต่ต้องลดความกว้างก่อนที่แผงขวาจะถูกตัด

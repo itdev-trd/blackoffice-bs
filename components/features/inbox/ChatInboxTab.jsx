@@ -11,7 +11,6 @@ import {
   SlidersHorizontal,
   MessageSquare,
   Search,
-  Menu,
   X,
   Paperclip,
   Eye,
@@ -418,7 +417,6 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   }, []);
   // จอที่มีแผงขวาแล้ว บังคับกลับโหมดตอบเสมอ
   const activeCompose = hasSidePanel ? "reply" : composeMode;
-  const [statusMenuOpen, setStatusMenuOpen] = useState(false); // มือถือ: เมนูแฮมเบอร์เกอร์ปรับสถานะ
   // โน้ต/แท็ก/สรุปบทสนทนา — เก็บ draft ของโน้ตแยกจาก selected เพราะพิมพ์แล้วค่อย save ตอน blur
   const [notesDraft, setNotesDraft] = useState("");
   const [notesSaving, setNotesSaving] = useState(false);
@@ -1086,7 +1084,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     const preloaded = cachedChat(item.id);
     setSelected(preloaded || { ...item, transcript: null });
     logActivity("open_chat", { id: item.id, customer_name: item.customer_name, page_id: item.page_id });
-    setTranslations({}); setReply(""); setSendPreview(null); setSendMsg(""); setAdSources([]); setAdLoading(false); setSavedReplies([]); setSavedOpen(false); setKnowledgeOpen(false); setKnowledgeResults([]); setReplyTo(null); setMessageMenu(null); setKnowledgeCapture(null); setKnowledgeCaptureMsg(""); setEmojiOpen(false); setInfoOpen(false); setComposeMode("reply"); setStatusMenuOpen(false); setLabelMsg(null); setQuickFillState({});
+    setTranslations({}); setReply(""); setSendPreview(null); setSendMsg(""); setAdSources([]); setAdLoading(false); setSavedReplies([]); setSavedOpen(false); setKnowledgeOpen(false); setKnowledgeResults([]); setReplyTo(null); setMessageMenu(null); setKnowledgeCapture(null); setKnowledgeCaptureMsg(""); setEmojiOpen(false); setInfoOpen(false); setComposeMode("reply"); setLabelMsg(null); setQuickFillState({});
     setForceLang(item.source === "line" ? "Thai" : lsGet(`ui.forceLang.${item.id}`, "auto"));   // LINE เป็นภาษาไทย ไม่ต้องแปล
     // LINE OA ใช้ภาษาไทย ไม่ต้องเรียกตัวแปลหรือสร้างคำแปลใต้ข้อความ
     const translationPromise = item.source === "line" ? null : supabase.functions.invoke("messenger-reply", { body: { action: "translate", id: item.id } });
@@ -2112,7 +2110,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
               {/* หัวแชท: back(มือถือ) + รูปลูกค้า + ชื่อ + มาจากแอด(กดขยาย) + แฮมเบอร์เกอร์
                   บนมือถือ (fixed เต็มจอ) เว้น safe-area บน กัน header ทับแถบสถานะ/นาฬิกา */}
               <div className="px-3 py-2.5 border-b border-night-border flex items-center gap-2 shrink-0 bg-night-surface" style={{ paddingTop: "calc(0.625rem + env(safe-area-inset-top))" }}>
-                <button className="chat-mobile-back lg:hidden p-1 -ml-1 text-night-ink-2" onClick={() => { setSelected(null); setInfoOpen(false); setStatusMenuOpen(false); }}><ArrowLeft size={20} /></button>
+                <button className="chat-mobile-back lg:hidden p-1 -ml-1 text-night-ink-2" onClick={() => { setSelected(null); setInfoOpen(false); }}><ArrowLeft size={20} /></button>
                 <div className="w-10 h-10 rounded-full bg-night-accent/25 text-brand-600 dark:text-night-accent-light flex items-center justify-center text-sm font-semibold shrink-0 relative overflow-hidden">
                   <span>{initial(selected.customer_name)}</span>
                   {selected.profile_pic && <img src={selected.profile_pic} alt="" className="absolute inset-0 w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display = "none"; }} />}
@@ -2135,7 +2133,6 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                       LINE/Instagram จะไม่เรนเดอร์ เพราะ Meta ผูกป้ายกับ PSID ของเพจ Facebook เท่านั้น */}
                   <div className="mt-1"><MetaLabels row={selected} /></div>
                 </div>
-                <button onClick={() => setStatusMenuOpen((o) => !o)} className="chat-mobile-status p-1.5 text-night-ink-2 hover:bg-night-surface2 rounded lg:hidden"><Menu size={20} /></button>
               </div>
 
               {/* แผงรายละเอียดแอด (กดขยายจากหัวแชท) */}
@@ -2146,40 +2143,6 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                   {adLoading && <div className="text-[11px] text-night-ink-3">กำลังโหลดข้อมูลแอด...</div>}
                   {!adLoading && adSources.length === 0 && <div className="text-[11px] text-night-ink-2">{srcLabel(selected)}</div>}
                   {adSources.map(renderAd)}
-                </div>
-              )}
-              {/* แผงปรับสถานะ (แฮมเบอร์เกอร์ — มือถือ) */}
-              {/* แผงปรับสถานะ/ใส่ข้อมูลลูกค้า (มือถือ) — เดิมเป็นแผงที่ดันข้อความแชทลง ต้องเลื่อนไปเลื่อนมา
-                  เปลี่ยนเป็น bottom sheet ลอยทับแชท ปิดแล้วกลับมาที่ตำแหน่งเดิมทันที ไม่เสียตำแหน่งสกอลล์ */}
-              {statusMenuOpen && (
-                <div
-                  className="chat-status-sheet lg:hidden fixed inset-0 z-50 bg-black/40 flex items-end"
-                  onMouseDown={(e) => { if (e.target === e.currentTarget) setStatusMenuOpen(false); }}
-                >
-                  <div className="w-full bg-night-surface rounded-t-2xl shadow-2xl max-h-[85vh] overflow-y-auto" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
-                    <div className="sticky top-0 bg-night-surface flex items-center justify-between px-4 py-3 border-b border-night-border">
-                      <span className="font-semibold text-night-ink">ข้อมูล & สถานะลูกค้า</span>
-                      <button onClick={() => setStatusMenuOpen(false)} className="text-night-ink-3 hover:text-night-ink p-1" aria-label="ปิด"><X size={20} /></button>
-                    </div>
-                    <div className="p-3 space-y-2">
-                      <div className="flex gap-2">
-                        {selected.unread
-                          ? <button onClick={() => setUnread(false)} className="flex-1 text-xs border border-emerald-500/40 text-emerald-400 rounded-lg px-2 py-1.5">ทำเป็นอ่านแล้ว</button>
-                          : <button onClick={() => setUnread(true)} className="flex-1 text-xs border border-night-border text-night-ink-2 rounded-lg px-2 py-1.5">ทำเป็นยังไม่อ่าน</button>}
-                      </div>
-                      {/* บันทึกข้อมูลลูกค้าพื้นฐาน (ไอดีเทรด/username/เบอร์/อีเมล) — ทำได้ทุกเพจ
-                          ส่วนเช็คไอดีเทรด + ให้สิทธิ์ TradingView อัตโนมัติ (อยู่ใน CustomerDataForm เอง) ยังทำได้เฉพาะเพจ BeSight
-                          TradeIdChecker (เครื่องมือเช็คไอดีแยกต่างหาก) ก็ผูกกับ BeSight เหมือนเดิม */}
-                      <CustomerDataForm darkMode row={selected} onSaved={(v) => { setSelected((s) => (s ? { ...s, ...v } : s)); setList((l) => (l || []).map((x) => (x.id === selected.id ? { ...x, ...v } : x))); }} />
-                      {isBeSightPage(selected) && <TradeIdChecker darkMode />}
-                      <ConversationInsights />
-                      {retentionBox}
-                      <button onClick={() => blockCustomer(selected.id, !selected.blocked_at)} disabled={blocking}
-                        className={`w-full text-xs rounded-lg px-2 py-1.5 font-medium flex items-center justify-center gap-1 disabled:opacity-50 ${selected.blocked_at ? "border border-emerald-500/40 text-emerald-400" : "border border-rose-500/40 text-rose-400"}`}>
-                        {blocking ? <Loader2 className="animate-spin" size={13} /> : <AlertTriangle size={13} />} {selected.blocked_at ? "ปลดบล็อก" : "บล็อก (สแปม)"}
-                      </button>
-                    </div>
-                  </div>
                 </div>
               )}
               {/* แบนเนอร์บอกแพลตฟอร์มและว่าเป็นคอมเมนต์จากโพสต์/แอดไหน */}
@@ -2404,6 +2367,19 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                         setList((l) => (l || []).map((x) => (x.id === selected.id ? { ...x, ...v } : x)));
                       }}
                     />
+                    {/* ย้ายมาจากเมนูแฮมเบอร์เกอร์ที่ถอดออกไป — บนจอแคบไม่มีแผงขวา
+                        ถ้าไม่ย้ายมา จะกดทำเป็นอ่านแล้ว/ไม่สนใจ/บล็อก จากมือถือไม่ได้เลย */}
+                    <div className="mt-2.5 space-y-2 border-t border-night-border pt-2.5">
+                      {selected.unread
+                        ? <button onClick={() => setUnread(false)} className="w-full text-xs border border-emerald-500/40 text-emerald-400 rounded-lg px-2 py-1.5">ทำเป็นอ่านแล้ว</button>
+                        : <button onClick={() => setUnread(true)} className="w-full text-xs border border-night-border text-night-ink-2 rounded-lg px-2 py-1.5">ทำเป็นยังไม่อ่าน</button>}
+                      <ConversationInsights />
+                      {retentionBox}
+                      <button onClick={() => blockCustomer(selected.id, !selected.blocked_at)} disabled={blocking}
+                        className={`w-full text-xs rounded-lg px-2 py-1.5 font-medium flex items-center justify-center gap-1 disabled:opacity-50 ${selected.blocked_at ? "border border-emerald-500/40 text-emerald-400" : "border border-rose-500/40 text-rose-400"}`}>
+                        {blocking ? <Loader2 className="animate-spin" size={13} /> : <AlertTriangle size={13} />} {selected.blocked_at ? "ปลดบล็อก" : "บล็อก (สแปม)"}
+                      </button>
+                    </div>
                   </div>
                 )}
 
