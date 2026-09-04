@@ -180,6 +180,18 @@ html.dark select:focus {
 input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
 select { min-height: 40px; }
 
+/* Safari บน iOS ซูมหน้าจอเข้าเองทุกครั้งที่โฟกัสช่องกรอกที่ตัวอักษรเล็กกว่า 16px
+   และไม่ซูมกลับให้ ทั้งหน้าเลยค้างใหญ่จนกดปุ่มอื่นไม่ถูก — แก้ด้วยการดันเป็น 16px
+   เฉพาะจอเล็ก (เดสก์ท็อปยังใช้ text-sm เท่าเดิม)
+   ห้ามแก้ด้วย maximum-scale=1 ใน viewport เพราะนั่นคือการปิดการซูมทั้งหน้า
+   คนสายตาไม่ดีจะขยายอ่านเองไม่ได้
+   ต้องใส่ !important เพราะคลาสของ Tailwind (text-sm/text-xs) ชนะ selector ธรรมดา */
+@media (max-width: 767px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  textarea,
+  select { font-size: 16px !important; }
+}
+
 /* Keep semantic status colors readable on the chat theme. */
 html.dark .bg-emerald-50 { background-color: rgba(16, 185, 129, .14) !important; }
 html.dark .bg-rose-50 { background-color: rgba(244, 63, 94, .14) !important; }
