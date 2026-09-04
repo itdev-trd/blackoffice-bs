@@ -134,8 +134,23 @@ Deno.serve(async (req) => {
       console.error("META_APP_SECRET is required for webhook signature verification");
       return new Response("webhook not configured", { status: 503 });
     }
-    const ok = await verifySig(raw, req.headers.get("x-hub-signature-256"), secret);
-    if (!ok) return new Response("bad signature", { status: 401 });
+    const sigHeader = req.headers.get("x-hub-signature-256");
+    const ok = await verifySig(raw, sigHeader, secret);
+    if (!ok) {
+      // ลายเซ็นไม่ตรง = META_APP_SECRET ในโปรเจกต์นี้ไม่ใช่ของแอปที่ Meta ส่งมา (เช่นเพิ่งย้ายไปใช้แอปอื่น)
+      // อาการจะเหมือน "webhook ไม่เข้า" เป๊ะ ๆ ทั้งที่ Meta ส่งมาแล้ว จึงต้องบันทึกไว้ให้ตรวจได้
+      if (sigHeader) {
+        try {
+          const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+          await admin.from("settings").upsert({
+            key: "meta_webhook_last_rejected",
+            value: { at: new Date().toISOString(), reason: "bad_signature" },
+            updated_at: new Date().toISOString(),
+          });
+        } catch { /* บันทึกไม่ได้ก็ต้องไม่ทำให้ webhook ล้มต่างจากเดิม */ }
+      }
+      return new Response("bad signature", { status: 401 });
+    }
     let payload: any = {};
     try { payload = JSON.parse(raw); } catch { return new Response("bad json", { status: 400 }); }
     if (payload.object !== "page" && payload.object !== "instagram") return new Response("ignored", { status: 200 });

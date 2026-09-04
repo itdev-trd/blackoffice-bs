@@ -73,13 +73,26 @@ export function ChatSyncConfigPanel() {
   const [dsResult, setDsResult] = useState(null);      // ผลการดึง Dataset รายเพจ
   const [webhookBusy, setWebhookBusy] = useState("");   // "" | "subscribe" | "status"
   const [webhookRes, setWebhookRes] = useState(null);
+  const [webhookHealth, setWebhookHealth] = useState(null);   // event ล่าสุดที่ Meta ส่งเข้ามาจริง
+  async function loadWebhookHealth() {
+    const { data } = await supabase.from("settings").select("key, value, updated_at")
+      .in("key", ["meta_webhook_last_event", "meta_webhook_last_rejected"]);
+    const byKey = {};
+    for (const row of data || []) byKey[row.key] = row;
+    setWebhookHealth({
+      last_event_at: byKey.meta_webhook_last_event?.value?.at || byKey.meta_webhook_last_event?.updated_at || null,
+      last_rejected_at: byKey.meta_webhook_last_rejected?.value?.at || null,
+    });
+  }
   async function runWebhook(action) {
     setWebhookBusy(action); setWebhookRes(null);
     const { data, error } = await supabase.functions.invoke("subscribe-webhook", { body: { action } });
     setWebhookBusy("");
+    void loadWebhookHealth();
     if (error) { setWebhookRes({ ok: false, error: await readFunctionErrorMessage(error) }); return; }
     setWebhookRes(data);
   }
+  useEffect(() => { void loadWebhookHealth(); }, []);
   const [labelPages, setLabelPages] = useState([]);   // รายชื่อเพจสำหรับเลือกทดสอบ
   const [labelPageId, setLabelPageId] = useState("");
   useEffect(() => {
@@ -367,6 +380,28 @@ export function ChatSyncConfigPanel() {
             </button>
           </div>
         </div>
+        {/* Meta เก็บ callback ได้ที่เดียวต่อแอปต่อ object — ถ้ามีระบบอื่นตั้งทับ event จะไปเข้าที่นั้นทั้งหมด
+            และถ้าไม่มี event เข้ามาเลยทั้งที่ผูกครบ มักเป็นเรื่องสิทธิ์ (Advanced Access) ไม่ใช่การตั้งค่า */}
+        {webhookHealth && (
+          <div className="text-[11px] text-slate-600 bg-white/70 rounded-lg border border-slate-200 px-2.5 py-1.5 space-y-0.5">
+            <div>event ล่าสุดที่ Meta ส่งเข้ามา: {webhookHealth.last_event_at
+              ? <span className="font-medium text-slate-800">{new Date(webhookHealth.last_event_at).toLocaleString("th-TH")}</span>
+              : <span className="text-rose-600 font-medium">ยังไม่เคยได้รับ</span>}</div>
+            {webhookHealth.last_rejected_at && (
+              <div className="text-rose-600">ถูกปฏิเสธล่าสุด (ลายเซ็นไม่ตรง = META_APP_SECRET ไม่ใช่ของแอปที่ส่งมา): {new Date(webhookHealth.last_rejected_at).toLocaleString("th-TH")}</div>
+            )}
+          </div>
+        )}
+        {webhookRes?.app_webhook && (
+          <div className="text-[11px] bg-white/70 rounded-lg border border-slate-200 px-2.5 py-1.5 space-y-0.5">
+            <div>Meta App ID: <span className="font-mono">{webhookRes.app_webhook.app_id || "-"}</span></div>
+            <div className="break-all">callback ที่ Meta ใช้จริง: <span className="font-mono">{webhookRes.app_webhook.page?.callback_url || "-"}</span></div>
+            {webhookRes.app_webhook.page?.callback_matches === false && (
+              <div className="text-rose-600">ไม่ตรงกับฟังก์ชันของโปรเจกต์นี้ — event กำลังถูกส่งไปที่ระบบอื่น กด "ผูกเพจกับ webhook" เพื่อดึงกลับ</div>
+            )}
+            {webhookRes.app_webhook.error && <div className="text-rose-600">{webhookRes.app_webhook.error}</div>}
+          </div>
+        )}
         {webhookRes && (
           <div className="text-xs bg-white rounded-lg border border-slate-200 p-2.5 space-y-1 max-h-52 overflow-y-auto">
             {webhookRes.ok === false ? <div className="text-rose-600">ผิดพลาด: {webhookRes.error}</div>
