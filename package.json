@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "node scripts/lint-source.mjs",
-    "check": "npm run lint && npm run build"
+    "build:sql": "node scripts/build-supabase-all.mjs",
+    "check:sql": "node scripts/build-supabase-all.mjs --check",
+    "check": "npm run build:sql && npm run lint && npm run build"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",
