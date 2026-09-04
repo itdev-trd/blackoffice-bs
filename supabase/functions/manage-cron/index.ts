@@ -40,9 +40,17 @@ Deno.serve(async (req) => {
       if (!/^[\d*/,\s-]{1,40}$/.test(expr)) throw new Error("รูปแบบความถี่ (cron) ไม่ถูกต้อง");
       const en = enabled !== false;
       await admin.from("scheduled_jobs").update({ cron_expr: expr, enabled: en, updated_at: new Date().toISOString() }).eq("key", key);
-      // TradingView sync ต้องระบุ action=sync ชัดเจน เพราะคำขอจาก service role ที่ไม่มี action
-      // จะถูกตีความเป็นงาน expire เพื่อความเข้ากันได้กับงานเดิมจึงใช้ body ว่างสำหรับงานอื่น
-      const body = job.key === "tv_sync" ? '{"action":"sync"}' : '{}';
+      // body ของแต่ละงานเก็บไว้ในตาราง (scheduled_jobs.body_json) — งานอย่าง "ดึงแชทล่าสุด" ต้องส่ง
+      // {"job":"recent"} ถ้า hardcode '{}' ให้ทุกงาน การแก้ความถี่จาก UI จะเปลี่ยนงานนั้นเป็นซิงก์เต็มทันที
+      // TradingView sync ต้องระบุ action=sync ชัดเจน เพราะคำขอจาก service role ที่ไม่มี action จะถูกตีความเป็นงาน expire
+      const bodyRaw = String(job.body_json || "").trim() || (job.key === "tv_sync" ? '{"action":"sync"}' : "{}");
+      // กัน SQL injection ผ่านค่าในตาราง: ต้องเป็น JSON object ล้วนและไม่มี quote เดี่ยว
+      let body = "{}";
+      try {
+        const parsed = JSON.parse(bodyRaw);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) body = JSON.stringify(parsed);
+      } catch { body = "{}"; }
+      if (body.includes("'")) body = "{}";
       const command = `select net.http_post(url:='${SUPABASE_URL}/functions/v1/${job.function_name}', headers:=jsonb_build_object('Content-Type','application/json','Authorization','Bearer ${SERVICE_KEY}'), body:='${body}'::jsonb);`;
       const { error } = await admin.rpc("app_set_cron", { p_jobname: job.jobname, p_schedule: expr, p_command: command, p_enabled: en });
       if (error) throw error;

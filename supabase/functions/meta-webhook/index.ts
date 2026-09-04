@@ -232,7 +232,7 @@ Deno.serve(async (req) => {
               const replyText = text || "[ตอบจาก Instagram]";
               const nextTr = already ? tr : [...tr, { w: "p", t: replyText, at: atIso, mid: commentId, via: "instagram_comment", by_name: "ตอบจาก Instagram" }].slice(-80);
               await admin.from("chat_customers").update({
-                transcript: nextTr, awaiting_reply: false, unread: false,
+                transcript: nextTr, awaiting_reply: false, unread: false, read_at: atIso,
                 last_reply_text: replyText, last_reply_by: "ตอบจาก Instagram", last_reply_at: atIso,
                 updated_at: new Date().toISOString(),
               }).eq("id", targetId);
@@ -339,7 +339,7 @@ Deno.serve(async (req) => {
             }
             if (row) {
               const update: Record<string, unknown> = isEcho
-                ? { transcript, awaiting_reply: false, unread: false, last_reply_text: preview, last_reply_at: nowIso, last_message_at: nowIso, updated_at: nowIso }
+                ? { transcript, awaiting_reply: false, unread: false, read_at: nowIso, last_reply_text: preview, last_reply_at: nowIso, last_message_at: nowIso, updated_at: nowIso }
                 : { transcript, awaiting_reply: true, unread: true, last_user_text: preview, last_message_at: nowIso, updated_at: nowIso, needs_ai: false, needs_verify: false };
               if (referralAdId) update.entry_ad_id = referralAdId;
               await admin.from("chat_customers").update(update).eq("id", row.id);
@@ -612,7 +612,7 @@ Deno.serve(async (req) => {
                 }
                 const lpDup = lastReplyFromTranscript(mergedTr);   // เอาข้อความเพจตัวสุดท้ายตามลำดับจริง (กัน echo สลับลำดับ)
                 await admin.from("chat_customers").update({
-                  transcript: mergedTr, awaiting_reply: false, unread: false,
+                  transcript: mergedTr, awaiting_reply: false, unread: false, read_at: nowIso,
                   last_reply_text: lpDup ? lpDup.text : echoPreview,
                   last_reply_by: (lpDup?.by) || adminName,
                   last_reply_at: lpDup ? lpDup.at : nowIso,
@@ -636,7 +636,7 @@ Deno.serve(async (req) => {
                 const newTr = items.length ? [...tr, ...items].slice(-80) : tr;
                 const lpNew = lastReplyFromTranscript(newTr);   // ข้อความเพจตัวสุดท้ายตามลำดับจริง
                 await admin.from("chat_customers").update({
-                  transcript: newTr, awaiting_reply: false, unread: false,
+                  transcript: newTr, awaiting_reply: false, unread: false, read_at: nowIso,
                   last_reply_text: lpNew ? lpNew.text : echoPreview,
                   last_reply_by: (lpNew?.by) || adminName,
                   last_reply_at: lpNew ? lpNew.at : nowIso,
@@ -693,7 +693,7 @@ Deno.serve(async (req) => {
             const already = tr.some((m: any) => m?.mid === commentId);
             const nextTr = already ? tr : [...tr, { w: "p", t: replyText, at: atIso, mid: commentId, via: "facebook_page", by_name: "ตอบจากเพจ" }].slice(-80);
             await admin.from("chat_customers").update({
-              transcript: nextTr, awaiting_reply: false, unread: false,
+              transcript: nextTr, awaiting_reply: false, unread: false, read_at: atIso,
               last_reply_text: replyText, last_reply_by: "ตอบจากเพจ", last_reply_at: atIso,
               updated_at: new Date().toISOString(),
             }).eq("id", targetId);

@@ -709,6 +709,12 @@ Deno.serve(async (req) => {
       // read_at = เวลาอ่านในแอป — sync/read_status จะไม่ทับกลับเป็น unread ถ้าไม่มีข้อความใหม่กว่านี้
       const nowIso = new Date().toISOString();
       const clearedIds = await clearRelatedUnread(admin, row, nowIso);
+      // แถวที่เคยถูกล้าง unread จากเส้นทางอื่น (echo ของเพจ / รอบ sync) จะไม่มี read_at
+      // ซึ่งทำให้ read_status/sync มองว่า "ยังไม่รู้ว่าอ่านหรือยัง" แล้วดันกลับมาเป็นยังไม่อ่าน
+      // เปิดอ่านในแอปคือหลักฐานการอ่านที่แน่นอนที่สุด → ประทับเวลาอ่านให้ทุกครั้ง
+      if (!clearedIds.length) {
+        await admin.from("chat_customers").update({ read_at: nowIso, updated_at: nowIso }).eq("id", id).is("read_at", null);
+      }
       if (row.source === "line") {
         const lastReadToken = [...transcript].reverse().find((m: any) => m?.w === "u" && m?.mark_as_read_token)?.mark_as_read_token;
         if (lastReadToken) {
@@ -720,7 +726,9 @@ Deno.serve(async (req) => {
           } catch (_e) { /* อ่านในแอปสำเร็จแม้ LINE mark-as-read ชั่วคราวล้ม */ }
         }
       }
-      if (row.unread && row.psid && row.source !== "line") {
+      // was_unread = หน้าเว็บเพิ่งเขียน unread=false ลงฐานข้อมูลเองก่อนเรียกมา (กันจุดแดงเด้งกลับตอน poll)
+      // ถ้าเช็คแค่ row.unread จะกลายเป็นไม่เคยแจ้ง Meta เลย ทำให้กล่องข้อความเพจยังขึ้นว่ายังไม่อ่าน
+      if ((row.unread || body?.was_unread === true) && row.psid && row.source !== "line") {
         const token = await getMetaToken();
         const pd = await getMetaPages(GRAPH_BASE, token, { mustIncludePageId: row.page_id });
         const pageTok = (pd?.data ?? []).find((p: any) => p.id === row.page_id)?.access_token;

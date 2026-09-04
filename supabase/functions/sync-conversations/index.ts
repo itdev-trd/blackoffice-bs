@@ -23,6 +23,9 @@ const corsHeaders = {
 const MAX_LOOPS_PER_CALL = 2; // full mode: ต่อการเรียก 1 ครั้ง (2 x 100 = ~200 แชท) แล้ว resume — เบาลงกัน compute limit เมื่อเปิด two-stage AI
 const RATE_LIMIT_CODES = new Set([4, 17, 32, 613, 80004]); // Meta rate limit (app/user/page/custom)
 const READ_STATUS_STATE_KEY = "messenger_read_status_sync";
+const RECENT_STATE_KEY = "messenger_recent_sync";
+const RECENT_COOLDOWN_MS = 25 * 1000;   // cooldown ร่วมต่อเพจ — หลายเครื่อง/หลายแท็บเปิดพร้อมกันก็ยิง Meta รอบเดียว
+const RECENT_LIMIT = 25;                // Meta เรียง conversations ตาม updated_time ล่าสุดก่อน
 const DEFAULT_READ_STATUS_COOLDOWN_MS = 5 * 60 * 1000;
 const MAX_TRANSCRIPT_TEXT = 10_000;
 // อิโมจิ/อักขระเสริมถูกเก็บเป็น surrogate pair 2 ตัว ถ้าลูกค้าส่งมาไม่ครบคู่
@@ -36,6 +39,25 @@ function stripLoneSurrogates(s: string): string {
 const transcriptText = (value: unknown) => stripLoneSurrogates(String(value || "").slice(0, MAX_TRANSCRIPT_TEXT));
 // ชื่อ/ข้อความย่อก็วิ่งผ่าน JSON body เดียวกัน ถ้ามี surrogate ค้างก็ล้มทั้งคำขอ
 const safeShort = (v: unknown, n: number) => stripLoneSurrogates(String(v || "").slice(0, n)) || null;
+
+const timeMs = (v: unknown) => {
+  const t = v ? new Date(String(v)).getTime() : 0;
+  return Number.isFinite(t) ? t : 0;
+};
+
+// "ยังไม่อ่าน" ของแอป = มีข้อความลูกค้าค้างรอตอบ ที่ใหม่กว่าเวลาที่เราอ่าน/ตอบล่าสุด
+// ห้ามเชื่อ unread_count ของ Meta เพียว ๆ: ค่านั้นค้าง > 0 ตลอดถ้าไม่มีใครเปิดอ่านในกล่องข้อความเพจ
+// และ conversation.updated_time (ที่เราเก็บเป็น last_message_at) ขยับตอน "เพจตอบ" ด้วย
+// ผลเดิมคือแอดมินอ่าน/ตอบในแอปแล้ว รอบ sync ถัดไปดันกลับมาเป็นยังไม่อ่าน
+function shouldFlagUnread(row: any): boolean {
+  if (row?.awaiting_reply === false) return false;      // ข้อความล่าสุดเป็นของเพจ = ตอบแล้ว ไม่ใช่ของค้างอ่าน
+  const lastAt = timeMs(row?.last_message_at);
+  if (!lastAt) return false;
+  const readAt = timeMs(row?.read_at);
+  // ไม่มีเวลาอ่าน (แถวเก่าที่ถูกล้าง unread จาก webhook echo/sync) → เทียบกับเวลาตอบล่าสุดของเราแทน
+  const seenAt = readAt || timeMs(row?.last_reply_at);
+  return lastAt > seenAt;
+}
 
 async function syncPushState(conversationId: string) {
   try {
@@ -90,7 +112,7 @@ Deno.serve(async (req) => {
     })();
     const after = body?.after ? String(body.after) : null;
     const job = body?.job ? String(body.job) : "sync";  // "sync" = ดึงข้อมูลอย่างเดียว | "classify" = AI เล็ก | "verify" = AI ใหญ่
-    const auth = job === "read_status" && !full
+    const auth = (job === "read_status" || job === "recent") && !full
       ? await authorizeRequest(req, { tab: ["inbox", "chat"], pageId: onlyPage, allowService: true })
       : await authorizeRequest(req, { admin: true, setting: "synccfg", pageId: onlyPage, allowService: true });
     if (!auth.ok) {
@@ -115,7 +137,7 @@ Deno.serve(async (req) => {
     const jsonResp = (b: unknown) => new Response(JSON.stringify(b), { headers: { ...corsHeaders, "content-type": "application/json" } });
 
     // เช็คว่า deploy เวอร์ชันที่มี job แล้วหรือยัง (ไม่แตะ Meta/AI) — ใช้ยืนยันการ deploy
-    if (job === "ping") return jsonResp({ ok: true, version: "sync-v4", jobs: ["sync", "read_status"], note: "classify/verify ย้ายไป function chat-ai" });
+    if (job === "ping") return jsonResp({ ok: true, version: "sync-v5", jobs: ["sync", "recent", "read_status"], note: "classify/verify ย้ายไป function chat-ai" });
 
     // ================= เช็คสถานะ "อ่าน/ยังไม่อ่าน" แบบเบา (ดึงแค่ unread_count ไม่ดึงข้อความ) =================
     if (job === "read_status") {
@@ -184,9 +206,11 @@ Deno.serve(async (req) => {
             if (!changedConversationId && r.data?.[0]?.id) changedConversationId = String(r.data[0].id);
           }
           if (unreadIds.length) {
-            // อย่าทับสถานะ "อ่านในแอปแล้ว": ตั้ง unread=true เฉพาะแถวที่มีข้อความใหม่กว่าเวลาอ่าน (read_at)
-            const { data: cand } = await admin.from("chat_customers").select("id, read_at, last_message_at").in("id", unreadIds).eq("unread", false);
-            const toFlag = (cand ?? []).filter((c: any) => !c.read_at || (c.last_message_at && new Date(c.last_message_at).getTime() > new Date(c.read_at).getTime())).map((c: any) => c.id);
+            // อย่าทับสถานะ "อ่านในแอปแล้ว" — unread_count ของ Meta ค้าง > 0 ได้เรื่อย ๆ ถ้าไม่มีใครเปิดอ่านในกล่องข้อความเพจ
+            // จึงตั้ง unread=true เฉพาะกรณีที่ "มีข้อความลูกค้าค้างรอตอบจริง" และใหม่กว่าเวลาอ่าน/เวลาตอบล่าสุดของเรา
+            const { data: cand } = await admin.from("chat_customers")
+              .select("id, read_at, last_message_at, last_reply_at, awaiting_reply").in("id", unreadIds).eq("unread", false);
+            const toFlag = (cand ?? []).filter((c: any) => shouldFlagUnread(c)).map((c: any) => c.id);
             if (toFlag.length) await admin.from("chat_customers").update({ unread: true, updated_at: new Date().toISOString() }).in("id", toFlag);
           }
           url = data?.paging?.next ?? "";
@@ -341,6 +365,7 @@ Deno.serve(async (req) => {
         const classifiedBy = prev?.classified_by || r.classified_by || "manual";
         const aiReason = prev?.ai_reason ?? null;
         const finalStage = isManual ? manualMap[r.id] : stageAuto;
+        const awaitingReply = Array.isArray(r.transcript) && r.transcript.length > 0 && r.transcript[r.transcript.length - 1]?.w === "u";
         return {
           id: r.id, page_id: r.page_id, page_name: r.page_name, psid: r.psid, customer_name: r.customer_name,
           message_count: r.message_count, user_message_count: r.user_message_count,
@@ -356,17 +381,32 @@ Deno.serve(async (req) => {
           source: refRow || prev?.entry_ad_id ? "ad" : (prev?.source ?? null),
           entry_ad_id: refRow?.ad_id ?? prev?.entry_ad_id ?? null,
           // ยังไม่ได้ตอบ = ข้อความล่าสุดใน transcript มาจากลูกค้า (w === "u")
-          awaiting_reply: Array.isArray(r.transcript) && r.transcript.length > 0 && r.transcript[r.transcript.length - 1]?.w === "u",
-          // ยังไม่อ่าน = อ้างอิงจาก unread_count ของ Meta แต่ "การอ่านในแอป" (read_at) ชนะ
-          // ถ้าอ่านในแอปหลังข้อความล่าสุดแล้ว → ไม่ทับกลับเป็น unread (Meta ไม่รู้ว่าเราอ่านในแอป)
-          unread: typeof r._unread_count === "number"
-            ? (r._unread_count > 0 && (!prev?.read_at || (r.last_message_at && new Date(r.last_message_at).getTime() > new Date(prev.read_at).getTime())))
-            : (prev?.unread ?? false),
+          awaiting_reply: awaitingReply,
+          // แถวใหม่เท่านั้นที่ตั้ง unread ตรงนี้ได้ — แถวเดิมจัดการหลัง upsert แบบมีการ์ด
+          // (upsert อ่าน prev.read_at มาก่อนหน้านี้หลายวินาที ถ้าแอดมินเพิ่งอ่าน/ตอบระหว่างนั้นจะถูกทับกลับเป็นยังไม่อ่าน)
+          ...(prev ? {} : { unread: (r._unread_count ?? 0) > 0 && awaitingReply }),
           synced_at: now, updated_at: now,
         };
       });
       const { error } = await admin.from("chat_customers").upsert(payload, { onConflict: "id" });
       if (error) throw error;
+      // ---- สถานะอ่าน/ยังไม่อ่านของแถวเดิม: อัปเดตแยกจาก upsert และอ่าน read_at สด ๆ ก่อนตัดสิน ----
+      // Meta บอกได้แค่ว่า "กล่องข้อความเพจ" อ่านหรือยัง (unread_count) จึงใช้ปิดจุดแดงได้ แต่ห้ามใช้เปิดเอง
+      const metaReadIds = rows.filter((r) => r._unread_count === 0 && prevMap[r.id]).map((r) => r.id);
+      const metaUnreadIds = rows.filter((r) => (r._unread_count ?? 0) > 0 && prevMap[r.id]).map((r) => r.id);
+      if (metaReadIds.length) {
+        await admin.from("chat_customers").update({ unread: false, read_at: now, updated_at: now })
+          .in("id", metaReadIds).eq("unread", true);
+      }
+      if (metaUnreadIds.length) {
+        const { data: fresh } = await admin.from("chat_customers")
+          .select("id, read_at, last_message_at, last_reply_at, awaiting_reply").in("id", metaUnreadIds).eq("unread", false);
+        const toFlag = (fresh ?? []).filter((c: any) => shouldFlagUnread(c)).map((c: any) => c.id);
+        if (toFlag.length) {
+          await admin.from("chat_customers").update({ unread: true, updated_at: new Date().toISOString() })
+            .in("id", toFlag).eq("unread", false);
+        }
+      }
       // worked = รายที่เนื้อหาเปลี่ยน (มีอะไรให้ทำต่อ) — ใช้เติมโควตา perPage
       const worked = rows.filter((r) => prevMap[r.id]?.content_hash !== contentHashOf(r.transcript)).length;
       return { upserted: payload.length, worked };
@@ -425,6 +465,53 @@ Deno.serve(async (req) => {
         if (Date.now() > aiDeadline) break;
       }
       return new Response(JSON.stringify({ ok: true, full: true, page: page.name, processed, skipped_old: skippedOld, next_after: done ? null : cursor, done }), { headers: { ...corsHeaders, "content-type": "application/json" } });
+    }
+
+    // ================= ซิงก์ "แชทล่าสุด" แบบเบา: 1 คำขอ/เพจ =================
+    // Meta ส่ง webhook ข้อความของลูกค้าทั่วไปให้ไม่ได้จนกว่าแอปจะได้ Advanced Access ของ pages_messaging
+    // (ตอนนี้ push เฉพาะคนที่มี role ในแอป) แชทใหม่จึงเข้าระบบได้ทางเดียวคือ "ดึงเอง"
+    // cron ทุก 15 นาทีช้าเกินสำหรับกล่องตอบแชท จ็อบนี้ให้หน้าเว็บเรียกได้ทุก ~30 วิ
+    // ดึงแค่ 25 ห้องที่ขยับล่าสุด และ upsert เฉพาะห้องที่ updated_time ใหม่กว่าที่เก็บไว้ (กัน WAL/realtime เด้งฟรี)
+    if (job === "recent") {
+      const guard = await getMetaBackgroundGuard(admin);
+      if (guard.blocked) return jsonResp({ ok: true, job, upserted: 0, changed: 0, skipped: "rate_guard" });
+      let recentPages = pages;
+      if (!auth.isService && auth.permission?.role !== "admin") {
+        recentPages = recentPages.filter((p: any) => auth.permission?.allowedPages.includes(String(p.id)));
+      }
+      if (!recentPages.length) return jsonResp({ ok: true, job, upserted: 0, changed: 0, skipped: "no_pages" });
+      const { data: recentState } = await admin.from("settings").select("value").eq("key", RECENT_STATE_KEY).maybeSingle();
+      const recentBy = (recentState?.value?.last_by_page && typeof recentState.value.last_by_page === "object")
+        ? recentState.value.last_by_page : {};
+      const due = recentPages.filter((p: any) => Date.now() - new Date(recentBy[String(p.id)] || 0).getTime() >= RECENT_COOLDOWN_MS);
+      if (!due.length) return jsonResp({ ok: true, job, upserted: 0, changed: 0, skipped: "cooldown" });
+      const claimedAt = new Date().toISOString();
+      for (const p of due) recentBy[String(p.id)] = claimedAt;
+      // จับคิวก่อนยิง Meta — เครื่องอื่นที่เข้ามาพร้อมกันจะเห็นว่าเพจนี้มีคนดึงอยู่แล้ว
+      await admin.from("settings").upsert({ key: RECENT_STATE_KEY, value: { last_by_page: recentBy }, updated_at: claimedAt });
+      let recentUpserted = 0;
+      let recentChanged = 0;
+      const recentErrors: { page: string; error: string }[] = [];
+      for (const page of due) {
+        const url = `${base}/${page.id}/conversations?platform=messenger&fields=${encodeURIComponent(fieldsQ)}&limit=${RECENT_LIMIT}&access_token=${page.access_token}`;
+        const data = await fetchJson(url, 2);
+        if (data?.error) { recentErrors.push({ page: page.name, error: data.error.message || String(data.error) }); continue; }
+        const convs = (data?.data ?? []) as any[];
+        if (!convs.length) continue;
+        const { data: known } = await admin.from("chat_customers").select("id, last_message_at").in("id", convs.map((c: any) => String(c.id)));
+        const knownAt = new Map((known ?? []).map((r: any) => [String(r.id), timeMs(r.last_message_at)]));
+        const fresh = convs.filter((c: any) => {
+          const prev = knownAt.get(String(c.id));
+          if (prev === undefined) return true;                     // ห้องใหม่ที่ยังไม่มีในฐานข้อมูล
+          const at = timeMs(c.updated_time);
+          return !at || at > prev;                                 // มีความเคลื่อนไหวใหม่กว่าที่เก็บไว้
+        });
+        if (!fresh.length) continue;
+        const rb = await processBatch(page, fresh, false);
+        recentUpserted += rb.upserted;
+        recentChanged += rb.worked;
+      }
+      return jsonResp({ ok: recentErrors.length === 0, job, pages: due.length, upserted: recentUpserted, changed: recentChanged, errors: recentErrors });
     }
 
     // ---- โหมดปกติ: ทุกเพจที่เปิด ดึงจนได้ "งานที่ต้องทำ" ครบ per_page ----

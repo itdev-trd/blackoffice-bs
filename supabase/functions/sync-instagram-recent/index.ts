@@ -9,6 +9,7 @@ import { getMetaBackgroundGuard, recordMetaUsage } from "../_shared/meta-rate.ts
 
 const GRAPH_BASE = "https://graph.facebook.com/v22.0";
 const STATE_KEY = "instagram_recent_fallback_sync";
+const ERROR_KEY = "instagram_recent_fallback_error";
 const COOLDOWN_MS = 10 * 60 * 1000;
 const WEBHOOK_HEALTH_MS = 15 * 60 * 1000;
 const MAX_TRANSCRIPT_TEXT = 10_000;
@@ -16,6 +17,10 @@ const transcriptText = (value: unknown) => String(value || "").slice(0, MAX_TRAN
 const corsHeaders = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type" };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "content-type": "application/json" } });
 
+const timeMs = (v: unknown) => {
+  const t = v ? new Date(String(v)).getTime() : 0;
+  return Number.isFinite(t) ? t : 0;
+};
 const mediaLabel = (att: any, sticker: unknown) => sticker ? "[สติกเกอร์]"
   : String(att?.mime_type || "").startsWith("image") ? "[รูปภาพ]"
   : String(att?.mime_type || "").startsWith("video") ? "[วิดีโอ]"
@@ -54,14 +59,39 @@ Deno.serve(async (req) => {
 
     let upserted = 0;
     const errors: Array<{ page_id: string; error: string }> = [];
-    const fields = "id,updated_time,message_count,unread_count,participants,messages.limit(30){id,message,from,created_time,sticker,attachments{mime_type,name,image_data,video_data,file_url}}";
+    const fieldsFull = "id,updated_time,message_count,unread_count,participants,messages.limit(30){id,message,from,created_time,sticker,attachments{mime_type,name,image_data,video_data,file_url}}";
+    // ชุดเบา: ใช้ลองซ้ำเมื่อ Meta ตอบ "reduce the amount of data" (code 1) หรือ query timeout (code -2)
+    const fieldsLite = "id,updated_time,message_count,unread_count,participants,messages.limit(10){id,message,from,created_time,sticker}";
+    const attempts: Array<{ fields: string; limit: number }> = [
+      { fields: fieldsFull, limit: 25 },
+      { fields: fieldsLite, limit: 8 },
+      { fields: fieldsLite, limit: 3 },
+    ];
     for (const page of pages) {
       const pageId = String(page.id);
       const igId = String(page.instagram_business_account.id);
-      const response = await fetch(`${GRAPH_BASE}/${pageId}/conversations?platform=instagram&fields=${encodeURIComponent(fields)}&limit=25&access_token=${page.access_token}`);
-      await recordMetaUsage(admin, response, "instagram_recent_fallback");
-      const result = await response.json().catch(() => ({}));
-      if (result?.error) { errors.push({ page_id: pageId, error: result.error.error_user_msg || result.error.message || "Meta error" }); continue; }
+      let result: any = {};
+      for (const attempt of attempts) {
+        const response = await fetch(`${GRAPH_BASE}/${pageId}/conversations?platform=instagram&fields=${encodeURIComponent(attempt.fields)}&limit=${attempt.limit}&access_token=${page.access_token}`);
+        await recordMetaUsage(admin, response, "instagram_recent_fallback");
+        result = await response.json().catch(() => ({}));
+        // code 1 = ขอข้อมูลหนักเกิน · code -2/subcode 2534084 = query timeout เพราะสิทธิ์ instagram_manage_messages
+        // ยังเป็น Standard Access (Meta เสิร์ฟได้แค่ห้องของผู้ใช้ที่มี role ในแอป) → ลองชุดที่เบากว่า
+        const code = Number(result?.error?.code);
+        if (!result?.error || (code !== 1 && code !== -2)) break;
+      }
+      if (result?.error) {
+        const detail = result.error.error_user_msg || result.error.message || "Meta error";
+        errors.push({ page_id: pageId, error: detail });
+        // เก็บ error ล่าสุดไว้ให้หน้าเว็บ/หน้าตั้งค่าอ่านได้ — เดิมพังเงียบทุกรอบจนดูเหมือน "IG ไม่มีแชท"
+        await admin.from("settings").upsert({
+          key: ERROR_KEY,
+          value: { at: new Date().toISOString(), page_id: pageId, code: result.error.code ?? null, subcode: result.error.error_subcode ?? null, error: detail },
+          updated_at: new Date().toISOString(),
+        });
+        continue;
+      }
+      await admin.from("settings").upsert({ key: ERROR_KEY, value: { at: new Date().toISOString(), page_id: pageId, error: null }, updated_at: new Date().toISOString() });
       const convs = result?.data ?? [];
       const psids = [...new Set(convs.map((c: any) =>
         (c?.participants?.data ?? []).find((p: any) => ![pageId, igId].includes(String(p?.id || "")))?.id,
@@ -93,8 +123,12 @@ Deno.serve(async (req) => {
         const lastAt = conv.updated_time || transcript[transcript.length - 1]?.at || checkedAt;
         const lastUser = [...transcript].reverse().find((m: any) => m.w === "u");
         const lastPage = [...transcript].reverse().find((m: any) => m.w === "p");
-        const unread = (Number(conv.unread_count) || 0) > 0 && (!existing?.read_at || new Date(lastAt).getTime() > new Date(existing.read_at).getTime());
         const awaitingReply = transcript[transcript.length - 1]?.w === "u";
+        // ยังไม่อ่าน = มีข้อความลูกค้าค้างรอตอบ ที่ใหม่กว่าเวลาที่เราอ่าน/ตอบล่าสุด
+        // ห้ามเทียบกับ conv.updated_time เพราะขยับตอน "เพจตอบ" ด้วย → ตอบเสร็จแล้วเด้งกลับเป็นยังไม่อ่าน
+        const inboundAt = timeMs(lastUser?.at) || (awaitingReply ? timeMs(lastAt) : 0);
+        const seenAt = timeMs(existing?.read_at) || timeMs(lastPage?.at);
+        const unread = (Number(conv.unread_count) || 0) > 0 && awaitingReply && inboundAt > seenAt;
         const hasNewContent = !existing?.last_message_at || new Date(lastAt).getTime() > new Date(existing.last_message_at).getTime();
         const common = {
           source: "instagram", page_id: pageId, page_name: page.name || page.instagram_business_account?.username || null,

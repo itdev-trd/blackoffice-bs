@@ -53,12 +53,30 @@ const MSG_EMOJI_ENABLED = false;      // ซ่อนปุ่มอีโมจ
 // คอลัมน์ที่หน้าแชทใช้จริง — เลี่ยง select * ที่ลากคอลัมน์หนักอย่าง ads_context/hash มาด้วย
 // ประกาศไว้ระดับโมดูลเพราะทั้งตอนเปิดแชทและตอนโหลดล่วงหน้า (prefetch) ต้องใช้ชุดเดียวกันเป๊ะ
 // ไม่งั้นของในแคชจะขาดคอลัมน์แล้วหน้าแชทเรนเดอร์ไม่ครบ
-const CHAT_OPEN_COLS = "id, page_id, page_name, psid, customer_name, source, stage, stage_manual, classified_by, needs_ai, needs_verify, manual_data, manual_data_by, manual_data_at, trade_id, username, phone, email, awaiting_reply, unread, cust_read_at, cust_lang, country, profile_pic, transcript, account_opened_at, entry_ad_id, entry_ad_name, last_user_text, last_reply_text, last_reply_by, last_reply_at, last_message_at, comment_ad_name, comment_ad_ids, comment_ad_names, comment_is_ad, comment_promoted_to_inbox, comment_permalink, blocked_at, synced_at, updated_at, notes, tags, ai_summary, ai_summary_at";
+const CHAT_OPEN_COLS = "id, page_id, page_name, psid, customer_name, source, stage, stage_manual, classified_by, needs_ai, needs_verify, manual_data, manual_data_by, manual_data_at, trade_id, username, phone, email, awaiting_reply, unread, read_at, cust_read_at, cust_lang, country, profile_pic, transcript, account_opened_at, entry_ad_id, entry_ad_name, last_user_text, last_reply_text, last_reply_by, last_reply_at, last_message_at, comment_ad_name, comment_ad_ids, comment_ad_names, comment_is_ad, comment_promoted_to_inbox, comment_permalink, blocked_at, synced_at, updated_at, notes, tags, ai_summary, ai_summary_at";
 
 export default function ChatInboxTab({ allowedPages = null, alertAllowed = true, alertMin = 3, alertPages = [], alertSound = true, alertNew = true, gotoChat = null, onGotoDone, active = true }) {
   const isInstagramComment = (row) => String(row?.id || "").startsWith("igc_");
   const isCommentChat = (row) => row?.source === "comment" || String(row?.id || "").startsWith("fbc_") || isInstagramComment(row);
   const normalizeChatSource = (row) => isCommentChat(row) && row?.source !== "comment" ? { ...row, source: "comment" } : row;
+  const READ_MARK_TTL_MS = 10 * 60 * 1000;
+  function markReadLocally(id) {
+    if (!id) return;
+    const now = Date.now();
+    for (const [key, at] of readMarksRef.current) { if (now - at > READ_MARK_TTL_MS) readMarksRef.current.delete(key); }
+    readMarksRef.current.set(String(id), now);
+  }
+  // แถวจากฐานข้อมูล: ถ้าเพิ่งเปิดอ่านในเครื่องนี้และไม่มีข้อความใหม่กว่านั้น = อ่านแล้ว
+  function applyReadMark(row) {
+    if (!row?.id) return row;
+    const key = String(row.id);
+    const at = readMarksRef.current.get(key);
+    if (!at) return row;
+    if (!row.unread) { readMarksRef.current.delete(key); return row; }   // ฐานข้อมูลยืนยันแล้ว ไม่ต้องจำต่อ
+    const msgAt = row.last_message_at ? new Date(row.last_message_at).getTime() : 0;
+    if (msgAt > at) { readMarksRef.current.delete(key); return row; }    // มีข้อความใหม่กว่าเวลาที่อ่าน = ยังไม่อ่านจริง
+    return { ...row, unread: false };
+  }
   const [list, setList] = useState(null);
   const [loadingList, setLoadingList] = useState(false);
   const [listError, setListError] = useState("");
@@ -90,6 +108,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   const savedCacheRef = useRef({});
   const [listTab, setListTab] = useState("everything");    // everything | all(=Messenger) | line | comments
   const [unreadOnly, setUnreadOnly] = useState(false);   // กรองดูเฉพาะแชทที่ยังไม่อ่าน
+  const [igSyncError, setIgSyncError] = useState("");     // Meta ปฏิเสธการดึงแชท IG (เช่นสิทธิ์ยังเป็น Standard Access)
   const [tagFilter, setTagFilter] = useState(null);      // กรองดูเฉพาะแชทที่ติดแท็กนี้ (null = ไม่กรอง)
   const [countryFilter, setCountryFilter] = useState(null); // กรองตามประเทศลูกค้า (null = ทุกประเทศ)
   // แผงตัวกรอง — พับเก็บได้ เพราะแถวชิป + ช่องประเทศ + แท็ก กินความสูงราว 1 ใน 3 ของแผงซ้าย
@@ -133,6 +152,10 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   const listFilterRef = useRef(null); // Realtime ต้องอ่านตัวกรองล่าสุดโดยไม่ต้องสร้าง channel ใหม่
   const pageOptionsRef = useRef([]);
   const unreadRefreshTimerRef = useRef(null);
+  // แชทที่เพิ่งเปิดอ่านในเครื่องนี้ (id → เวลาที่กดเข้าไปอ่าน)
+  // poll ลิสต์ยิงทุก 10 วิ + ทุกครั้งที่โฟกัสหน้าจอ ถ้า query ออกไปก่อนที่การเขียน "อ่านแล้ว" จะลงฐานข้อมูล
+  // response เก่าจะทับจุดแดงกลับมา — เก็บไว้กันเองฝั่งหน้าเว็บจนกว่าฐานข้อมูลจะยืนยัน
+  const readMarksRef = useRef(new Map());
   const transcriptRefreshTimerRef = useRef(null);
   const focusRefreshAtRef = useRef(0);
   const syncGuardRef = useRef({ inFlight: new Map(), lastRun: new Map() });
@@ -651,7 +674,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
         const { data, error } = await query.abortSignal(controller.signal);
         if (error) throw error;
         if (seq !== listSeqRef.current || key !== latestListKeyRef.current) return;
-        setList((data || []).map(normalizeChatSource));
+        setList((data || []).map((row) => applyReadMark(normalizeChatSource(row))));
         // นับ unread/badge (count query หลายตัว) — ข้ามในโหมด lean เพื่อให้ poll 10 วิ ยิงแค่ query ลิสต์ตัวเดียว
         if (!lean) {
           void Promise.allSettled([
@@ -728,8 +751,9 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   }
   // ดึงข้อความใหม่ของ "แชทที่เปิดอยู่" (ให้เด้งเองโดยไม่ต้องกดที่ลิสต์)
   async function refreshOpenTranscript(id) {
-    const { data } = await supabase.from("chat_customers").select("id, page_id, transcript, unread, awaiting_reply, last_message_at, synced_at, updated_at").eq("id", id).maybeSingle();
-    if (!data) return;
+    const { data: row } = await supabase.from("chat_customers").select("id, page_id, transcript, unread, awaiting_reply, last_message_at, synced_at, updated_at").eq("id", id).maybeSingle();
+    if (!row) return;
+    const data = applyReadMark(row);   // เพิ่งเปิดอ่านในเครื่องนี้ = อย่าให้ response ที่ออกไปก่อนการเขียนดันสถานะกลับ
     const cur = selRef.current;
     if (!cur || cur.id !== id) return;
     const newTr = Array.isArray(data.transcript) ? data.transcript : [];
@@ -749,7 +773,8 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
         if (tr?.ok) setTranslations(tr.translations || {});
       }
       // มีข้อความใหม่ในแชทที่เปิดอยู่ = ถือว่าอ่านแล้ว (เราเห็นอยู่)
-      supabase.functions.invoke("messenger-reply", { body: { action: "mark_seen", id } });
+      markReadLocally(id);
+      supabase.functions.invoke("messenger-reply", { body: { action: "mark_seen", id, was_unread: true } });
     }
   }
   selRef.current = selected;
@@ -768,11 +793,31 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
       return data;
     });
   };
+  // ดึง "แชทล่าสุด" จาก Meta เอง ทุก ~30 วิ
+  // Messenger webhook ส่งข้อความของลูกค้าทั่วไปเข้ามาไม่ได้จนกว่าแอปจะได้ Advanced Access ของ pages_messaging
+  // (เห็นได้จาก settings.meta_webhook_last_event ที่ค้างเป็นวัน) แชทใหม่จึงเข้าระบบได้ทางเดียวคือดึงเอง
+  // ถ้าปล่อยให้ cron 15 นาทีทำงานลำพัง ลิสต์ในแอปจะช้ากว่ากล่องข้อความเพจหลายนาที
+  const syncRecentChats = async () => {
+    const ps = pageSelRef.current;
+    const selectedPages = ps.mode === "single" ? (ps.single ? [ps.single] : []) : (ps.multi || []);
+    const onePage = selectedPages.length === 1 ? selectedPages[0] : null;
+    return runGuardedSync("recent", onePage || "all", 25 * 1000, async () => {
+      const { data } = await supabase.functions.invoke("sync-conversations", {
+        body: { job: "recent", ...(onePage ? { page_id: onePage } : {}) },
+      }).catch(() => ({ data: null }));
+      // มีห้องที่เนื้อหาเปลี่ยนจริง = รีเฟรชลิสต์/แชทที่เปิดอยู่ทันที (ไม่ต้องรอ poll รอบถัดไป)
+      if (data?.changed > 0 || data?.upserted > 0) { loadRef.current({ lean: true }); openRef.current(); scheduleUnreadRefresh(0); }
+      return data;
+    });
+  };
   const syncInstagramRecent = async () => {
     const pageIds = currentPageIds({ includeAll: true });
     const key = pageIds.length ? [...pageIds].sort().join(",") : "all";
     return runGuardedSync("instagram", key, 10 * 60 * 1000, async () => {
       const { data } = await supabase.functions.invoke("sync-instagram-recent", { body: { page_ids: pageIds } });
+      // เดิมพังเงียบ: Meta ตอบ error ทุกรอบแต่หน้าเว็บขึ้นแค่ "ยังไม่มีแชทเข้ามา" จึงดูเหมือนไม่มีลูกค้าทักเข้า IG
+      if (Array.isArray(data?.errors) && data.errors.length) setIgSyncError(String(data.errors[0]?.error || "Meta ปฏิเสธคำขอ"));
+      else if (data?.ok) setIgSyncError("");
       if (data?.upserted > 0) { loadRef.current(); openRef.current(); scheduleUnreadRefresh(0); }
       return data;
     });
@@ -866,9 +911,9 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
             if (!visible) return exists ? items.filter((item) => item.id !== row.id) : items;
             // transcript อาจใหญ่มาก เก็บไว้เฉพาะ selected pane ไม่ยัดลงลิสต์ซ้าย 200 ห้อง
             const { transcript: _transcript, ads_context: _adsContext, ...lightRow } = row;
-            const nextRow = normalizeChatSource(lightRow);
+            const nextRow = applyReadMark(normalizeChatSource(lightRow));
             const next = exists
-              ? items.map((item) => item.id === row.id ? normalizeChatSource({ ...item, ...nextRow }) : item)
+              ? items.map((item) => item.id === row.id ? applyReadMark(normalizeChatSource({ ...item, ...nextRow })) : item)
               : [nextRow, ...items];
             return next
               .sort((a, b) => new Date(b.last_message_at || 0).getTime() - new Date(a.last_message_at || 0).getTime())
@@ -898,7 +943,8 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
             if (row.source !== "line") {
               supabase.functions.invoke("messenger-reply", { body: { action: "translate", id: row.id } }).then(({ data: tr }) => { if (tr?.ok) setTranslations(tr.translations || {}); });
             }
-            supabase.functions.invoke("messenger-reply", { body: { action: "mark_seen", id: row.id } });
+            markReadLocally(row.id);
+            supabase.functions.invoke("messenger-reply", { body: { action: "mark_seen", id: row.id, was_unread: true } });
           }
         }
         // ---- แจ้งเตือน "ข้อความใหม่ทันที" (ไม่ต้องรอค้างครบ X นาที) ----
@@ -917,7 +963,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     // fallback: เผื่อ realtime หลุด — poll ทุก 10 วิ (จุดแดงข้อความใหม่ช้าสุด ~10 วิ)
     //   lean = ยิงแค่ query ลิสต์ตัวเดียว (จุดแดงในลิสต์สด) · เต็ม (นับ unread/badge) ทุก ~30 วิ
     let ftick = 0;
-    const fallback = setInterval(() => { ftick++; loadRef.current({ lean: ftick % 3 !== 0 }); openRef.current(); }, 10000);
+    const fallback = setInterval(() => { ftick++; loadRef.current({ lean: ftick % 3 !== 0 }); openRef.current(); syncRecentChats(); }, 10000);
     // Facebook ไม่มี webhook เมื่อแอดมินเพียง "เปิดอ่าน" ใน Page Inbox จึงใช้ fallback เบา ๆ
     // ฝั่ง server มี shared cooldown ต่อเพจ ป้องกันหลายเครื่องเรียก Meta ซ้ำกัน
     const readSync = () => {
@@ -929,6 +975,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
         supabase.functions.invoke("sync-conversations", { body: { job: "read_status", ...(onePage ? { page_id: onePage } : {}) } }).catch(() => null));
     };
     readSync();
+    syncRecentChats();
     const readEveryMs = Math.max(1, Math.min(15, Number(alertMin) || 3)) * 60 * 1000;
     const readTimer = setInterval(readSync, readEveryMs);
     // Webhook เป็นทางหลักและเด้งทันทีอยู่แล้ว; polling นี้เป็น safety net เมื่อ Meta พลาด event เท่านั้น
@@ -946,7 +993,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
       const now = Date.now();
       if (now - focusRefreshAtRef.current < 1500) return;
       focusRefreshAtRef.current = now;
-      loadRef.current(); openRef.current(); readSync(); syncCommentReplies(); syncInstagramRecent(); clearNotifs();
+      loadRef.current(); openRef.current(); readSync(); syncRecentChats(); syncCommentReplies(); syncInstagramRecent(); clearNotifs();
     };
     clearNotifs();   // ตอนเปิดแอปครั้งแรก
     const onVis = () => { if (document.visibilityState === "visible") onFocus(); };
@@ -1104,13 +1151,22 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
       void loadAdSources(normalized, openSeq);
       void loadSavedReplies(normalized.page_id, openSeq);
       // เปิดอ่านแล้ว → ปิดจุดแดง + แจ้ง Meta ว่าเพจอ่านแล้ว (mark_seen) ให้สถานะตรงกับกล่องข้อความเพจ
-      if (data.unread) {
-        setSelected((s) => (s && s.id === data.id ? { ...s, unread: false } : s));
-        setList((l) => (l || []).map((x) => (x.id === data.id ? { ...x, unread: false } : x)));
-        supabase.functions.invoke("messenger-reply", { body: { action: "mark_seen", id: data.id } }).then(() => {
+      // แถวที่ยังไม่มี read_at (เคยถูกล้าง unread จาก echo ของเพจ/รอบ sync) ต้องประทับเวลาอ่านด้วย
+      // ไม่งั้น read_status/sync จะมองว่า "ไม่รู้ว่าอ่านหรือยัง" แล้วดันกลับมาเป็นยังไม่อ่าน
+      if (data.unread || !data.read_at) {
+        const readAt = new Date().toISOString();
+        markReadLocally(data.id);
+        if (data.unread) {
+          setSelected((s) => (s && s.id === data.id ? { ...s, unread: false, read_at: readAt } : s));
+          setList((l) => (l || []).map((x) => (x.id === data.id ? { ...x, unread: false } : x)));
+          if (isCommentChat(data)) setCommentUnreadCount((n) => Math.max(0, n - 1));
+        }
+        // เขียน "อ่านแล้ว" ลงฐานข้อมูลเองทันที ไม่รอ edge function ที่ต้องคุยกับ Meta/LINE ก่อน
+        // (poll ลิสต์ยิงทุก 10 วิ ถ้ารอ round-trip นั้น จุดแดงจะกลับมาให้เห็นระหว่างรอ)
+        void supabase.from("chat_customers").update({ unread: false, read_at: readAt, updated_at: readAt }).eq("id", data.id);
+        supabase.functions.invoke("messenger-reply", { body: { action: "mark_seen", id: data.id, was_unread: !!data.unread } }).then(() => {
           if (openSeq === openRequestRef.current.seq) scheduleUnreadRefresh(0);
         });
-        if (isCommentChat(data)) setCommentUnreadCount((n) => Math.max(0, n - 1));
       }
       if (!data.profile_pic) {
         supabase.functions.invoke("messenger-reply", { body: { action: "profile", id: data.id } }).then(({ data: p }) => {
@@ -2021,6 +2077,12 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
               // แยกสาเหตุให้ชัด: ค้นหาไม่เจอ / ดูที่บล็อกไว้ / ยังไม่มีแชทเข้ามาเลย
               // เดิมขึ้นแค่ "ไม่มีแชท" ซึ่งอ่านแล้วไม่รู้ว่าต้องทำอะไรต่อ
               <div className="p-6 text-center space-y-1.5">
+                {listTab === "instagram" && igSyncError && !q.trim() && !showBlocked ? (
+                  <div className="mb-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-left space-y-1">
+                    <div className="text-xs font-semibold text-amber-300">ดึงแชท Instagram ไม่ได้</div>
+                    <div className="text-2xs text-night-ink-2 leading-relaxed break-words">{igSyncError}</div>
+                  </div>
+                ) : null}
                 <div className="text-[13px] font-medium text-night-ink-2">
                   {q.trim() ? "ไม่พบแชทที่ตรงกับคำค้น" : showBlocked ? "ไม่มีแชทที่บล็อกไว้" : "ยังไม่มีแชทเข้ามา"}
                 </div>
