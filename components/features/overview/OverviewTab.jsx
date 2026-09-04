@@ -46,7 +46,7 @@ function LiveSummary({ onNavigate }) {
       const c = counts?.data || {};
       if (!dead) setD({
         customers: c.customers ?? 0, unanswered: c.unanswered ?? 0, fresh7: c.fresh7 ?? 0,
-        tvAll: c.tvAll ?? 0, tvSoon: c.tvSoon ?? 0, tvExpired: c.tvExpired ?? 0,
+        tvAll: c.tvAll ?? 0, tvSoon: c.tvSoon ?? 0, tvSoon3: c.tvSoon3 ?? 0, tvExpired: c.tvExpired ?? 0,
         spend, results, hasAds,
       });
     })().catch(() => { if (!dead) setD({ error: true }); });
@@ -57,15 +57,20 @@ function LiveSummary({ onNavigate }) {
   if (d.error) return <Card className="p-5 text-sm text-rose-600">โหลดตัวเลขไม่สำเร็จ</Card>;
 
   return (
-    <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+    <div className="grid grid-cols-2 gap-4 lg:grid-cols-4 2xl:grid-cols-5">
       <StatCard icon={Inbox} label="ลูกค้าทั้งหมด" value={int(d.customers)}
         sub={`ทักใหม่ 7 วัน ${int(d.fresh7)} คน`} tone="brand" onClick={() => onNavigate?.("customer_list")} />
       <StatCard icon={Inbox} label="ยังไม่ได้ตอบ" value={int(d.unanswered)}
         sub={d.unanswered > 0 ? "รอแอดมินตอบอยู่" : "ตอบครบแล้ว"}
         tone={d.unanswered > 0 ? "gold" : "brand"} onClick={() => onNavigate?.("inbox")} />
+      {/* 3 วัน = กลุ่มที่ต้องรีบติดต่อวันนี้ · 7 วัน = ไว้วางแผนล่วงหน้า
+          คนที่เหลือ <= 3 วัน ถูกนับในทั้งสองใบ (ช่วงซ้อนกัน) ไม่ใช่คนละกลุ่ม */}
+      <StatCard icon={Tv} label="สิทธิ์ใกล้หมดใน 3 วัน" value={int(d.tvSoon3)}
+        sub={d.tvSoon3 > 0 ? "ต้องรีบติดต่อ" : "ยังไม่มีใครใกล้หมด"}
+        tone={d.tvSoon3 > 0 ? "red" : "brand"} onClick={() => onNavigate?.("customerdb")} />
       <StatCard icon={Tv} label="สิทธิ์ใกล้หมดใน 7 วัน" value={int(d.tvSoon)}
         sub={`ทั้งหมด ${int(d.tvAll)} · หมดแล้ว ${int(d.tvExpired)}`}
-        tone={d.tvSoon > 0 ? "red" : "brand"} onClick={() => onNavigate?.("customerdb")} />
+        tone={d.tvSoon > 0 ? "gold" : "brand"} onClick={() => onNavigate?.("customerdb")} />
       <StatCard icon={BarChart3} label="ค่าโฆษณา 30 วัน" value={d.hasAds ? thb(d.spend) : "—"}
         sub={d.hasAds ? `ได้ผลลัพธ์ ${int(d.results)} ครั้ง` : "เปิดหน้าแคมเปญเพื่อดึงข้อมูล"}
         tone="brand" onClick={() => onNavigate?.("campaigns")} />
