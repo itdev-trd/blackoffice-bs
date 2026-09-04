@@ -14,6 +14,8 @@ backup/projects.conf
 backup/*.local.*
 .vercel
 .env*
+# ...แต่ไฟล์ตัวอย่าง (ไม่มีค่าจริง) ต้องขึ้น git เพื่อให้รู้ว่าต้องตั้งค่าอะไรบ้างตอน deploy
+!.env.example
 
 # Supabase CLI local state (ไม่ใช่ของโปรเจกต์ ต่างเครื่องต่างค่า)
 supabase/.temp/

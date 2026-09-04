@@ -24,6 +24,36 @@ const nextConfig = {
   async redirects() {
     return [{ source: "/tv-members", destination: "/customerdb", permanent: false }];
   },
+
+  // Header ความปลอดภัย + กฎแคช
+  // อยู่ที่นี่แทน vercel.json เพราะ next.config ใช้ได้ทั้งตอน next start ในเครื่อง
+  // และตอน deploy จริง — ทำให้ทดสอบก่อนขึ้นได้ ไม่ต้องรอไปเห็นผลบน production
+  async headers() {
+    const noStore = { key: "Cache-Control", value: "no-store, must-revalidate" };
+    return [
+      {
+        // ไฟล์นี้คือกลไกตรวจว่ามี deploy ใหม่ (UpdateBanner poll ทุก 3 นาที)
+        // ถ้า CDN แคชไว้ ผู้ใช้จะไม่มีวันรู้ว่ามีเวอร์ชันใหม่
+        source: "/version.json",
+        headers: [noStore],
+      },
+      {
+        // service worker ต้องอัปเดตได้ทันที ไม่งั้นค้างเวอร์ชันเก่าข้ามวัน
+        source: "/sw.js",
+        headers: [noStore, { key: "Service-Worker-Allowed", value: "/" }],
+      },
+      {
+        source: "/:path*",
+        headers: [
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          { key: "X-Frame-Options", value: "SAMEORIGIN" },
+          { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), interest-cohort=()" },
+          { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" },
+        ],
+      },
+    ];
+  },
 };
 
 module.exports = nextConfig;
