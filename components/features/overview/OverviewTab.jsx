@@ -63,12 +63,12 @@ function LiveSummary({ onNavigate }) {
       <StatCard icon={Inbox} label="ยังไม่ได้ตอบ" value={int(d.unanswered)}
         sub={d.unanswered > 0 ? "รอแอดมินตอบอยู่" : "ตอบครบแล้ว"}
         tone={d.unanswered > 0 ? "gold" : "brand"} onClick={() => onNavigate?.("inbox")} />
-      {/* 3 วัน = กลุ่มที่ต้องรีบติดต่อวันนี้ · 7 วัน = ไว้วางแผนล่วงหน้า
-          คนที่เหลือ <= 3 วัน ถูกนับในทั้งสองใบ (ช่วงซ้อนกัน) ไม่ใช่คนละกลุ่ม */}
+      {/* สองใบนี้ไม่ซ้ำคนกัน: <= 3 วัน = ต้องรีบติดต่อวันนี้ · 4-7 วัน = ไว้วางแผนล่วงหน้า
+          บวกกันได้ตรง ๆ = จำนวนคนที่สิทธิ์จะหมดภายใน 7 วัน */}
       <StatCard icon={Tv} label="สิทธิ์ใกล้หมดใน 3 วัน" value={int(d.tvSoon3)}
         sub={d.tvSoon3 > 0 ? "ต้องรีบติดต่อ" : "ยังไม่มีใครใกล้หมด"}
         tone={d.tvSoon3 > 0 ? "red" : "brand"} onClick={() => onNavigate?.("customerdb")} />
-      <StatCard icon={Tv} label="สิทธิ์ใกล้หมดใน 7 วัน" value={int(d.tvSoon)}
+      <StatCard icon={Tv} label="สิทธิ์หมดใน 4–7 วัน" value={int(d.tvSoon)}
         sub={`ทั้งหมด ${int(d.tvAll)} · หมดแล้ว ${int(d.tvExpired)}`}
         tone={d.tvSoon > 0 ? "gold" : "brand"} onClick={() => onNavigate?.("customerdb")} />
       <StatCard icon={BarChart3} label="ค่าโฆษณา 30 วัน" value={d.hasAds ? thb(d.spend) : "—"}
