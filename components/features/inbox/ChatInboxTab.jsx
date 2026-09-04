@@ -33,6 +33,17 @@ import { CHAT_STAGES } from "@/lib/constants/settings";
 const EmojiPicker = React.lazy(() => import("emoji-picker-react").then((module) => ({ default: module.default })));
 
 const INBOX_LINE_OA_ENABLED = true; // เปิดใช้งาน LINE OA ในหน้าตอบแชท
+// LINE OA ไม่ได้ผูกกับเพจ Facebook — page_id ของมันคือ "line:<userId>" ซึ่งไม่เคยอยู่ในลิสต์
+// สิทธิ์รายเพจ (ลิสต์นั้นมีแต่เพจ Meta) ถ้าเอาไปกรองด้วยลิสต์เพจ แชท LINE จะหายหมด
+// ทุกคนที่มีสิทธิ์แท็บตอบแชทเห็นแชท LINE ได้เท่ากัน (RLS ฝั่งฐานข้อมูลคุมไว้ตรงกัน)
+const isLinePage = (id) => String(id || "").startsWith("line:");
+// ตัวกรอง "เพจที่มีสิทธิ์ + แชท LINE" สำหรับ query ที่ครอบทุกช่องทาง
+function scopeToAllowedPages(query, allowedPages) {
+  if (!allowedPages) return query;   // ไม่ถูกจำกัดสิทธิ์ = เห็นทุกเพจอยู่แล้ว
+  const ids = allowedPages.map(String).filter((id) => /^[\w:.-]+$/.test(id));
+  if (!ids.length) return query.like("page_id", "line:%");
+  return query.or(`page_id.in.(${ids.map((id) => `"${id}"`).join(",")}),page_id.like.line:*`);
+}
 // Instagram DM: ฝั่งหลังบ้านรองรับครบอยู่แล้ว (meta-webhook รับ, messenger-reply ส่ง, sync-instagram-recent ดึงย้อนหลัง)
 // แต่เดิมไม่มีแท็บของตัวเอง แชท IG จึงตกไปรวมอยู่ในแท็บ Messenger แยกไม่ออก
 const INBOX_INSTAGRAM_ENABLED = true;
@@ -287,8 +298,8 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     // เพจอยู่ในขอบเขตที่ควรเตือนไหม (สิทธิ์ + เพจที่เลือกดู)
     const ps = pageSelRef.current;
     const viewing = ps.mode === "single" ? (ps.single ? [ps.single] : []) : (ps.multi || []);
-    if (allowedPages && !allowedPages.includes(row.page_id)) return;
-    if (viewing.length && !viewing.includes(row.page_id)) return;
+    if (allowedPages && !isLinePage(row.page_id) && !allowedPages.includes(row.page_id)) return;
+    if (viewing.length && !isLinePage(row.page_id) && !viewing.includes(row.page_id)) return;
     if (!viewing.length && alertPages.length && !alertPages.includes(row.page_id)) return;
     // กันเตือนซ้ำ: ข้อความล่าสุดของแชทนี้เตือนไปแล้ว
     const key = String(row.id);
@@ -502,10 +513,10 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     if (!filters) return false;
     const isBlocked = !!row.blocked_at;
     if (isBlocked !== filters.showBlocked) return false;
-    if (allowedPages && !allowedPages.includes(String(row.page_id || ""))) return false;
+    if (allowedPages && !isLinePage(row.page_id) && !allowedPages.includes(String(row.page_id || ""))) return false;
     const selectedPages = currentPageIds();
     // แท็บ "ทั้งหมด" ต้องรวมทุกเพจที่ผู้ใช้มีสิทธิ์ ไม่ถูก page selector ของเพจแรกบังแชทช่องทางอื่น
-    if (filters.listTab !== "everything" && selectedPages.length && !selectedPages.includes(String(row.page_id || ""))) return false;
+    if (filters.listTab !== "everything" && !isLinePage(row.page_id) && selectedPages.length && !selectedPages.includes(String(row.page_id || ""))) return false;
     if (filters.listTab === "comments") return isCommentChat(row);
     if (filters.listTab === "line") return row.source === "line" && INBOX_LINE_OA_ENABLED;
     if (filters.listTab === "instagram") return row.source === "instagram" && INBOX_INSTAGRAM_ENABLED;
@@ -629,14 +640,14 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
         if (unreadOnly) query = query.eq("unread", true);
 
         if (listTab === "line") {
-          if (allowedPages !== null) query = query.eq("page_id", "__line_permission_required__");
+          // ไม่กรองเพจเลย — LINE ไม่ได้ผูกกับเพจ Facebook และ RLS คุมสิทธิ์ให้อยู่แล้ว
         } else if (listTab !== "everything") {
           if (pageSel.mode === "single" && pageSel.single) query = query.eq("page_id", pageSel.single);
           else if (pageSel.mode === "multi" && pageSel.multi.length) query = query.in("page_id", pageSel.multi);
           if (allowedPages) query = query.in("page_id", allowedPages);
-        } else if (allowedPages) {
-          // รวมทุกเพจ แต่ยังเคารพสิทธิ์เพจที่ผู้ใช้ได้รับ
-          query = query.in("page_id", allowedPages);
+        } else {
+          // รวมทุกเพจ แต่ยังเคารพสิทธิ์เพจที่ผู้ใช้ได้รับ (บวกแชท LINE ที่ไม่ผูกกับเพจ)
+          query = scopeToAllowedPages(query, allowedPages);
         }
 
         const { data, error } = await query.abortSignal(controller.signal);
@@ -681,9 +692,8 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     setMessengerUnreadCount(count || 0);
   }
   async function loadLineUnreadCount() {
-    let lq = supabase.from("chat_customers").select("id", { count: "exact", head: true }).eq("source", "line").eq("unread", true);
-    if (allowedPages) lq = lq.in("page_id", allowedPages);
-    const { count } = await lq; setLineUnreadCount(count || 0);
+    const lq = supabase.from("chat_customers").select("id", { count: "exact", head: true }).eq("source", "line").eq("unread", true);
+    const { count } = await lq; setLineUnreadCount(count || 0);   // LINE เปิดให้ทุกคนที่เข้าหน้าตอบแชท
   }
   async function loadInstagramUnreadCount() {
     const ps = pageSelRef.current;
