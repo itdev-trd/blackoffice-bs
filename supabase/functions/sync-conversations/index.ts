@@ -45,6 +45,15 @@ const timeMs = (v: unknown) => {
   return Number.isFinite(t) ? t : 0;
 };
 
+// เดาภาษา/ประเทศจาก "สคริปต์" ที่ลูกค้าพิมพ์ — ฟรีและชัดเจน (ไทยกับลาวคนละบล็อก Unicode)
+// เดิมช่องประเทศจะว่างจนกว่าจะมีคนเปิดแชท (ตัวแปล AI เป็นคนเติม) ห้องใหม่เลยไม่มีประเทศให้ดูในลิสต์
+// ใช้เฉพาะห้องที่ยังไม่มีค่า — ตัวแปลตอนเปิดแชทเขียนทับด้วยค่าที่แม่นกว่าได้ตามเดิม
+function guessOriginFromScript(text: string): { country: string; lang: string } | null {
+  if (/[\u0E80-\u0EFF]/.test(text)) return { country: "ลาว", lang: "Lao" };   // อักษรลาว
+  if (/[\u0E00-\u0E7F]/.test(text)) return { country: "ไทย", lang: "Thai" };  // อักษรไทย
+  return null;
+}
+
 // "ยังไม่อ่าน" ของแอป = มีข้อความลูกค้าค้างรอตอบ ที่ใหม่กว่าเวลาที่เราอ่าน/ตอบล่าสุด
 // ห้ามเชื่อ unread_count ของ Meta เพียว ๆ: ค่านั้นค้าง > 0 ตลอดถ้าไม่มีใครเปิดอ่านในกล่องข้อความเพจ
 // และ conversation.updated_time (ที่เราเก็บเป็น last_message_at) ขยับตอน "เพจตอบ" ด้วย
@@ -294,7 +303,7 @@ Deno.serve(async (req) => {
       const ids = rows.map((r) => r.id);
       const manualMap: Record<string, string> = {};
       const prevMap: Record<string, any> = {};
-      const { data: existing } = await admin.from("chat_customers").select("id, stage_manual, stage_auto, ai_hash, ai_reason, classified_by, phone, trade_id, username, email, ai_verified, verify_hash, content_hash, source, entry_ad_id, unread, read_at, ai_attempts, verify_attempts, manual_data, transcript").in("id", ids);
+      const { data: existing } = await admin.from("chat_customers").select("id, stage_manual, stage_auto, ai_hash, ai_reason, classified_by, phone, trade_id, username, email, ai_verified, verify_hash, content_hash, source, entry_ad_id, unread, read_at, ai_attempts, verify_attempts, manual_data, transcript, country, cust_lang").in("id", ids);
       for (const e of existing ?? []) { if (e.stage_manual) manualMap[e.id] = e.stage_manual; prevMap[e.id] = e; }
 
       // รวม transcript โดยใช้ mid เป็นตัวเดียวกัน แต่เลือก URL ให้ถูกชนิดสื่อ
@@ -367,6 +376,7 @@ Deno.serve(async (req) => {
         const aiReason = prev?.ai_reason ?? null;
         const finalStage = isManual ? manualMap[r.id] : stageAuto;
         const awaitingReply = Array.isArray(r.transcript) && r.transcript.length > 0 && r.transcript[r.transcript.length - 1]?.w === "u";
+        const originGuess = prev?.country ? null : guessOriginFromScript(String(r.last_user_text || ""));
         return {
           id: r.id, page_id: r.page_id, page_name: r.page_name, psid: r.psid, customer_name: r.customer_name,
           message_count: r.message_count, user_message_count: r.user_message_count,
@@ -383,6 +393,9 @@ Deno.serve(async (req) => {
           entry_ad_id: refRow?.ad_id ?? prev?.entry_ad_id ?? null,
           // ยังไม่ได้ตอบ = ข้อความล่าสุดใน transcript มาจากลูกค้า (w === "u")
           awaiting_reply: awaitingReply,
+          // ค่าที่มีอยู่แล้วชนะเสมอ (มาจากตัวแปล AI ตอนเปิดแชท ซึ่งแม่นกว่าการเดาจากสคริปต์)
+          country: prev?.country ?? originGuess?.country ?? null,
+          cust_lang: prev?.cust_lang ?? originGuess?.lang ?? null,
           // ไม่ส่ง unread มากับ upsert เลย — จัดการหลัง upsert แบบมีการ์ดแทน
           // (upsert อ่าน prev.read_at มาก่อนหน้านี้หลายวินาที ถ้าแอดมินเพิ่งอ่าน/ตอบระหว่างนั้นจะถูกทับกลับเป็นยังไม่อ่าน)
           // ห้ามใส่แบบมีบ้างไม่มีบ้างในชุดเดียวกัน: PostgREST รวมคอลัมน์จากทุกออบเจกต์แล้วเติม NULL
