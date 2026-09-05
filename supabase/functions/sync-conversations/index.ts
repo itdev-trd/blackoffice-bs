@@ -383,9 +383,11 @@ Deno.serve(async (req) => {
           entry_ad_id: refRow?.ad_id ?? prev?.entry_ad_id ?? null,
           // ยังไม่ได้ตอบ = ข้อความล่าสุดใน transcript มาจากลูกค้า (w === "u")
           awaiting_reply: awaitingReply,
-          // แถวใหม่เท่านั้นที่ตั้ง unread ตรงนี้ได้ — แถวเดิมจัดการหลัง upsert แบบมีการ์ด
+          // ไม่ส่ง unread มากับ upsert เลย — จัดการหลัง upsert แบบมีการ์ดแทน
           // (upsert อ่าน prev.read_at มาก่อนหน้านี้หลายวินาที ถ้าแอดมินเพิ่งอ่าน/ตอบระหว่างนั้นจะถูกทับกลับเป็นยังไม่อ่าน)
-          ...(prev ? {} : { unread: (r._unread_count ?? 0) > 0 && awaitingReply }),
+          // ห้ามใส่แบบมีบ้างไม่มีบ้างในชุดเดียวกัน: PostgREST รวมคอลัมน์จากทุกออบเจกต์แล้วเติม NULL
+          // ให้ตัวที่ไม่มีคีย์ → แถวใหม่ 1 แถวทำให้ทั้ง batch ล้มด้วย 23502 (unread เป็น NOT NULL)
+          // แถวใหม่ที่ไม่ส่งคอลัมน์นี้เลยจะได้ค่า default false แล้วรอบล่างค่อยยกธงให้
           synced_at: now, updated_at: now,
         };
       });
@@ -393,8 +395,9 @@ Deno.serve(async (req) => {
       if (error) throw error;
       // ---- สถานะอ่าน/ยังไม่อ่านของแถวเดิม: อัปเดตแยกจาก upsert และอ่าน read_at สด ๆ ก่อนตัดสิน ----
       // Meta บอกได้แค่ว่า "กล่องข้อความเพจ" อ่านหรือยัง (unread_count) จึงใช้ปิดจุดแดงได้ แต่ห้ามใช้เปิดเอง
-      const metaReadIds = rows.filter((r) => r._unread_count === 0 && prevMap[r.id]).map((r) => r.id);
-      const metaUnreadIds = rows.filter((r) => (r._unread_count ?? 0) > 0 && prevMap[r.id]).map((r) => r.id);
+      // รวมแถวใหม่ด้วย (เพิ่งถูก insert ด้วยค่า default unread=false) — การ์ด .eq("unread", ...) กันเขียนซ้ำอยู่แล้ว
+      const metaReadIds = rows.filter((r) => r._unread_count === 0).map((r) => r.id);
+      const metaUnreadIds = rows.filter((r) => (r._unread_count ?? 0) > 0).map((r) => r.id);
       if (metaReadIds.length) {
         await admin.from("chat_customers").update({ unread: false, read_at: now, updated_at: now })
           .in("id", metaReadIds).eq("unread", true);

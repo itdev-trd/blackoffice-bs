@@ -111,9 +111,10 @@ Deno.serve(async (req) => {
   try {
     const body = await req.json().catch(() => ({}));
     const action = body?.action === "status" ? "status" : body?.action === "sync_comments" ? "sync_comments" : "subscribe";
+    // allowService = เรียกจาก cron/สคริปต์หลังบ้านได้ด้วย (ผูก webhook ซ้ำหลังเปลี่ยน Meta app / ตรวจสุขภาพ)
     const auth = await authorizeRequest(req, action === "sync_comments"
       ? { tab: "inbox", allowService: true }
-      : { admin: true, setting: "synccfg", allowService: action === "status" });
+      : { admin: true, setting: "synccfg", allowService: true });
     if (!auth.ok) return json({ ok: false, error: auth.error }, auth.status);
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const selectedPageIds = action === "sync_comments" ? await getSelectedCommentPageIds(admin) : [];
