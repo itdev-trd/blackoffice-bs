@@ -34,3 +34,44 @@ export async function getMetaToken(): Promise<string> {
   cachedTokenAt = now;
   return cachedToken;
 }
+
+// ---------- ข้อมูลของ "Meta app" (App ID / App Secret) ----------
+// ใช้ตรวจลายเซ็น webhook (x-hub-signature-256) และสร้าง app access token (`{app_id}|{app_secret}`)
+// สำหรับตั้ง callback URL ของ webhook — ตั้งจากหน้าเว็บได้เหมือน token เพื่อไม่ต้องเข้าไปแก้ env
+// ทุกครั้งที่ย้ายไปใช้ Meta app ตัวอื่น ต้องเปลี่ยนคู่นี้พร้อมกับ access token
+const APP_CACHE_MS = 60 * 1000;   // สั้นกว่า token เพราะเปลี่ยนแล้วต้องมีผลกับ webhook เกือบทันที
+let cachedAppSecret = "";
+let cachedAppSecretAt = 0;
+let cachedAppId = "";
+let cachedAppIdAt = 0;
+
+async function readSecretRow(key: string): Promise<string> {
+  try {
+    const admin = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+    );
+    const { data } = await admin.from("app_secrets").select("value").eq("key", key).maybeSingle();
+    return data?.value ? String(data.value) : "";
+  } catch (_e) {
+    return "";   // อ่านไม่ได้ = ไป fallback env
+  }
+}
+
+export async function getMetaAppSecret(): Promise<string> {
+  const now = Date.now();
+  if (cachedAppSecret && now - cachedAppSecretAt < APP_CACHE_MS) return cachedAppSecret;
+  const fromDb = await readSecretRow("meta_app_secret");
+  cachedAppSecret = fromDb || Deno.env.get("META_APP_SECRET") || "";
+  cachedAppSecretAt = now;
+  return cachedAppSecret;
+}
+
+export async function getMetaAppId(): Promise<string> {
+  const now = Date.now();
+  if (cachedAppId && now - cachedAppIdAt < APP_CACHE_MS) return cachedAppId;
+  const fromDb = await readSecretRow("meta_app_id");
+  cachedAppId = fromDb || Deno.env.get("META_APP_ID") || "";
+  cachedAppIdAt = now;
+  return cachedAppId;
+}

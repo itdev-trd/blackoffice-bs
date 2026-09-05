@@ -6,7 +6,7 @@
 // ตั้ง secret:  META_VERIFY_TOKEN (ตั้งเอง, ใส่ให้ตรงกับ Meta), META_APP_SECRET (ตรวจลายเซ็น)
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { getMetaToken } from "../_shared/meta.ts";
+import { getMetaAppSecret, getMetaToken } from "../_shared/meta.ts";
 import { getMetaPages } from "../_shared/meta-pages.ts";
 import { getSelectedCommentPageIds, resolveCommentAds } from "../_shared/comment-realtime.ts";
 
@@ -129,7 +129,8 @@ Deno.serve(async (req) => {
 
   try {
     const raw = await req.text();
-    const secret = Deno.env.get("META_APP_SECRET");
+    // ตั้งจากหน้าเว็บได้ (app_secrets.meta_app_secret) ไม่งั้น fallback env — ย้าย Meta app ได้โดยไม่ต้องแก้ env
+    const secret = await getMetaAppSecret();
     if (!secret) {
       console.error("META_APP_SECRET is required for webhook signature verification");
       return new Response("webhook not configured", { status: 503 });

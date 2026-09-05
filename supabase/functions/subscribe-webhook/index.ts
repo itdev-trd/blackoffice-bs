@@ -3,7 +3,7 @@
 //   action "subscribe" (ค่าเริ่มต้น) → POST /{page_id}/subscribed_apps ทุกเพจ
 //   action "status"                  → GET  /{page_id}/subscribed_apps ดูว่าผูกแล้วยัง
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { getMetaToken } from "../_shared/meta.ts";
+import { getMetaAppId, getMetaAppSecret, getMetaToken } from "../_shared/meta.ts";
 import { getMetaPages } from "../_shared/meta-pages.ts";
 import { authorizeRequest } from "../_shared/permissions.ts";
 import { getOrRefreshCommentAdMap, getSelectedCommentPageIds } from "../_shared/comment-realtime.ts";
@@ -27,16 +27,23 @@ async function fetchJson(url: string, init?: RequestInit, admin?: any, source = 
   return await r.json().catch(() => ({}));
 }
 
+// token รู้ว่าตัวเองออกโดยแอปไหน — ใช้เป็นค่าสำรองเมื่อยังไม่ได้กรอก App ID ในหน้าตั้งค่า
+async function appIdFromToken(base: string, userToken: string, admin: any): Promise<string> {
+  if (!userToken) return "";
+  const debug = await fetchJson(`${base}/debug_token?input_token=${encodeURIComponent(userToken)}&access_token=${encodeURIComponent(userToken)}`, undefined, admin);
+  return debug?.data?.app_id ? String(debug.data.app_id) : "";
+}
+
 async function ensureAppPageWebhook(base: string, userToken: string, admin: any) {
-  const appSecret = Deno.env.get("META_APP_SECRET") || "";
+  const appSecret = await getMetaAppSecret();
   const verifyToken = Deno.env.get("META_VERIFY_TOKEN") || "";
   const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
   if (!appSecret || !verifyToken || !supabaseUrl) {
-    return { success: false, error: "META_APP_SECRET / META_VERIFY_TOKEN / SUPABASE_URL ไม่ครบ" };
+    return { success: false, error: "ยังไม่ได้ตั้ง App Secret (ตั้งได้ที่ ตั้งค่า → Meta) หรือ META_VERIFY_TOKEN / SUPABASE_URL ไม่ครบ" };
   }
-  const debug = await fetchJson(`${base}/debug_token?input_token=${encodeURIComponent(userToken)}&access_token=${encodeURIComponent(userToken)}`, undefined, admin);
-  const appId = debug?.data?.app_id ? String(debug.data.app_id) : "";
-  if (!appId) return { success: false, error: debug?.error?.message || "หา Meta App ID ไม่สำเร็จ" };
+  // App ID ที่ตั้งไว้ในหน้าเว็บมาก่อน — ตอนย้ายไปใช้แอปอื่น token อาจยังเป็นของแอปเดิมอยู่ชั่วคราว
+  const appId = (await getMetaAppId()) || await appIdFromToken(base, userToken, admin);
+  if (!appId) return { success: false, error: "หา Meta App ID ไม่สำเร็จ — ใส่ App ID ในหน้าตั้งค่า" };
   const appToken = `${appId}|${appSecret}`;
   const callbackUrl = `${supabaseUrl}/functions/v1/meta-webhook`;
   const fields = `${BASE_FIELDS},feed`;
@@ -76,12 +83,11 @@ async function ensureAppPageWebhook(base: string, userToken: string, admin: any)
 // อ่านการตั้งค่า webhook ของแอปแบบ read-only — action=status ต้องไม่ไปตั้ง callback ทับของใคร
 // ใช้ตรวจว่า "Meta จะส่ง event ไปที่ URL ไหน" ซึ่งเป็นคำตอบเดียวที่บอกได้ว่าทำไม webhook ไม่เข้า
 async function readAppWebhook(base: string, userToken: string, admin: any) {
-  const appSecret = Deno.env.get("META_APP_SECRET") || "";
+  const appSecret = await getMetaAppSecret();
   const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
-  if (!appSecret) return { success: false, error: "META_APP_SECRET ไม่ครบ" };
-  const debug = await fetchJson(`${base}/debug_token?input_token=${encodeURIComponent(userToken)}&access_token=${encodeURIComponent(userToken)}`, undefined, admin);
-  const appId = debug?.data?.app_id ? String(debug.data.app_id) : "";
-  if (!appId) return { success: false, error: debug?.error?.message || "หา Meta App ID ไม่สำเร็จ" };
+  if (!appSecret) return { success: false, error: "ยังไม่ได้ตั้ง App Secret (ตั้งได้ที่ ตั้งค่า → Meta)" };
+  const appId = (await getMetaAppId()) || await appIdFromToken(base, userToken, admin);
+  if (!appId) return { success: false, error: "หา Meta App ID ไม่สำเร็จ — ใส่ App ID ในหน้าตั้งค่า" };
   const status = await fetchJson(`${base}/${appId}/subscriptions?access_token=${encodeURIComponent(`${appId}|${appSecret}`)}`, undefined, admin);
   if (status?.error) return { success: false, app_id: appId, error: status.error.error_user_msg || status.error.message };
   const expected = `${supabaseUrl}/functions/v1/meta-webhook`;

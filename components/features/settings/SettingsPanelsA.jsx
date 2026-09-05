@@ -528,6 +528,101 @@ export function MetaTokenPanel() {
   );
 }
 
+// App ID + App Secret ของ Meta app — ใช้ 2 อย่าง: ตรวจลายเซ็น webhook (x-hub-signature-256)
+// และสร้าง app access token สำหรับตั้ง callback URL ของ webhook
+// เดิมอยู่ใน env ของ edge function อย่างเดียว ทำให้ย้ายไปใช้ Meta app ตัวอื่นต้องเข้า Supabase ไปแก้เอง
+export function MetaAppPanel() {
+  const [status, setStatus] = useState(null);
+  const [appId, setAppId] = useState("");
+  const [appSecret, setAppSecret] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
+  const [canForce, setCanForce] = useState(false);
+
+  async function loadStatus() {
+    const { data } = await supabase.functions.invoke("set-meta-token", { body: { action: "app_status" } });
+    if (data?.ok) setStatus(data);
+  }
+  useEffect(() => { loadStatus(); }, []);
+
+  async function save(force = false) {
+    if (!appSecret.trim()) return;
+    setBusy(true); setErr(""); setMsg(""); setCanForce(false);
+    const { data, error } = await supabase.functions.invoke("set-meta-token", {
+      body: { action: "save_app", app_id: appId.trim() || undefined, app_secret: appSecret.trim(), force },
+    });
+    setBusy(false);
+    if (error) { setErr(await readFunctionErrorMessage(error)); return; }
+    if (!data?.ok) { setErr(data?.error || "บันทึกไม่สำเร็จ"); setCanForce(!!data?.can_force); return; }
+    setAppSecret(""); setAppId("");
+    setMsg(data.unverified
+      ? "บันทึกแล้ว (ยังตรวจกับ Meta ไม่ผ่าน — เช็ค App ID/Secret อีกครั้ง)"
+      : `บันทึกแล้ว ✓${data.app_name ? " · " + data.app_name : ""}`);
+    loadStatus();
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-3">
+      <div>
+        <h3 className="font-semibold text-slate-800">Meta App (App ID + App Secret)</h3>
+        <p className="text-xs text-slate-500 mt-1">
+          ใช้ตรวจลายเซ็นของ webhook และตั้ง callback URL ให้ Meta ส่งข้อความ/ที่มาจากแอดเข้าระบบนี้ ·
+          คัดลอกจาก developers.facebook.com → App settings → Basic · เก็บแบบปลอดภัย ฝั่งเว็บอ่านค่าเดิมไม่ได้
+        </p>
+      </div>
+
+      {status && (
+        <div className="text-xs">
+          {status.has_app_secret ? (
+            status.valid === false
+              ? <span className="text-rose-600">● ตั้งค่าแล้วแต่ใช้ไม่ได้: {status.error}</span>
+              : <span className="text-emerald-700">
+                  ● ตั้งค่าแล้ว{status.app_name ? " · " + status.app_name : ""}
+                  {status.app_id ? " · App ID " + status.app_id : ""}
+                  {status.app_secret_masked ? " · " + status.app_secret_masked : ""}
+                  {status.app_secret_source === "env" ? " · (จาก env)" : ""}
+                </span>
+          ) : <span className="text-amber-600">● ยังไม่ได้ตั้ง App Secret</span>}
+        </div>
+      )}
+
+      <input
+        value={appId}
+        onChange={(e) => setAppId(e.target.value)}
+        placeholder={status?.app_id ? `App ID (เว้นว่าง = ใช้ ${status.app_id} เดิม)` : "App ID (ตัวเลขล้วน)"}
+        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+        autoComplete="off"
+        inputMode="numeric"
+      />
+      <PasswordInput
+        value={appSecret}
+        onChange={(e) => setAppSecret(e.target.value)}
+        placeholder="App Secret"
+        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+        autoComplete="off"
+      />
+      <div className="flex items-center gap-2 flex-wrap">
+        <button onClick={() => save(false)} disabled={busy || !appSecret.trim()} className="bg-brand-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-brand-700 disabled:opacity-60 flex items-center gap-2">
+          {busy ? <Loader2 className="animate-spin" size={16} /> : null}บันทึกและตรวจสอบ
+        </button>
+        {/* ตอนสลับไปใช้แอปอื่น access token ที่ยังค้างอยู่จะเป็นของแอปเดิม การตรวจจึงไม่ผ่านชั่วคราว */}
+        {canForce && (
+          <button onClick={() => save(true)} disabled={busy} className="border border-amber-400 text-amber-700 rounded-lg px-3 py-2 text-xs font-medium hover:bg-amber-50 disabled:opacity-60">
+            บันทึกทั้งที่ตรวจไม่ผ่าน
+          </button>
+        )}
+        {msg && <span className="text-sm text-emerald-700">{msg}</span>}
+      </div>
+      {err && <div className="text-sm text-rose-600 bg-rose-50 rounded-lg px-3 py-2">{err}</div>}
+      <p className="text-[11px] text-slate-400">
+        มีผลกับ webhook ภายใน ~1 นาที · หลังเปลี่ยนแอปให้ไปที่ ตั้งค่า → ซิงก์แชท แล้วกด "ผูกเพจกับ webhook" หนึ่งครั้ง
+        เพื่อย้าย callback URL มาที่ระบบนี้ แล้วกด "เช็คสถานะ" ดูว่า callback ตรงและมี event เข้ามาไหม
+      </p>
+    </div>
+  );
+}
+
 export function LineOAPanel() {
   const [status, setStatus] = useState(null);
   const [secret, setSecret] = useState("");

@@ -42,6 +42,7 @@ import {
   BrandAssetUploader,
   CiStyleUploader,
   MetaTokenPanel,
+  MetaAppPanel,
   LineOAPanel,
   OpenAIKeyPanel,
   PermissionsPanel,
@@ -1155,6 +1156,7 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
       {section === "knowledge" && <KnowledgeBasePanel allowedPages={allowedPages} />}
       {section === "ai_prompts" && <AiPromptsPanel />}
       {section === "meta" && <MetaTokenPanel />}
+      {section === "meta" && <MetaAppPanel />}
       {section === "openai_key" && <OpenAIKeyPanel />}
       {section === "line" && <LineOAPanel />}
       {section === "permissions" && <PermissionsPanel />}
