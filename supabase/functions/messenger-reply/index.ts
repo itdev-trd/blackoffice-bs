@@ -24,6 +24,16 @@ async function fetchJson(url: string, init?: RequestInit) {
   return await r.json().catch(() => ({}));
 }
 
+// แอป Meta ที่ยังไม่ผ่าน App Review (Standard Access ของ pages_messaging) ส่งข้อความได้เฉพาะบัญชี
+// ที่มี role ในแอป (แอดมิน/ผู้พัฒนา/ผู้ทดสอบ) — Meta คืน code 10 เหมือนกรณี "เกิน 24 ชม." เป๊ะ
+// ถ้าไม่แยกออก ข้อความ error จะโทษกรอบเวลาแทน ทั้งที่ตอบลูกค้าทั่วไปไม่ได้เลยสักคน
+const APP_REVIEW_HINT = "แอป Meta ยังเป็น Standard Access — ส่งข้อความได้เฉพาะบัญชีที่มี role ในแอป (แอดมิน/ผู้พัฒนา/ผู้ทดสอบ) "
+  + "ต้องยื่น App Review ขอ Advanced Access ของ pages_messaging ก่อนถึงจะตอบลูกค้าทั่วไปได้ · แชท LINE ไม่เกี่ยวกับข้อจำกัดนี้";
+const isAppReviewBlock = (...errs: any[]) => errs.some((e) => {
+  const text = `${e?.message || ""} ${e?.error_user_msg || ""} ${e?.error_user_title || ""}`;
+  return /pages_messaging/i.test(text) && /(ผู้ทดสอบ|ผู้พัฒนา|testers|developers)/i.test(text);
+});
+
 // ส่งเข้า Messenger: ลอง RESPONSE ก่อน (กรอบ 24 ชม.) ถ้า Meta ปฏิเสธ → retry ด้วย Human Agent tag (ขยายเป็น 7 วัน)
 // message = object ของ Send API (เช่น { text } หรือ { attachment })
 async function sendMessage(pageId: string, pageTok: string, psid: string, message: any, version: string, preferHumanAgent = false, extra: Record<string, unknown> = {}) {
@@ -44,6 +54,8 @@ async function sendMessage(pageId: string, pageTok: string, psid: string, messag
     const subcode = retry.error.error_subcode ? Number(retry.error.error_subcode) : null;
     const metaMsg = retry.error.error_user_msg || firstErr?.error_user_msg || "";
     console.warn("[messenger send failed]", JSON.stringify({ preferHumanAgent, firstErr, retryErr: retry.error }));
+    // ติดสิทธิ์ระดับแอป ไม่ใช่ระดับห้องแชท — บอกให้ตรงสาเหตุ ไม่งั้นแอดมินจะไล่แก้ผิดทาง
+    if (isAppReviewBlock(firstErr, retry.error)) throw new Error(APP_REVIEW_HINT);
     // อยู่ในกรอบ 24 ชม.แต่ยังส่งไม่ได้ = ไม่ใช่เรื่องหมดเวลา — มักเป็นลูกค้าบล็อกเพจ/ปิดรับข้อความ/บัญชีถูกจำกัด
     if (!preferHumanAgent) {
       throw new Error(`ส่งไม่สำเร็จ (ยังอยู่ในกรอบ 24 ชม.): ${metaMsg || "Meta ปฏิเสธการส่ง"} — สาเหตุที่พบบ่อย: ลูกค้าบล็อกเพจ/ปิดรับข้อความ, บัญชีลูกค้าถูกจำกัด, หรือลิงก์/เนื้อหาถูกบล็อก (code ${code}${subcode ? `, subcode ${subcode}` : ""})`);
@@ -63,7 +75,10 @@ async function sendInstagramMessage(pageId: string, pageTok: string, igsid: stri
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ recipient: { id: igsid }, messaging_type: "RESPONSE", message, ...extra }),
   });
-  if (res?.error) throw new Error(res.error.error_user_msg || res.error.message || "ส่ง Instagram DM ไม่สำเร็จ");
+  if (res?.error) {
+    if (isAppReviewBlock(res.error)) throw new Error(APP_REVIEW_HINT);
+    throw new Error(res.error.error_user_msg || res.error.message || "ส่ง Instagram DM ไม่สำเร็จ");
+  }
   return { ...res, _delivery_mode: "instagram" };
 }
 
