@@ -13,7 +13,8 @@ const ERROR_KEY = "instagram_recent_fallback_error";
 const COOLDOWN_MS = 10 * 60 * 1000;
 const WEBHOOK_HEALTH_MS = 15 * 60 * 1000;
 const MAX_TRANSCRIPT_TEXT = 10_000;
-const ONE_BY_ONE_MAX = 5;   // จำนวนห้องสูงสุดที่ไล่เก็บทีละใบเมื่อดึงเป็นชุดไม่ได้ (คุมจำนวนคำขอ Meta ต่อรอบ)
+const ONE_BY_ONE_MAX = 5;                     // จำนวนห้องสูงสุดที่ไล่เก็บทีละใบ (คุมจำนวนคำขอ Meta ต่อรอบ)
+const HEAVY_RETRY_MS = 24 * 60 * 60 * 1000;   // เว้นวรรคก่อนกลับไปลองขอเป็นชุดอีกครั้ง
 const transcriptText = (value: unknown) => String(value || "").slice(0, MAX_TRANSCRIPT_TEXT);
 const corsHeaders = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type" };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "content-type": "application/json" } });
@@ -53,11 +54,13 @@ Deno.serve(async (req) => {
     const { data: stateRow } = await admin.from("settings").select("value").eq("key", STATE_KEY).maybeSingle();
     const state = stateRow?.value || {};
     const lastByPage = state.last_by_page && typeof state.last_by_page === "object" ? state.last_by_page : {};
+    // เพจไหนพิสูจน์แล้วว่าขอเป็นชุดไม่ได้ (เวลาที่เจอครั้งล่าสุด) — ใช้ข้ามการลองที่รู้ผลอยู่แล้ว
+    const heavyBlocked: Record<string, string> = state.heavy_blocked && typeof state.heavy_blocked === "object" ? state.heavy_blocked : {};
     pages = pages.filter((p: any) => Date.now() - new Date(lastByPage[String(p.id)] || 0).getTime() >= COOLDOWN_MS);
     if (!pages.length) return json({ ok: true, upserted: 0, skipped: "cooldown" });
     const checkedAt = new Date().toISOString();
     for (const page of pages) lastByPage[String(page.id)] = checkedAt;
-    await admin.from("settings").upsert({ key: STATE_KEY, value: { last_by_page: lastByPage }, updated_at: checkedAt });
+    await admin.from("settings").upsert({ key: STATE_KEY, value: { last_by_page: lastByPage, heavy_blocked: heavyBlocked }, updated_at: checkedAt });
 
     let upserted = 0;
     const errors: Array<{ page_id: string; error: string }> = [];
@@ -74,7 +77,12 @@ Deno.serve(async (req) => {
       const igId = String(page.instagram_business_account.id);
       let result: any = {};
       const oneByOne: any[] = [];
-      for (const attempt of attempts) {
+      // เพจที่เพิ่งพิสูจน์แล้วว่าขอเป็นชุดไม่ได้ ให้ข้ามไปทางถอยเลย — ไม่งั้นเสียคำขอที่ Meta ปฏิเสธแน่ ๆ
+      // 3 ครั้ง (ครั้งละ ~20 วิ) ทุกรอบ ซึ่งกินโควตาและอาจไปสะกิด rate guard ของงานอื่น
+      // ยังลองทางปกติซ้ำวันละครั้ง เผื่อได้ Advanced Access แล้วจะกลับไปใช้คำขอเดียวเองอัตโนมัติ
+      const heavyBlockedAt = timeMs(heavyBlocked[pageId]);
+      const skipHeavy = heavyBlockedAt > 0 && Date.now() - heavyBlockedAt < HEAVY_RETRY_MS;
+      for (const attempt of (skipHeavy ? [] : attempts)) {
         const response = await fetch(`${GRAPH_BASE}/${pageId}/conversations?platform=instagram&fields=${encodeURIComponent(attempt.fields)}&limit=${attempt.limit}&access_token=${page.access_token}`);
         await recordMetaUsage(admin, response, "instagram_recent_fallback");
         result = await response.json().catch(() => ({}));
@@ -88,7 +96,7 @@ Deno.serve(async (req) => {
       // (limit=1 ผ่าน · limit>=2 ตอบ code 1 ทุกครั้ง — ทดสอบกับเพจนี้แล้ว) แต่ "ดึงรายละเอียดรายห้อง"
       // ด้วย GET /{conversation_id} ยังทำได้ปกติ จึงไล่เก็บ id ทีละใบแล้วค่อยดึงเนื้อหาทีหลัง
       // หมายเหตุ: Meta คืนเฉพาะห้องของผู้ใช้ที่มี role ในแอป ห้องของลูกค้าจริงยังไม่โผล่จนกว่าจะผ่าน App Review
-      if (result?.error) {
+      if (result?.error || skipHeavy) {
         const walked: any[] = [];
         let after = "";
         for (let i = 0; i < ONE_BY_ONE_MAX; i++) {
@@ -110,7 +118,10 @@ Deno.serve(async (req) => {
           const detailJson = await detailRes.json().catch(() => ({}));
           if (!detailJson?.error && detailJson?.id) oneByOne.push(detailJson);
         }
-        if (oneByOne.length) result = { data: oneByOne };   // เดินสำเร็จ = ไปต่อเส้นทางปกติ
+        if (oneByOne.length) {
+          result = { data: oneByOne };   // เดินสำเร็จ = ไปต่อเส้นทางปกติ
+          if (!skipHeavy) heavyBlocked[pageId] = new Date().toISOString();   // รอบหน้าข้ามการลองชุดใหญ่ไปเลย
+        }
       }
       if (result?.error) {
         const detail = result.error.error_user_msg || result.error.message || "Meta error";
@@ -123,6 +134,7 @@ Deno.serve(async (req) => {
         });
         continue;
       }
+      if (!skipHeavy && !oneByOne.length) delete heavyBlocked[pageId];   // ขอเป็นชุดได้แล้ว = กลับสู่ทางปกติถาวร
       await admin.from("settings").upsert({ key: ERROR_KEY, value: { at: new Date().toISOString(), page_id: pageId, error: null }, updated_at: new Date().toISOString() });
       const convs = result?.data ?? [];
       const psids = [...new Set(convs.map((c: any) =>
@@ -183,6 +195,7 @@ Deno.serve(async (req) => {
         }
       }
     }
+    await admin.from("settings").upsert({ key: STATE_KEY, value: { last_by_page: lastByPage, heavy_blocked: heavyBlocked }, updated_at: new Date().toISOString() });
     return json({ ok: errors.length === 0, upserted, checked_pages: pages.length, errors });
   } catch (error) {
     return json({ ok: false, error: String(error instanceof Error ? error.message : error) }, 200);
