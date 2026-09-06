@@ -12,6 +12,10 @@ try {
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // แยกโฟลเดอร์ build ออกจาก dev ได้ด้วย NEXT_DIST_DIR
+  // `next build` เขียนทับ .next ที่ `next dev` ใช้อยู่ ทำให้ dev server ที่เปิดค้างพังทันที
+  // (ENOENT ... .next/server/vendor-chunks/*.js) — สคริปต์ตรวจโค้ดจึง build ลง .next-check แทน
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   reactStrictMode: true,
   generateBuildId: async () => BUILD_ID,
   env: {

@@ -19,3 +19,6 @@ backup/*.local.*
 
 # Supabase CLI local state (ไม่ใช่ของโปรเจกต์ ต่างเครื่องต่างค่า)
 supabase/.temp/
+
+# build ตรวจโค้ด (แยกจาก .next ของ dev server)
+.next-check
