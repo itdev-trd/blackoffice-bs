@@ -299,7 +299,7 @@ Deno.serve(async (req) => {
   try {
     const body = await readJsonBody(req, 1024 * 1024);
     const action = String(body?.action || "");
-    const auth = await authorizeRequest(req, { tab: ["inbox", "chat"] });
+    const auth = await authorizeRequest(req, { tab: ["inbox", "chat", "feed"] });
     if (!auth.ok) return json({ ok: false, error: auth.error }, auth.status);
 
     // ---------- ดึง "ข้อความตอบกลับที่บันทึกไว้" (Saved Replies) ของเพจ ----------

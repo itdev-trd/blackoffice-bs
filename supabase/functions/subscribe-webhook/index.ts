@@ -12,8 +12,11 @@ import { getMetaBackgroundGuard, recordMetaUsage } from "../_shared/meta-rate.ts
 const GRAPH_VERSION = "v22.0"; // v19 หมดอายุแล้ว (sunset ต้นปี 2026)
 // message_reads = ลูกค้าเปิดอ่านข้อความเราแล้ว (ใช้โชว์สถานะ "อ่านแล้ว" ในแอป)
 // feed = คอมเมนต์/โพสต์บนหน้าเพจ (ใช้รับคอมเมนต์ใต้โฆษณาแบบเรียลไทม์)
+// คอมเมนต์ยังรับเหมือนเดิม (หน้า "ฟีด" ใช้ตอบคอมเมนต์) แค่ไม่โผล่ในกล่องแชท
+const COMMENTS_ENABLED = true;
 const BASE_FIELDS = "messages,messaging_postbacks,messaging_referrals,message_echoes,message_reads";
-const INSTAGRAM_FIELDS = "messages,messaging_postbacks,messaging_seen,messaging_handover,message_reactions,messaging_referral,messaging_optins,message_edit,comments,live_comments,standby";
+const IG_MESSAGE_FIELDS = "messages,messaging_postbacks,messaging_seen,messaging_handover,message_reactions,messaging_referral,messaging_optins,message_edit,standby";
+const INSTAGRAM_FIELDS = COMMENTS_ENABLED ? `${IG_MESSAGE_FIELDS},comments,live_comments` : IG_MESSAGE_FIELDS;
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -46,7 +49,7 @@ async function ensureAppPageWebhook(base: string, userToken: string, admin: any)
   if (!appId) return { success: false, error: "หา Meta App ID ไม่สำเร็จ — ใส่ App ID ในหน้าตั้งค่า" };
   const appToken = `${appId}|${appSecret}`;
   const callbackUrl = `${supabaseUrl}/functions/v1/meta-webhook`;
-  const fields = `${BASE_FIELDS},feed`;
+  const fields = COMMENTS_ENABLED ? `${BASE_FIELDS},feed` : BASE_FIELDS;
   const subscribeObject = async (object: string, subscribedFields: string) => {
     const form = new URLSearchParams({
       object, callback_url: callbackUrl, fields: subscribedFields,
@@ -183,7 +186,7 @@ Deno.serve(async (req) => {
         results.push({ page: p.name, page_id: p.id, subscribed: !!app, fields: app?.subscribed_fields ?? [], error: r?.error?.message ?? null });
       } else {
         const commentsEnabled = action !== "sync_comments" || selectedPageIds.includes(String(p.id));
-        const fields = commentsEnabled ? `${BASE_FIELDS},feed` : BASE_FIELDS;
+        const fields = (COMMENTS_ENABLED && commentsEnabled) ? `${BASE_FIELDS},feed` : BASE_FIELDS;
         const r = await fetchJson(`${base}/${p.id}/subscribed_apps?subscribed_fields=${encodeURIComponent(fields)}&access_token=${p.access_token}`, { method: "POST" }, admin);
         results.push({ page: p.name, page_id: p.id, comments_enabled: commentsEnabled, success: r?.success === true, error: r?.error?.error_user_msg || r?.error?.message || null });
       }

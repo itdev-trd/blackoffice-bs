@@ -10,6 +10,9 @@ import { getMetaAppSecret, getMetaToken } from "../_shared/meta.ts";
 import { getMetaPages } from "../_shared/meta-pages.ts";
 import { getSelectedCommentPageIds, resolveCommentAds } from "../_shared/comment-realtime.ts";
 
+// คอมเมนต์ยังเก็บเหมือนเดิม แต่ไม่ปนในกล่องแชท — ไปอยู่หน้า "ฟีด" แยกต่างหาก (แท็บ feed)
+// ตัวแปรนี้เหลือไว้เป็นสวิตช์เดียวสำหรับปิดทั้งเส้นถ้าวันหนึ่งไม่ใช้แล้ว
+const COMMENTS_ENABLED = true;
 const GRAPH_BASE = "https://graph.facebook.com/v22.0";
 const MAX_TRANSCRIPT_TEXT = 10_000;
 // อิโมจิ/อักขระเสริมถูกเก็บเป็น surrogate pair 2 ตัว ถ้าลูกค้าส่งมาไม่ครบคู่
@@ -206,11 +209,11 @@ Deno.serve(async (req) => {
         // คอมเมนต์ IG มาได้ 2 ทรง: entry.field/value (ตรง ๆ) หรือ entry.changes[].value (เหมือน Page feed ของ FB)
         // รองรับทั้งคู่ ให้คอมเมนต์ IG เข้าเลนความคิดเห็นแบบเดียวกับ FB
         const igCommentValues: any[] = [];
-        if (entry.field === "comments" || entry.field === "live_comments") {
+        if (COMMENTS_ENABLED && (entry.field === "comments" || entry.field === "live_comments")) {
           const vals = Array.isArray(entry.value) ? entry.value : [entry.value];
           igCommentValues.push(...vals.filter(Boolean));
         }
-        for (const ch of entry.changes || []) {
+        for (const ch of (COMMENTS_ENABLED ? entry.changes || [] : [])) {
           if (ch?.field === "comments" || ch?.field === "live_comments") {
             const vals = Array.isArray(ch.value) ? ch.value : [ch.value];
             igCommentValues.push(...vals.filter(Boolean));
@@ -677,7 +680,7 @@ Deno.serve(async (req) => {
       }
 
       // ---- feed: คอมเมนต์ใต้โพสต์/โฆษณา (ต้อง subscribe field "feed") ----
-      const changes = entry.changes || [];
+      const changes = COMMENTS_ENABLED ? (entry.changes || []) : [];
       if (changes.length) {
         // รับเฉพาะเพจที่มีผู้ใช้เลือกไว้ในหน้า Inbox เท่านั้น
         const selectedPageIds = await getSelectedCommentPageIds(admin);

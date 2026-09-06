@@ -9,6 +9,7 @@ import {
   TrendingUp,
   BarChart3,
   Inbox,
+  MessageSquare,
   UsersRound,
   ClipboardList,
   Trophy,
@@ -30,6 +31,8 @@ export const TABS = [
   { key: "analyze", label: "วิเคราะห์", icon: BarChart3 },
   { key: "ad_library", label: "คลังโฆษณาคู่แข่ง", icon: LibraryBig },
   { key: "inbox", label: "ตอบแชท", icon: Inbox },
+  // แยกจาก "ตอบแชท" เพราะงานคนละแบบ — คอมเมนต์ใต้โพสต์/โฆษณาไว้กวาดตอบทีละหลายอัน
+  { key: "feed", label: "ฟีด (คอมเมนต์)", icon: MessageSquare },
   { key: "customerdb", label: "จัดการลูกค้า", icon: UsersRound },
   // หน้าดูอย่างเดียว — คอลัมน์ตรงกับชีตสรุปรายชื่อลูกค้าที่ทีมใช้อยู่
   // แยกจาก "จัดการลูกค้า" เพราะหน้านั้นไว้แก้ไข/นำเข้า/เช็คไอดี ส่วนหน้านี้ไว้เปิดดูและส่งต่อ
@@ -49,6 +52,7 @@ export const ROUTE_PATH = {
   analyze: "/analyze",
   ad_library: "/ad-library",
   inbox: "/inbox",
+  feed: "/feed",
   customerdb: "/customerdb",
   customer_list: "/customer-list",
   leaderboard: "/leaderboard",

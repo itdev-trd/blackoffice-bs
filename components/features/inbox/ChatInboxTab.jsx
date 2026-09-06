@@ -541,7 +541,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     if (filters.listTab === "comments") return isCommentChat(row);
     if (filters.listTab === "line") return row.source === "line" && INBOX_LINE_OA_ENABLED;
     if (filters.listTab === "instagram") return row.source === "instagram" && INBOX_INSTAGRAM_ENABLED;
-    if (filters.listTab === "everything") return true;
+    if (filters.listTab === "everything") return INBOX_COMMENTS_ENABLED || !isCommentChat(row);
     // แท็บ Messenger = เฉพาะ Messenger จริงๆ ต้องกัน instagram ออกด้วย ไม่งั้น IG จะโผล่ผิดช่อง
     return !isCommentChat(row) && row.source !== "line" && row.source !== "instagram";
   }
@@ -655,7 +655,11 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
         if (listTab === "comments") query = query.or("source.eq.comment,id.like.fbc_%");
         else if (listTab === "line") query = query.eq("source", "line");
         else if (listTab === "instagram") query = query.eq("source", "instagram");
-        else if (listTab === "everything") { /* ทุกช่องทางจริง รวมความคิดเห็นด้วย */ }
+        // ปิดระบบความคิดเห็นแล้ว = แท็บ "ทั้งหมด" ต้องไม่มีคอมเมนต์เก่าโผล่ปนกับแชทด้วย
+        // (แท็บความคิดเห็นถูกซ่อนไปแล้ว ถ้ายังโผล่ตรงนี้จะกดเข้าไปเจอห้องที่ตอบไม่ได้)
+        else if (listTab === "everything") {
+          if (!INBOX_COMMENTS_ENABLED) query = query.not("id", "like", "fbc_%").not("id", "like", "igc_%").or("source.is.null,source.neq.comment");
+        }
         // แท็บ Messenger — เดิมกันออกแค่ comment กับ line ทำให้แชท Instagram หลุดมาปนอยู่ในนี้
         else query = query.not("id", "like", "fbc_%").or("source.is.null,and(source.neq.comment,source.neq.line,source.neq.instagram)");
         if (unreadOnly) query = query.eq("unread", true);
