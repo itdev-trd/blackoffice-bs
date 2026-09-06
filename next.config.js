@@ -29,6 +29,17 @@ const nextConfig = {
     return [{ source: "/tv-members", destination: "/customerdb", permanent: false }];
   },
 
+  // URL แบบไม่มีนามสกุลไฟล์สำหรับหน้านโยบาย — ตัวตรวจ URL ของ Meta (โดยเฉพาะช่อง
+  // "คำแนะนำการลบข้อมูล") ไม่รับ URL บางรูปแบบ การมีทั้ง /data-deletion และ
+  // /data-deletion.html ให้เลือกใส่ ช่วยให้ไม่ต้องมาเดาว่าติดที่รูปแบบ URL หรือไม่
+  async rewrites() {
+    return [
+      { source: "/privacy-policy", destination: "/privacy-policy.html" },
+      { source: "/terms", destination: "/terms.html" },
+      { source: "/data-deletion", destination: "/data-deletion.html" },
+    ];
+  },
+
   // Header ความปลอดภัย + กฎแคช
   // อยู่ที่นี่แทน vercel.json เพราะ next.config ใช้ได้ทั้งตอน next start ในเครื่อง
   // และตอน deploy จริง — ทำให้ทดสอบก่อนขึ้นได้ ไม่ต้องรอไปเห็นผลบน production

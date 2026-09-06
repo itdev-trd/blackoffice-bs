@@ -5,7 +5,7 @@ import { parse } from "@babel/parser";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const extensions = new Set([".js", ".jsx", ".ts"]);
-const ignored = new Set(["node_modules", "dist", ".next", ".git", "backup", "tooling"]);
+const ignored = new Set(["node_modules", "dist", ".next", ".next-check", ".git", "backup", "tooling"]);
 const files = [];
 
 async function walk(dir) {
