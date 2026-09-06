@@ -13,6 +13,7 @@ const ERROR_KEY = "instagram_recent_fallback_error";
 const COOLDOWN_MS = 10 * 60 * 1000;
 const WEBHOOK_HEALTH_MS = 15 * 60 * 1000;
 const MAX_TRANSCRIPT_TEXT = 10_000;
+const ONE_BY_ONE_MAX = 5;   // จำนวนห้องสูงสุดที่ไล่เก็บทีละใบเมื่อดึงเป็นชุดไม่ได้ (คุมจำนวนคำขอ Meta ต่อรอบ)
 const transcriptText = (value: unknown) => String(value || "").slice(0, MAX_TRANSCRIPT_TEXT);
 const corsHeaders = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type" };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "content-type": "application/json" } });
@@ -72,6 +73,7 @@ Deno.serve(async (req) => {
       const pageId = String(page.id);
       const igId = String(page.instagram_business_account.id);
       let result: any = {};
+      const oneByOne: any[] = [];
       for (const attempt of attempts) {
         const response = await fetch(`${GRAPH_BASE}/${pageId}/conversations?platform=instagram&fields=${encodeURIComponent(attempt.fields)}&limit=${attempt.limit}&access_token=${page.access_token}`);
         await recordMetaUsage(admin, response, "instagram_recent_fallback");
@@ -80,6 +82,35 @@ Deno.serve(async (req) => {
         // ยังเป็น Standard Access (Meta เสิร์ฟได้แค่ห้องของผู้ใช้ที่มี role ในแอป) → ลองชุดที่เบากว่า
         const code = Number(result?.error?.code);
         if (!result?.error || (code !== 1 && code !== -2)) break;
+      }
+      // ---- ทางถอย: เดินทีละห้อง ----
+      // แอปที่ยังไม่มี Advanced Access ของ instagram_manage_messages ขอ conversations ทีละหลายห้องไม่ได้เลย
+      // (limit=1 ผ่าน · limit>=2 ตอบ code 1 ทุกครั้ง — ทดสอบกับเพจนี้แล้ว) แต่ "ดึงรายละเอียดรายห้อง"
+      // ด้วย GET /{conversation_id} ยังทำได้ปกติ จึงไล่เก็บ id ทีละใบแล้วค่อยดึงเนื้อหาทีหลัง
+      // หมายเหตุ: Meta คืนเฉพาะห้องของผู้ใช้ที่มี role ในแอป ห้องของลูกค้าจริงยังไม่โผล่จนกว่าจะผ่าน App Review
+      if (result?.error) {
+        const walked: any[] = [];
+        let after = "";
+        for (let i = 0; i < ONE_BY_ONE_MAX; i++) {
+          const listUrl = `${GRAPH_BASE}/${pageId}/conversations?platform=instagram&fields=id,updated_time&limit=1`
+            + (after ? `&after=${encodeURIComponent(after)}` : "") + `&access_token=${page.access_token}`;
+          const listRes = await fetch(listUrl);
+          await recordMetaUsage(admin, listRes, "instagram_recent_one_by_one");
+          const listJson = await listRes.json().catch(() => ({}));
+          const row = listJson?.data?.[0];
+          if (listJson?.error || !row?.id) break;
+          if (walked.some((w) => w.id === row.id)) break;   // cursor ไม่ขยับ = หมดห้องที่มองเห็นแล้ว
+          walked.push(row);
+          after = listJson?.paging?.cursors?.after || "";
+          if (!after) break;
+        }
+        for (const item of walked) {
+          const detailRes = await fetch(`${GRAPH_BASE}/${item.id}?fields=${encodeURIComponent(fieldsLite)}&access_token=${page.access_token}`);
+          await recordMetaUsage(admin, detailRes, "instagram_recent_one_by_one");
+          const detailJson = await detailRes.json().catch(() => ({}));
+          if (!detailJson?.error && detailJson?.id) oneByOne.push(detailJson);
+        }
+        if (oneByOne.length) result = { data: oneByOne };   // เดินสำเร็จ = ไปต่อเส้นทางปกติ
       }
       if (result?.error) {
         const detail = result.error.error_user_msg || result.error.message || "Meta error";
