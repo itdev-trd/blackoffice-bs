@@ -27,6 +27,21 @@ import Spinner from "@/components/shared/Spinner";
 import { EmptyState, SearchInput, FilterPill } from "@/components/ui";
 import { EditableCell } from "@/components/features/settings/SettingsTab";
 import { CHAT_STAGES } from "@/lib/constants/settings";
+
+// ชื่อช่องภาษาคน ใช้บอกแอดมินว่า AI ตอบช่องไหนเพี้ยน
+const AI_FIELD_LABEL = { trade_id: "ไอดีเทรด", email: "อีเมล", tv_username: "User TradingView", phone: "เบอร์โทร" };
+
+// ปุ่มลองใหม่ของการสแกน AI — ใช้ซ้ำทุกกรณีที่ AI ไม่ให้คำตอบที่เอาไปใช้ได้
+// เหตุผลที่ต้องมี: เดิมพอ AI เพี้ยนหรือหาไม่เจอ หน้าจอขึ้นข้อความอธิบายลอย ๆ แล้วจบ
+// แอดมินไม่รู้ว่าต้องทำอะไรต่อ (กดปุ่มสแกนซ้ำก็ต้องเลื่อนขึ้นไปหา)
+function RetryAiButton({ onClick, label = "ลองใหม่อีกครั้ง" }) {
+  return (
+    <button type="button" onClick={onClick}
+      className="inline-flex items-center gap-1 rounded-full border border-brand-400/60 px-2.5 py-1 text-[10.5px] font-semibold text-brand-600 hover:bg-white">
+      <Sparkles size={11} /> {label}
+    </button>
+  );
+}
 import {
   customerDatabaseReportCache,
   getCustomerDatabaseViewCache,
@@ -302,12 +317,30 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
       {ai && !aiBusy && (
         <div className="rounded-lg border border-brand-400/40 bg-brand-50/40 p-2.5 space-y-1.5">
           {ai.error ? (
-            <div className="text-[11px] text-rose-600">{ai.error}</div>
+            /* อ่านไม่สำเร็จ (เน็ต/โมเดลล่ม) — ให้กดซ้ำได้ตรงนี้เลย ไม่ต้องเลื่อนขึ้นไปหาปุ่มสแกน */
+            <div className="space-y-1.5">
+              <div className="text-[11px] text-rose-600">AI อ่านไม่สำเร็จ — ลองใหม่อีกครั้ง</div>
+              <div className="text-[10px] text-slate-400 break-words">{ai.error}</div>
+              <RetryAiButton onClick={askAi} />
+            </div>
+          ) : ai.dropped?.length ? (
+            /* AI ตอบค่ามาแต่รูปแบบไม่ผ่านการตรวจ = ค่าเพี้ยน ห้ามเอาไปโชว์ให้แอดมินกดบันทึก
+               เดิมจะกลายเป็นกล่อง "ไม่พบข้อมูล" ทั้งที่จริง ๆ คือ AI ตอบมั่ว ต้องบอกให้ชัดและให้ลองใหม่ */
+            <div className="space-y-1.5">
+              <div className="text-[11px] text-amber-700">
+                AI ตอบค่าที่ใช้ไม่ได้ ({ai.dropped.map((k) => AI_FIELD_LABEL[k] || k).join(", ")}) — ลองใหม่อีกครั้ง
+              </div>
+              <div className="text-[10px] text-slate-500">ถ้าลองแล้วยังไม่ได้ แปลว่าข้อความในแชทยังไม่ชัดพอ ให้กรอกเองด้านล่างได้เลย</div>
+              <RetryAiButton onClick={askAi} />
+            </div>
           ) : !ai.suggestion || !Object.values(ai.suggestion).some(Boolean) ? (
             /* อ่านสำเร็จแต่ไม่เจออะไร — เดิมจะขึ้นกล่องเปล่าที่มีแค่หัวข้อ ดูเหมือนค้าง */
-            <div className="text-[11px] text-slate-600">
-              AI อ่านแล้วแต่ไม่พบไอดีเทรด อีเมล หรือ User TradingView ในบทสนทนานี้
-              {ai.note && <div className="mt-1 text-[10.5px] text-slate-500">{ai.note}</div>}
+            <div className="space-y-1.5">
+              <div className="text-[11px] text-slate-600">
+                AI อ่านแล้วแต่ไม่พบไอดีเทรด อีเมล หรือ User TradingView ในบทสนทนานี้
+                {ai.note && <div className="mt-1 text-[10.5px] text-slate-500">{ai.note}</div>}
+              </div>
+              <RetryAiButton onClick={askAi} label="ลองใหม่อีกครั้ง" />
             </div>
           ) : (
             <>
@@ -343,6 +376,7 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
                 <div className="text-[11px] text-slate-400">AI ไม่พบข้อมูลที่มั่นใจในบทสนทนานี้</div>
               )}
               {ai.note && <div className="text-[10px] text-slate-400">หมายเหตุ: {ai.note}</div>}
+              <div className="pt-0.5"><RetryAiButton onClick={askAi} label="ค่าไม่ถูก? ลองใหม่อีกครั้ง" /></div>
             </>
           )}
         </div>

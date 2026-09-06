@@ -801,7 +801,8 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     const ps = pageSelRef.current;
     const selectedPages = ps.mode === "single" ? (ps.single ? [ps.single] : []) : (ps.multi || []);
     const onePage = selectedPages.length === 1 ? selectedPages[0] : null;
-    return runGuardedSync("recent", onePage || "all", 25 * 1000, async () => {
+    // 5 วิ = จังหวะที่ฝั่ง server ยอมให้ยิงจริง (รอบที่ไม่มีอะไรใหม่เสียแค่คำขอเคาะถามใบเดียว)
+    return runGuardedSync("recent", onePage || "all", 5 * 1000, async () => {
       const { data } = await supabase.functions.invoke("sync-conversations", {
         body: { job: "recent", ...(onePage ? { page_id: onePage } : {}) },
       }).catch(() => ({ data: null }));
@@ -963,7 +964,10 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     // fallback: เผื่อ realtime หลุด — poll ทุก 10 วิ (จุดแดงข้อความใหม่ช้าสุด ~10 วิ)
     //   lean = ยิงแค่ query ลิสต์ตัวเดียว (จุดแดงในลิสต์สด) · เต็ม (นับ unread/badge) ทุก ~30 วิ
     let ftick = 0;
-    const fallback = setInterval(() => { ftick++; loadRef.current({ lean: ftick % 3 !== 0 }); openRef.current(); syncRecentChats(); }, 10000);
+    const fallback = setInterval(() => { ftick++; loadRef.current({ lean: ftick % 3 !== 0 }); openRef.current(); }, 10000);
+    // แยกจังหวะ "ถามหาแชทใหม่" ออกจากการรีเฟรชลิสต์ — ถามทุก 6 วิ (ฝั่ง server เคาะถามด้วยคำขอจิ๋ว
+    // แล้วดึงจริงเฉพาะตอนมีของใหม่) พอมีของใหม่ตัวมันเองสั่งรีเฟรชลิสต์ทันทีอยู่แล้ว
+    const recentTimer = setInterval(syncRecentChats, 6000);
     // Facebook ไม่มี webhook เมื่อแอดมินเพียง "เปิดอ่าน" ใน Page Inbox จึงใช้ fallback เบา ๆ
     // ฝั่ง server มี shared cooldown ต่อเพจ ป้องกันหลายเครื่องเรียก Meta ซ้ำกัน
     const readSync = () => {
@@ -999,7 +1003,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     const onVis = () => { if (document.visibilityState === "visible") onFocus(); };
     document.addEventListener("visibilitychange", onVis);
     window.addEventListener("focus", onFocus);
-    return () => { stopped = true; clearTimeout(unreadRefreshTimerRef.current); clearTimeout(transcriptRefreshTimerRef.current); clearTimeout(prefetchTimerRef.current); clearInterval(fallback); clearInterval(readTimer); clearInterval(commentReplyTimer); clearInterval(instagramFallbackTimer); supabase.removeChannel(channel); window.removeEventListener("focus", onFocus); document.removeEventListener("visibilitychange", onVis); };
+    return () => { stopped = true; clearTimeout(unreadRefreshTimerRef.current); clearTimeout(transcriptRefreshTimerRef.current); clearTimeout(prefetchTimerRef.current); clearInterval(fallback); clearInterval(recentTimer); clearInterval(readTimer); clearInterval(commentReplyTimer); clearInterval(instagramFallbackTimer); supabase.removeChannel(channel); window.removeEventListener("focus", onFocus); document.removeEventListener("visibilitychange", onVis); };
   }, [active, alertMin]);
   useEffect(() => { setList(null); loadList(); }, [listTab, unreadOnly]);   // เปลี่ยนแท็บ/ตัวกรองยังไม่อ่าน = แสดงสถานะโหลด ไม่สรุปผิดว่าไม่มีแชท
   useEffect(() => { setSelected(null); setList(null); loadList(); }, [showBlocked, showDropped]);

@@ -118,11 +118,21 @@ Deno.serve(async (req) => {
       phone: phone && /^[0-9+\-\s()]{8,20}$/.test(phone) ? phone : null,
     };
 
+    // ช่องที่ AI ตอบมาแต่รูปแบบไม่ผ่านการตรวจ = "เพี้ยน" ต้องบอกหน้าเว็บให้ชวนกดลองใหม่
+    // ไม่ใช่เงียบไปเฉย ๆ จนแอดมินคิดว่าไม่มีข้อมูลในแชท
+    const dropped = [
+      ...(tid && !suggestion.trade_id ? ["trade_id"] : []),
+      ...(email && !suggestion.email ? ["email"] : []),
+      ...(uname && !suggestion.tv_username ? ["tv_username"] : []),
+      ...(phone && !suggestion.phone ? ["phone"] : []),
+    ];
+
     return json({
       ok: true,
       id: row.id,
       model,
       suggestion,
+      dropped,
       confidence: out.confidence ?? null,
       evidence: out.evidence ?? null,
       note: out.note ?? null,

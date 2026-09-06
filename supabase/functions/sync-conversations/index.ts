@@ -24,7 +24,8 @@ const MAX_LOOPS_PER_CALL = 2; // full mode: ต่อการเรียก 1 
 const RATE_LIMIT_CODES = new Set([4, 17, 32, 613, 80004]); // Meta rate limit (app/user/page/custom)
 const READ_STATUS_STATE_KEY = "messenger_read_status_sync";
 const RECENT_STATE_KEY = "messenger_recent_sync";
-const RECENT_COOLDOWN_MS = 25 * 1000;   // cooldown ร่วมต่อเพจ — หลายเครื่อง/หลายแท็บเปิดพร้อมกันก็ยิง Meta รอบเดียว
+const RECENT_COOLDOWN_MS = 5 * 1000;    // cooldown ร่วมต่อเพจ — หลายเครื่อง/หลายแท็บเปิดพร้อมกันก็ยิง Meta รอบเดียว
+                                        // 5 วิ เพราะรอบที่ "ไม่มีอะไรใหม่" เสียแค่คำขอเคาะถามใบเดียว (ดูยามด้านล่าง)
 const RECENT_LIMIT = 25;                // Meta เรียง conversations ตาม updated_time ล่าสุดก่อน
 const DEFAULT_READ_STATUS_COOLDOWN_MS = 5 * 60 * 1000;
 const MAX_TRANSCRIPT_TEXT = 10_000;
@@ -509,7 +510,21 @@ Deno.serve(async (req) => {
       let recentUpserted = 0;
       let recentChanged = 0;
       const recentErrors: { page: string; error: string }[] = [];
+      let probedOnly = 0;
       for (const page of due) {
+        // ---- ยาม: เคาะถามก่อนว่ามีอะไรใหม่ไหม (1 คำขอจิ๋ว) ----
+        // Meta เรียง conversations ตาม updated_time ล่าสุดก่อน ขอแค่ห้องเดียวเอาเฉพาะ id+updated_time
+        // ถ้าไม่ใหม่กว่าที่เก็บไว้ = ไม่มีใครทักเข้ามา จบรอบตรงนี้ ไม่ต้องดึง 25 ห้องพร้อมข้อความ
+        // ทำให้เรียกถี่ทุก 5-7 วินาทีได้โดยไม่เปลืองโควตา (ตอนเงียบเสียแค่คำขอเล็ก ๆ ใบเดียว)
+        const probe = await fetchJson(`${base}/${page.id}/conversations?platform=messenger&fields=id,updated_time&limit=1&access_token=${page.access_token}`, 1);
+        if (!probe?.error) {
+          const newestAt = timeMs(probe?.data?.[0]?.updated_time);
+          const { data: seen } = await admin.from("chat_customers")
+            .select("last_message_at").eq("page_id", String(page.id)).is("source", null)
+            .order("last_message_at", { ascending: false }).limit(1).maybeSingle();
+          const seenAt = timeMs(seen?.last_message_at);
+          if (newestAt && seenAt && newestAt <= seenAt) { probedOnly++; continue; }
+        }
         const url = `${base}/${page.id}/conversations?platform=messenger&fields=${encodeURIComponent(fieldsQ)}&limit=${RECENT_LIMIT}&access_token=${page.access_token}`;
         const data = await fetchJson(url, 2);
         if (data?.error) { recentErrors.push({ page: page.name, error: data.error.message || String(data.error) }); continue; }
@@ -528,7 +543,7 @@ Deno.serve(async (req) => {
         recentUpserted += rb.upserted;
         recentChanged += rb.worked;
       }
-      return jsonResp({ ok: recentErrors.length === 0, job, pages: due.length, upserted: recentUpserted, changed: recentChanged, errors: recentErrors });
+      return jsonResp({ ok: recentErrors.length === 0, job, pages: due.length, probed_only: probedOnly, upserted: recentUpserted, changed: recentChanged, errors: recentErrors });
     }
 
     // ---- โหมดปกติ: ทุกเพจที่เปิด ดึงจนได้ "งานที่ต้องทำ" ครบ per_page ----
