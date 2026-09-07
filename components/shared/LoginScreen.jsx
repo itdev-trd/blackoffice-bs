@@ -89,6 +89,14 @@ export default function LoginScreen() {
           {loading ? <Loader2 className="animate-spin" size={16} /> : null}
           เข้าสู่ระบบ
         </button>
+        {/* บรรทัดภาษาอังกฤษสำหรับ reviewer ของ Meta — หน้าจอในระบบเป็นไทยทั้งหมด
+            ถ้าไม่มีทางเข้าที่อ่านออก reviewer จะทำตามขั้นตอนไม่ได้ ซึ่งเป็นเหตุตีกลับที่พบบ่อยสุด */}
+        <p className="pt-1 text-center text-[11.5px] leading-relaxed text-slate-400">
+          Internal tool of Traderider Media Group · sign in with the account provided.
+          <br />
+          Meta App Review testers:{" "}
+          <a href="/review-guide" className="underline hover:text-slate-600">English testing guide</a>
+        </p>
       </form>
     </div>
   );

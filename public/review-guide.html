@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Besight Backend — App Review testing guide</title>
+  <!--
+    หน้านี้มีไว้ให้ reviewer ของ Meta อ่านตอนตรวจ App Review — จึงเป็นภาษาอังกฤษทั้งหน้า
+    และเปิดได้โดยไม่ต้องล็อกอิน (ยกเว้นใน middleware เหมือนหน้านโยบาย)
+
+    เหตุผลที่ต้องมี: หน้าจอแอปเป็นภาษาไทยทั้งหมด reviewer อ่านไม่ออกว่าต้องกดอะไร
+    ซึ่งเป็นสาเหตุตีกลับที่พบบ่อยที่สุด ("reviewer could not complete the steps")
+    หน้านี้จับคู่ปุ่มไทยกับคำอธิบายอังกฤษไว้ทุกขั้น
+  -->
+  <style>
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f6f7fb; color: #0f172a;
+           font: 15px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    .wrap { max-width: 860px; margin: 0 auto; padding: 40px 20px 72px; }
+    h1 { font-size: 26px; margin: 0 0 6px; }
+    h2 { font-size: 18px; margin: 34px 0 10px; }
+    .sub { color: #64748b; margin: 0 0 28px; }
+    .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 18px 20px; margin: 14px 0; }
+    .note { background: #fffbeb; border-color: #fde68a; }
+    .th { display: inline-block; background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 6px;
+          padding: 1px 7px; font-weight: 600; white-space: nowrap; }
+    ol, ul { padding-left: 22px; margin: 8px 0; }
+    li { margin: 6px 0; }
+    table { border-collapse: collapse; width: 100%; font-size: 14px; }
+    th, td { text-align: left; border-bottom: 1px solid #e2e8f0; padding: 8px 6px; vertical-align: top; }
+    th { color: #475569; font-weight: 600; }
+    code { background: #f1f5f9; border-radius: 4px; padding: 1px 5px; font-size: 13px; }
+    .foot { color: #94a3b8; font-size: 13px; margin-top: 30px; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Besight Backend — testing guide for App Review</h1>
+  <p class="sub">Internal customer-messaging tool of Traderider Media Group. This page explains how to test each
+    requested permission. The app interface is in Thai, so every button is shown here with its English meaning.</p>
+
+  <div class="card">
+    <h2 style="margin-top:0">What this app is</h2>
+    <p>We run Facebook Pages and Instagram accounts for our own brand (BeSight). Customers click our
+      Click-to-Messenger ads and message the Page. This app is the internal console our own staff use to read
+      those conversations and answer them. It is not distributed to third parties and has no public sign-up:
+      accounts are created by us for our own employees.</p>
+  </div>
+
+  <h2>Test account</h2>
+  <div class="card">
+    <p>Sign in at <a href="https://blackoffice-bs.vercel.app">https://blackoffice-bs.vercel.app</a> with the
+      email and password provided in the App Review submission form. The account is limited to the inbox of a
+      single Page so that the reviewer sees exactly the flow being reviewed.</p>
+  </div>
+
+  <h2>Permission: pages_messaging</h2>
+  <div class="card">
+    <p><b>Why we need it</b> — to read the messages customers send to our Page and to reply to them from this
+      console, inside the 24-hour standard messaging window (we send with
+      <code>messaging_type: RESPONSE</code>, and <code>HUMAN_AGENT</code> for follow-ups our staff write by hand).
+      We also subscribe to the <code>messages</code>, <code>message_echoes</code> and <code>message_reads</code>
+      webhooks so the read state in this console matches the Page inbox and two staff members do not answer the
+      same customer twice.</p>
+    <p><b>Steps to reproduce</b></p>
+    <ol>
+      <li>Sign in with the test account.</li>
+      <li>In the left menu, click <span class="th">ตอบแชท</span> (Inbox).</li>
+      <li>The list on the left shows conversations. Tabs above it are
+        <span class="th">ทั้งหมด</span> (All), <span class="th">Messenger</span>,
+        <span class="th">Instagram</span>, <span class="th">LINE OA</span>.
+        Click the <b>Messenger</b> tab, then click any conversation.</li>
+      <li>The conversation opens in the middle. The customer's messages are on the left, ours on the right, each
+        one labelled with the staff member who sent it.</li>
+      <li>Type a message in the box at the bottom — placeholder
+        <span class="th">พิมพ์คำตอบเป็นไทย...</span> (type your reply) — and press
+        <span class="th">ส่ง</span> (Send).</li>
+      <li>The message is delivered to the customer on Messenger and appears in the thread with a timestamp.</li>
+    </ol>
+  </div>
+
+  <h2>Permission: instagram_manage_messages</h2>
+  <div class="card">
+    <p><b>Why we need it</b> — the same console also answers Instagram direct messages for the Instagram
+      professional account connected to the same Page. Customers reach us there from our Instagram ads.</p>
+    <p><b>Steps to reproduce</b> — same as above, but click the <span class="th">Instagram</span> tab in step 3.
+      Open a thread, type a reply, press <span class="th">ส่ง</span> (Send).</p>
+  </div>
+
+  <h2>Permission: instagram_manage_comments</h2>
+  <div class="card">
+    <p><b>Why we need it</b> — customers ask questions in the comments under our ads. Staff answer them from the
+      <span class="th">ฟีด (คอมเมนต์)</span> (Feed / comments) page, either as a public reply under the comment or
+      as a one-time private reply, which is how we move a public question into a private conversation.</p>
+    <p><b>Steps to reproduce</b></p>
+    <ol>
+      <li>In the left menu, click <span class="th">ฟีด (คอมเมนต์)</span> (Feed / comments).</li>
+      <li>Each card is one comment. Type in the box inside the card and press
+        <span class="th">ส่ง</span> (Send) to publish the reply under that comment.</li>
+      <li>Ticking <span class="th">ส่งเป็นข้อความส่วนตัว (DM) แทน</span> sends it as a private reply instead.</li>
+    </ol>
+  </div>
+
+  <h2>Other things you will see</h2>
+  <div class="card">
+    <table>
+      <tr><th>Thai label</th><th>English</th><th>What it does</th></tr>
+      <tr><td><span class="th">ภาพรวม</span></td><td>Overview</td><td>Counters for customers, unanswered chats and ad spend.</td></tr>
+      <tr><td><span class="th">ตอบแชท</span></td><td>Inbox</td><td>Read and answer Messenger / Instagram / LINE conversations.</td></tr>
+      <tr><td><span class="th">ฟีด (คอมเมนต์)</span></td><td>Feed</td><td>Answer comments under our posts and ads.</td></tr>
+      <tr><td><span class="th">แอดไหนได้ลูกค้า</span></td><td>Which ad brought customers</td><td>Report joining conversations to the ad they came from.</td></tr>
+      <tr><td><span class="th">จัดการลูกค้า</span></td><td>Customer management</td><td>Staff record a customer's trading account, email and country.</td></tr>
+      <tr><td><span class="th">ส่ง</span></td><td>Send</td><td>Sends the message.</td></tr>
+      <tr><td><span class="th">อ่านแล้วทั้งหมด</span></td><td>Mark all read</td><td>Clears the unread markers.</td></tr>
+    </table>
+  </div>
+
+  <div class="card note">
+    <h2 style="margin-top:0">One limitation the reviewer should know</h2>
+    <p>While the app only has <b>Standard Access</b> to <code>pages_messaging</code>, the Send API accepts our
+      replies <b>only</b> for recipients who have a role on the app. If you open a conversation from a member of
+      the public, the send will fail with the Meta error “This message is sent outside of allowed window” /
+      “app does not have permission”. That restriction is precisely why we are requesting Advanced Access.</p>
+    <p>To see a successful send during review, use the conversation belonging to an account that has a role on the
+      app — the screencast attached to this submission was recorded that way, and the reply is shown arriving in
+      Messenger on a phone.</p>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0">Data handling</h2>
+    <ul>
+      <li>Privacy policy: <a href="https://blackoffice-bs.vercel.app/privacy-policy">/privacy-policy</a></li>
+      <li>Data deletion instructions: <a href="https://blackoffice-bs.vercel.app/data-deletion">/data-deletion</a></li>
+      <li>Terms of use: <a href="https://blackoffice-bs.vercel.app/terms">/terms</a></li>
+      <li>Message content is stored only to show conversation history to our own staff. It is never sold, shared
+        with third parties, or used for advertising targeting.</li>
+    </ul>
+  </div>
+
+  <p class="foot">Traderider Media Group · contact: info@traderidermedia.com</p>
+</div>
+</body>
+</html>

@@ -37,6 +37,8 @@ const nextConfig = {
       { source: "/privacy-policy", destination: "/privacy-policy.html" },
       { source: "/terms", destination: "/terms.html" },
       { source: "/data-deletion", destination: "/data-deletion.html" },
+      // หน้าคู่มือให้ reviewer ของ Meta (ภาษาอังกฤษ) — ส่ง URL นี้ไปในฟอร์ม App Review
+      { source: "/review-guide", destination: "/review-guide.html" },
     ];
   },
 
