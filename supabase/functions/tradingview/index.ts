@@ -16,7 +16,7 @@
 //   sync    (service/cron)                → ดึงรายชื่อสิทธิ์ต่อสคริปต์วันละครั้ง เก็บเป็น snapshot แยกจากประวัติสมาชิกใน tv_access
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { authorizeRequest } from "../_shared/permissions.ts";
+import { hasFullData, authorizeRequest } from "../_shared/permissions.ts";
 import { readJsonBody } from "../_shared/security.ts";
 import { tvValidate, tvListUsers, tvCheckAccess, tvGrant, tvRevoke, tvPing } from "../_shared/tradingview-direct.ts";
 
@@ -326,7 +326,8 @@ Deno.serve(async (req) => {
     // ---- ต่อจากนี้ต้องมีสิทธิ์แท็บ tv_members ----
     const auth = await authorizeRequest(req, { tab: "tv_members" });
     if (!auth.ok) return json({ ok: false, error: auth.error }, auth.status);
-    const isAdmin = auth.permission?.role === "admin";
+    // เดิมเช็ค role === "admin" ตรง ๆ — บทบาท owner/ads ต้องได้สิทธิ์เดียวกัน
+    const isAdmin = !!auth.permission && hasFullData(auth.permission);
 
     if (action === "set_webhook") {
       if (!isAdmin) return json({ ok: false, error: "เฉพาะแอดมิน" }, 403);

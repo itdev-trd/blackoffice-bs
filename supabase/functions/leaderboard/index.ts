@@ -3,7 +3,7 @@
 // เห็นได้ทุกคนที่ล็อกอิน (ไม่จำกัด admin) — เพจที่นับถูกล็อกโดยแอดมินในตั้งค่า (settings.leaderboard.pages)
 // อ่านอย่างเดียวจาก reply_stats — ไม่แตะ logic/นับใหม่
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { authorizeRequest } from "../_shared/permissions.ts";
+import { hasFullData, authorizeRequest } from "../_shared/permissions.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -55,12 +55,12 @@ Deno.serve(async (req) => {
     if (allowedEmails.length && !allowedEmails.includes(auth.permission!.email.toLowerCase())) {
       return json({ ok: false, error: "ไม่มีสิทธิ์ดูกระดานแต้ม" }, 403);
     }
-    const permittedPages = auth.permission!.role === "admin"
+    const permittedPages = hasFullData(auth.permission!)
       ? lbPages
       : (lbPages.length
         ? lbPages.filter((pageId) => auth.permission!.allowedPages.includes(pageId))
         : auth.permission!.allowedPages);
-    if (auth.permission!.role !== "admin" && !permittedPages.length) {
+    if (!hasFullData(auth.permission!) && !permittedPages.length) {
       return json({ ok: true, board: [], total: 0, rows: 0 });
     }
 

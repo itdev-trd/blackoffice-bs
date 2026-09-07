@@ -90,6 +90,7 @@ function LiveSummary({ onNavigate }) {
 function RunningAdsToday({ onNavigate }) {
   const [rows, setRows] = useState(null);
   const [noAccount, setNoAccount] = useState(false);
+  const [acctId, setAcctId] = useState("");
 
   useEffect(() => {
     let dead = false;
@@ -99,6 +100,7 @@ function RunningAdsToday({ onNavigate }) {
       try { const j = JSON.parse(stored); if (j) acct = String(j); } catch { /* สตริงดิบ ใช้ได้เลย */ }
       acct = String(acct || "").replace(/^"|"$/g, "").trim();
       if (!acct) { if (!dead) { setNoAccount(true); setRows([]); } return; }
+      if (!dead) setAcctId(acct);
       const { data } = await supabase.functions.invoke("list-campaigns", {
         body: { ad_account_id: acct, date_preset: "today" },
       });
@@ -134,8 +136,10 @@ function RunningAdsToday({ onNavigate }) {
         <EmptyState icon={BarChart3} title="ยังไม่ได้เลือกบัญชีโฆษณา"
           hint="เปิดหน้าแคมเปญแล้วเลือกบัญชีโฆษณาหนึ่งครั้ง ระบบจะจำไว้ให้เอง" />
       ) : rows.length === 0 ? (
-        <EmptyState icon={PauseCircle} title="ตอนนี้ไม่มีโฆษณาที่กำลังยิง"
-          hint="ทุกแคมเปญในบัญชีนี้หยุดอยู่ (หรือ Meta ยังไม่อัปเดตสถานะ)" />
+        /* ต้องบอกว่าอ่านจากบัญชีไหน ไม่งั้นเข้าใจผิดว่า "ไม่มีแอดยิงอยู่เลยทั้งระบบ"
+           ทั้งที่จริง ๆ แอดที่ทำให้ลูกค้าทักเข้ามาอยู่ในบัญชีโฆษณาที่ token ยังเข้าไม่ถึง */
+        <EmptyState icon={PauseCircle} title="ไม่มีโฆษณาที่กำลังยิงในบัญชีนี้"
+          hint={`อ่านจากบัญชี ${acctId || "-"} — ทุกแคมเปญในบัญชีนี้หยุดอยู่ · ถ้าแอดที่ยิงจริงอยู่บัญชีอื่น ต้องมอบสิทธิ์บัญชีนั้นให้ system user ก่อน แล้วเลือกบัญชีในหน้าแคมเปญ`} />
       ) : (
         /* โชว์ทุกตัวที่ยิงอยู่ ไม่ตัดเหลือ 8 ตัวแบบเดิม — ถ้ามีเยอะให้เลื่อนดูในกล่อง */
         <ul className="max-h-[320px] divide-y divide-slate-100 overflow-y-auto">

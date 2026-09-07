@@ -62,7 +62,7 @@ as $$
   select case public.app_role()
     when 'owner' then null
     when 'ads' then null
-    when 'admin' then '["overview","inbox","ad_chats","feed","customerdb","customer_list","leaderboard","settings"]'::jsonb
+    when 'admin' then '["overview","inbox","ad_chats","feed","customerdb","customer_list","leaderboard","tv_members","settings"]'::jsonb
     else coalesce((
       select p.allowed_tabs from public.user_permissions p
       where lower(p.email) = lower(coalesce(auth.jwt() ->> 'email', '')) limit 1

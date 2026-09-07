@@ -1,4 +1,4 @@
-import { canAccessAccount, type UserPermission } from "./permissions.ts";
+import { canAccessAccount, type UserPermission, hasFullData } from "./permissions.ts";
 
 export async function canAccessMetaNodes(
   permission: UserPermission,
@@ -6,7 +6,8 @@ export async function canAccessMetaNodes(
   nodeIds: unknown[],
   graphVersion = "v22.0",
 ): Promise<boolean> {
-  if (permission.role === "admin") return true;
+  // เดิมเช็ค role === "admin" ตรง ๆ พอเพิ่มบทบาท owner/ads เจ้าของระบบจะเข้าบัญชีโฆษณาไม่ได้เลย
+  if (hasFullData(permission)) return true;
   if (!permission.allowed.length) return false;
 
   const ids = [...new Set(nodeIds.map((id) => String(id || "").trim()).filter(Boolean))].slice(0, 50);

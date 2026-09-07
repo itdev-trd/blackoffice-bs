@@ -11,7 +11,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getMetaToken } from "../_shared/meta.ts";
 import { getMetaPages } from "../_shared/meta-pages.ts";
 import { contentHashOf } from "../_shared/chat-extract.ts";
-import { authorizeRequest } from "../_shared/permissions.ts";
+import { hasFullData, authorizeRequest } from "../_shared/permissions.ts";
 import { getMetaBackgroundGuard, recordMetaUsage } from "../_shared/meta-rate.ts";
 import { readJsonBody } from "../_shared/security.ts";
 
@@ -194,7 +194,7 @@ Deno.serve(async (req) => {
       const pagesData = await getMetaPages(base, token, { mustIncludePageId: onlyPage || undefined });
       let pages = (pagesData?.data ?? []).filter((p: any) => p.access_token);
       pages = onlyPage ? pages.filter((p: any) => p.id === onlyPage) : pages.filter((p: any) => enabledMap[p.id] !== false);
-      if (!auth.isService && auth.permission?.role !== "admin") {
+      if (!auth.isService && !(auth.permission && hasFullData(auth.permission))) {
         pages = pages.filter((p: any) =>
           auth.permission?.allowedPages.includes(String(p.id)),
         );
@@ -531,7 +531,7 @@ Deno.serve(async (req) => {
       const guard = await getMetaBackgroundGuard(admin);
       if (guard.blocked) return jsonResp({ ok: true, job, upserted: 0, changed: 0, skipped: "rate_guard" });
       let recentPages = pages;
-      if (!auth.isService && auth.permission?.role !== "admin") {
+      if (!auth.isService && !(auth.permission && hasFullData(auth.permission))) {
         recentPages = recentPages.filter((p: any) => auth.permission?.allowedPages.includes(String(p.id)));
       }
       if (!recentPages.length) return jsonResp({ ok: true, job, upserted: 0, changed: 0, skipped: "no_pages" });

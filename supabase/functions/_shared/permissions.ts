@@ -17,7 +17,8 @@ export interface UserPermission {
 // สำเนากติกาบทบาทฝั่ง server — ต้องตรงกับ lib/constants/roles.js และ public.app_role_tabs()
 // (มีสามที่เพราะบังคับสิทธิ์กันสามชั้น: หน้าเว็บซ่อนเมนู · edge function ปฏิเสธคำขอ · RLS กันที่ข้อมูล)
 const ROLES: Role[] = ["owner", "ads", "admin", "analyze_only"];
-const ADMIN_TABS = ["overview", "inbox", "ad_chats", "feed", "customerdb", "customer_list", "leaderboard", "settings"];
+// tv_members = คีย์สิทธิ์ของฟีเจอร์ TradingView (ไม่ใช่เมนูในแถบข้าง) แอดมินต้องมีเพื่อเพิ่มอินดี้ให้ลูกค้า
+const ADMIN_TABS = ["overview", "inbox", "ad_chats", "feed", "customerdb", "customer_list", "leaderboard", "tv_members", "settings"];
 const OPERATOR_SETTINGS = ["savedreplies"];
 
 // เมนูที่บทบาทนั้นเข้าได้ — null = ทุกเมนู
