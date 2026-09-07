@@ -66,15 +66,15 @@ export default function CustomerListTab() {
   // แบ่งแสดงทีละ 50 · ตัวนับสรุปกับปุ่ม CSV ยังคิดจากผลลัพธ์ทั้งหมด ไม่ใช่แค่หน้าที่เห็น
   const PER_PAGE = 50;
   const [page, setPage] = useState(1);
-  // ช่วงวันแบ่งเป็นสองชั้นตามที่ใช้งานจริง:
-  //   loadFrom/loadTo = ดึงจากฐานข้อมูลแค่ช่วงนี้ (ยิงใหม่ทุกครั้งที่เปลี่ยน)
-  //   viewFrom/viewTo = ย่อดูเฉพาะบางช่วงจากที่โหลดมาแล้ว ไม่ต้องรอโหลดใหม่
-  // ทั้งคู่อิง first_customer_message_at = "วันที่ทักเข้ามาครั้งแรก" ไม่ใช่แชทล่าสุด
-  // เพราะโจทย์คือแยกลูกค้าเก่า/ใหม่ ถ้าใช้แชทล่าสุด ลูกค้าเก่าที่เพิ่งทักกลับจะกลายเป็นลูกค้าใหม่
+  // ช่วงวันที่มีชั้นเดียว — อิง first_customer_message_at = "วันที่ทักเข้ามาครั้งแรก" ไม่ใช่แชทล่าสุด
+  // (โจทย์คือแยกลูกค้าเก่า/ใหม่ ถ้าใช้แชทล่าสุด ลูกค้าเก่าที่เพิ่งทักกลับจะกลายเป็นลูกค้าใหม่)
+  //
+  // เดิมมีสองชั้น: ช่วงที่ "ดึงจากฐานข้อมูล" กับช่วงที่ "ย่อดูจากที่โหลดมาแล้ว" = ช่องวันที่ 4 ช่อง
+  // ซึ่งต่างกันแค่เร็ว/ช้า ไม่ต่างกันที่ผลลัพธ์ คนใช้จึงไม่รู้ว่าควรกรอกช่องคู่ไหน
+  // เพจใหญ่สุดมีลูกค้า ~1,200 คน = โหลดใหม่ 2 คำขอ เร็วพอที่จะไม่ต้องมีชั้นที่สอง
+  const [rangeKey, setRangeKey] = useState("all");     // all | 7 | 30 | 90 | custom
   const [loadFrom, setLoadFrom] = useState("");
   const [loadTo, setLoadTo] = useState("");
-  const [viewFrom, setViewFrom] = useState("");
-  const [viewTo, setViewTo] = useState("");
 
   // page_lead_config เก็บแต่เพจ Facebook — บัญชี LINE OA ต้องดึงจากแชทจริง ไม่งั้นเลือกไม่ได้
   useEffect(() => {
@@ -127,25 +127,18 @@ export default function CustomerListTab() {
 
   useEffect(() => { if (pageFilter) load(); }, [pageFilter, load]);
   // เปลี่ยนตัวกรอง/คำค้นแล้วต้องกลับหน้า 1 ไม่งั้นค้างอยู่หน้า 12 ที่ไม่มีข้อมูลแล้ว
-  useEffect(() => { setPage(1); }, [pageFilter, statusFilter, q, viewFrom, viewTo]);
+  useEffect(() => { setPage(1); }, [pageFilter, statusFilter, q, loadFrom, loadTo]);
 
+  // ช่วงวันกรองที่ฐานข้อมูลไปแล้ว (ในฟังก์ชัน load) ตรงนี้เหลือแค่สถานะกับคำค้น
   const view = useMemo(() => {
     const term = q.trim().toLowerCase();
-    const vFrom = viewFrom ? new Date(`${viewFrom}T00:00:00+07:00`).getTime() : null;
-    const vTo = viewTo ? new Date(`${viewTo}T23:59:59+07:00`).getTime() : null;
     return (rows || []).filter((r) => {
       const status = SHEET_STATUS[r.stage_manual || r.stage] || "สนใจ";
       if (statusFilter !== "all" && status !== statusFilter) return false;
-      if (vFrom || vTo) {
-        const t = r.first_customer_message_at ? new Date(r.first_customer_message_at).getTime() : null;
-        if (t === null) return false;              // ไม่รู้วันทักครั้งแรก = ตอบไม่ได้ว่าอยู่ในช่วงไหม
-        if (vFrom && t < vFrom) return false;
-        if (vTo && t > vTo) return false;
-      }
       if (!term) return true;
       return [r.customer_name, r.trade_id, r.email, r.username].some((v) => String(v || "").toLowerCase().includes(term));
     });
-  }, [rows, q, statusFilter, viewFrom, viewTo]);
+  }, [rows, q, statusFilter]);
 
   const counts = useMemo(() => {
     const c = { total: (rows || []).length, opened: 0, withTrade: 0 };
@@ -244,40 +237,30 @@ export default function CustomerListTab() {
           </button>
         </div>
 
-        <div className="grid gap-3 rounded-xl border border-slate-200 p-3 sm:grid-cols-2">
-          <div>
-            <div className="text-[11px] font-medium text-slate-600">1 · ช่วงที่ดึงจากฐานข้อมูล</div>
-            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+        {/* ช่วงวันที่: ปุ่มลัดเป็นตัวหลัก ช่องวันที่โผล่มาเฉพาะเมื่อกด "กำหนดเอง"
+            เดิมเปิดมาเจอช่องวันที่ว่าง 4 ช่องพร้อมกัน ซึ่งงานประจำแทบไม่ได้ใช้เลย */}
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 p-3">
+          <span className="text-[11px] font-medium text-slate-600">วันที่ลูกค้าทักเข้ามาครั้งแรก:</span>
+          {[["all", "ทั้งหมด", null], ["7", "7 วัน", 7], ["30", "30 วัน", 30], ["90", "90 วัน", 90], ["custom", "กำหนดเอง", 0]].map(([key, lbl, days]) => (
+            <button key={key}
+              onClick={() => {
+                setRangeKey(key);
+                if (key === "all") { setLoadFrom(""); setLoadTo(""); }
+                else if (key !== "custom") { setLoadFrom(thaiToday(-days)); setLoadTo(thaiToday(0)); }
+              }}
+              className={`rounded-full px-3 py-1 text-[12px] font-medium ${
+                rangeKey === key ? "bg-brand-600 text-white" : "border border-slate-300 text-slate-600 hover:border-slate-400"}`}>
+              {lbl}
+            </button>
+          ))}
+          {rangeKey === "custom" && (
+            <span className="flex flex-wrap items-center gap-1.5">
               <input type="date" value={loadFrom} onChange={(e) => setLoadFrom(e.target.value)} className="rounded-lg border border-slate-300 px-2 py-1.5 text-[13px]" />
               <span className="text-slate-400">–</span>
               <input type="date" value={loadTo} onChange={(e) => setLoadTo(e.target.value)} className="rounded-lg border border-slate-300 px-2 py-1.5 text-[13px]" />
-              {(loadFrom || loadTo) && (
-                <button onClick={() => { setLoadFrom(""); setLoadTo(""); }} className="text-[12px] text-slate-500 underline">ล้าง</button>
-              )}
-            </div>
-            <div className="mt-1.5 flex flex-wrap gap-1.5">
-              {[["7 วัน", 7], ["30 วัน", 30], ["90 วัน", 90]].map(([lbl, d]) => (
-                <button key={lbl} onClick={() => { setLoadFrom(thaiToday(-d)); setLoadTo(thaiToday(0)); }}
-                  className="rounded-full border border-slate-300 px-2.5 py-0.5 text-[11px] hover:border-slate-400">{lbl}</button>
-              ))}
-            </div>
-            <p className="mt-1 text-[11px] text-slate-500">เปลี่ยนแล้วโหลดใหม่จากฐานข้อมูล</p>
-          </div>
-          <div>
-            <div className="text-[11px] font-medium text-slate-600">2 · ย่อดูเฉพาะช่วง (ไม่โหลดใหม่)</div>
-            <div className="mt-1 flex flex-wrap items-center gap-1.5">
-              <input type="date" value={viewFrom} onChange={(e) => setViewFrom(e.target.value)} className="rounded-lg border border-slate-300 px-2 py-1.5 text-[13px]" />
-              <span className="text-slate-400">–</span>
-              <input type="date" value={viewTo} onChange={(e) => setViewTo(e.target.value)} className="rounded-lg border border-slate-300 px-2 py-1.5 text-[13px]" />
-              {(viewFrom || viewTo) && (
-                <button onClick={() => { setViewFrom(""); setViewTo(""); }} className="text-[12px] text-slate-500 underline">ล้าง</button>
-              )}
-            </div>
-            <p className="mt-1 text-[11px] text-slate-500">กรองจากข้อมูลที่โหลดมาแล้ว เห็นผลทันที</p>
-          </div>
-          <p className="text-[11px] text-slate-500 sm:col-span-2">
-            ทั้งสองช่องนับจาก <b className="text-slate-700">วันที่ลูกค้าทักเข้ามาครั้งแรก</b> ไม่ใช่วันที่คุยล่าสุด — ใช้แยกลูกค้าเก่ากับลูกค้าใหม่
-          </p>
+            </span>
+          )}
+          <span className="text-[11px] text-slate-500">นับจากวันที่ทักครั้งแรก ไม่ใช่วันที่คุยล่าสุด — ใช้แยกลูกค้าเก่ากับลูกค้าใหม่</span>
         </div>
 
         {rows && rows.length > 0 && (
@@ -286,7 +269,7 @@ export default function CustomerListTab() {
             <span>เปิดบัญชีแล้ว <b className="text-emerald-700">{counts.opened}</b> คน</span>
             <span>มีเลขบัญชีเทรด <b className="text-slate-900">{counts.withTrade}</b> คน</span>
             {/* ต้องนับตัวกรองวันด้วย ไม่งั้นย่อดูช่วงวันแล้วบรรทัดนี้ยังบอกยอดเต็ม ทำให้เข้าใจผิด */}
-            {q || statusFilter !== "all" || viewFrom || viewTo ? <span>· แสดง <b className="text-slate-900">{view.length}</b> คนตามตัวกรอง</span> : null}
+            {q || statusFilter !== "all" ? <span>· แสดง <b className="text-slate-900">{view.length}</b> คนตามตัวกรอง</span> : null}
           </div>
         )}
         {error && <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">โหลดไม่สำเร็จ: {error}</div>}

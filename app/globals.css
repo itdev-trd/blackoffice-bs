@@ -762,3 +762,15 @@ body { padding-top: var(--update-banner-h); }
 /* แถวสลับสีอ่อนๆ ช่วยไล่สายตาในตารางกว้าง */
 .tv-row:nth-of-type(even) { background: rgb(var(--n-ink-3) / .028); }
 .tv-row:nth-of-type(even):hover { background: rgb(var(--n-ink-3) / .06); }
+
+/* ปุ่มจัดการท้ายแถว — เดิมเป็นไอคอนเทาลอย ๆ 14px ไม่มีกรอบ
+   ดูไม่ออกว่ากดได้ และพื้นที่กดเล็กกว่านิ้ว */
+.tv-row-act {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink-2);
+  transition: background-color var(--dur, .15s) var(--ease, ease), color var(--dur, .15s) var(--ease, ease), border-color var(--dur, .15s) var(--ease, ease);
+}
+.tv-row-act:hover { background: var(--brand-soft); border-color: var(--brand); color: var(--brand); }
+.tv-row-act:disabled { opacity: .5; }
+.tv-row-act-bad:hover { background: rgb(var(--n-bad) / .12); border-color: var(--bad); color: var(--bad); }

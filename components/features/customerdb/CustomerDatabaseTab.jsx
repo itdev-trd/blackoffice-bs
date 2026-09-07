@@ -856,7 +856,9 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
             <h3 className="font-semibold text-slate-800">รีพอร์ตลูกค้าทักแชท</h3>
             <p className="text-xs text-slate-500 mt-0.5">ข้อมูลลูกค้าทั้งหมดที่ซิงก์มาจาก Supabase — ค้นหา กรอง เรียงลำดับ และดาวน์โหลดได้</p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          {/* ปุ่มพวกนี้ทำงานได้ต่อเมื่อเลือกเพจแล้ว — เดิมโชว์ตลอดเวลาแบบกดไม่ได้
+              คนเปิดหน้ามาครั้งแรกจึงเห็นปุ่มเทา 3 ปุ่มก่อนจะรู้ว่าต้องเลือกเพจก่อน */}
+          <div className={`flex flex-wrap items-center gap-2 ${pageFilter ? "" : "hidden"}`}>
             <input ref={importInputRef} type="file" accept=".xlsx,.xlsm" onChange={chooseImportFile} className="hidden" />
             <button onClick={() => pageFilter ? importInputRef.current?.click() : setError("กรุณาเลือกเพจก่อน Import Excel")} disabled={!!importState?.loading} title="จับคู่ด้วยชื่อลูกค้าในเพจที่เลือก และเขียนทับเฉพาะช่องที่มีข้อมูลในไฟล์" className="border border-emerald-300 text-emerald-700 rounded-lg px-3 py-2 text-sm font-medium hover:bg-emerald-50 disabled:opacity-50 flex items-center gap-1.5">
               {importState?.loading ? <Loader2 className="animate-spin" size={15} /> : <Upload size={15} />} Import Excel
@@ -870,20 +872,10 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
           </div>
         </div>
 
-        <SearchInput value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหา ชื่อ / เบอร์ / ไอดีเทรด / username / ข้อความ" />
-
-        {/* ตัวกรองสถานะแบบแคปซูล — เลื่อนซ้ายขวาได้บนมือถือ ใช้ stageFilter เดิมที่มีอยู่แล้วแต่ยังไม่เคยมี UI ให้กด */}
-        <div className="flex gap-1.5 overflow-x-auto -mx-0.5 px-0.5 pb-0.5">
-          <FilterPill active={stageFilter === "all"} onClick={() => setStageFilter("all")}>ทั้งหมด</FilterPill>
-          {CHAT_STAGES.map((s) => (
-            <FilterPill key={s.key} active={stageFilter === s.key} onClick={() => setStageFilter(s.key)}>{s.label}</FilterPill>
-          ))}
-        </div>
-
-        {/* แยกเป็นสองกลุ่มให้ชัด — เดิมปุ่มที่ "ดึงข้อมูลใหม่" กับตัวกรองที่ "กรองผลที่ดึงมาแล้ว"
-            วางปนกันในแถวเดียว ผู้ใช้ใหม่แยกไม่ออกว่ากดอะไรแล้วระบบจะไปโหลดข้อมูลใหม่ */}
+        {/* ลำดับบนหน้าจอ = ลำดับที่ต้องทำ: เลือกเพจ+ช่วงเวลา → กดดึง → แล้วค่อยมีของให้ค้นหา/กรอง
+            เดิมช่องค้นหากับตัวกรองอยู่ข้างบนกล่องนี้ ทั้งที่ยังไม่มีข้อมูลให้กรองเลย */}
         <div className="rounded-card border border-slate-200 bg-slate-50 p-3 space-y-2">
-          <div className="text-2xs font-semibold uppercase tracking-wide text-slate-400">1 · เลือกข้อมูลที่จะดึง</div>
+          <div className="text-xs font-medium text-slate-600">เลือกเพจและช่วงเวลา แล้วกด “ดึงรายงาน”</div>
           <div className="flex flex-wrap gap-2">
           <select value={pageFilter} onChange={(e) => setPageFilter(e.target.value)} className={selCls} title="เพจ">
             <option value="">— เลือกเพจ —</option>
@@ -921,23 +913,38 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-2xs font-semibold uppercase tracking-wide text-slate-400">2 · กรองผลลัพธ์</span>
-          <select value={dataFilter} onChange={(e) => setDataFilter(e.target.value)} className={selCls} title="ข้อมูลติดต่อ">
-            <option value="all">ข้อมูลติดต่อ: ทั้งหมด</option>
-            <option value="has">มีข้อมูลติดต่อ</option>
-            <option value="none">ยังไม่มีข้อมูล</option>
-          </select>
-          <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} className={selCls} title="ที่มา">
-            <option value="all">ที่มา: ทั้งหมด</option>
-            <option value="ad">โฆษณา</option>
-            <option value="organic">ออร์แกนิก</option>
-            <option value="unknown">ไม่ทราบ</option>
-          </select>
-        </div>
+        {/* ค้นหา/กรอง = ทำงานกับข้อมูลที่ดึงมาแล้วเท่านั้น จึงโชว์หลังมีข้อมูล
+            ไม่ต้องมีป้าย "ขั้นที่ 2" อีก เพราะมันโผล่มาตอนที่ใช้ได้จริงพอดี */}
+        {reportPageId && (
+          <div className="space-y-2.5 rounded-card border border-slate-200 p-3">
+            <SearchInput value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหา ชื่อ / เบอร์ / ไอดีเทรด / username / ข้อความ" />
+            <div className="flex gap-1.5 overflow-x-auto -mx-0.5 px-0.5 pb-0.5">
+              <FilterPill active={stageFilter === "all"} onClick={() => setStageFilter("all")}>ทั้งหมด</FilterPill>
+              {CHAT_STAGES.map((st) => (
+                <FilterPill key={st.key} active={stageFilter === st.key} onClick={() => setStageFilter(st.key)}>{st.label}</FilterPill>
+              ))}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <select value={dataFilter} onChange={(e) => setDataFilter(e.target.value)} className={selCls} title="ข้อมูลติดต่อ">
+                <option value="all">ข้อมูลติดต่อ: ทั้งหมด</option>
+                <option value="has">มีข้อมูลติดต่อ</option>
+                <option value="none">ยังไม่มีข้อมูล</option>
+              </select>
+              <select value={sourceFilter} onChange={(e) => setSourceFilter(e.target.value)} className={selCls} title="ที่มา">
+                <option value="all">ที่มา: ทั้งหมด</option>
+                <option value="ad">โฆษณา</option>
+                <option value="organic">ออร์แกนิก</option>
+                <option value="unknown">ไม่ทราบ</option>
+              </select>
+              {(q || stageFilter !== "all" || dataFilter !== "all" || sourceFilter !== "all") && (
+                <button type="button" onClick={() => { setQ(""); setStageFilter("all"); setDataFilter("all"); setSourceFilter("all"); }}
+                  className="text-xs text-slate-500 underline hover:text-slate-700">ล้างตัวกรอง</button>
+              )}
+            </div>
+          </div>
+        )}
 
         {error && <div className="text-sm text-rose-600 bg-rose-50 rounded-lg px-3 py-2">{error}</div>}
-        {!reportPageId && !error && <div className="text-sm text-slate-500 bg-slate-50 rounded-lg px-3 py-3">เลือกเพจและช่วงเวลา แล้วกด “ดึงรายงาน” ระบบจึงจะเริ่มโหลดข้อมูลลูกค้า</div>}
         {reportPageId && reportRefreshedAt && (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-brand-200 bg-brand-50 px-3 py-2.5">
             <div className="text-sm font-medium text-brand-900">ข้อมูลชุดนี้ดึงล่าสุด: {new Date(reportRefreshedAt).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "medium" })}{reportRefreshedBy ? <span className="ml-1 text-xs font-normal text-brand-700">โดย {reportRefreshedBy}</span> : null}</div>

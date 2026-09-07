@@ -238,9 +238,9 @@ export default function TvMembersTab({ active = true, embedded = false }) {
     "104px",                                  // Trade ID
     "100px",                                  // หมดอายุ
     ...(showAudit ? ["104px", "96px", "132px", "92px", "104px", "132px"] : []),   // ประเภท + ช่องทาง + คอลัมน์ตรวจสอบย้อนหลัง
-    "96px",                                   // ปุ่มจัดการ
+    "132px",                                  // ปุ่มจัดการ (4 ปุ่ม × 28px + ช่องไฟ)
   ].join(" ");
-  const tableMinW = (canSeeNewTv ? 750 : 590) + (showAudit ? 660 : 0);
+  const tableMinW = (canSeeNewTv ? 786 : 626) + (showAudit ? 660 : 0);
   const createLabel = (a) => { const d = a.created_at || a.granted_at; return d ? new Date(d).toLocaleDateString("th-TH", { day: "2-digit", month: "short", year: "2-digit" }) : "—"; };
   const tvGrantedLabel = (a) => a.tv_granted_at
     ? new Date(a.tv_granted_at).toLocaleString("th-TH", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })
@@ -795,12 +795,12 @@ export default function TvMembersTab({ active = true, embedded = false }) {
           </div>
           {/* ช่วงวันที่ดูข้อมูล (กรองตามวันที่เพิ่มสมาชิก) */}
           <div className="tv-members-toolbar relative bg-white rounded-2xl border border-slate-200 p-3 flex flex-wrap items-center gap-2">
-            <span className="text-xs text-slate-500 mr-1">ช่วงวันที่:</span>
+            <span className="text-xs text-slate-500 mr-1" title="กรองรายการตามวันที่เพิ่มสมาชิกเข้าระบบ">วันที่เพิ่มสมาชิก:</span>
             {RANGE_PRESETS.map(([key, label]) => (
               <button key={key} onClick={() => key === "custom" ? openDatePicker() : setRangeKey(key)} className={`px-2.5 py-1 rounded-lg text-xs font-medium ${rangeKey === key ? "bg-brand-600 text-white" : "text-slate-600 hover:bg-slate-100 border border-slate-200"}`}>{label}</button>
             ))}
             {rangeKey === "custom" && <button onClick={openDatePicker} className="tv-date-trigger rounded-lg border border-slate-300 px-3 py-1 text-xs text-slate-200">{fmtDMY2(customFrom)} ถึง {fmtDMY2(customTo)}</button>}
-            <span className="ml-auto text-xs text-slate-400">แสดง: {rangeLabel}</span>
+            <span className="ml-auto text-xs text-slate-400">กำลังแสดง: {rangeLabel}</span>
             {datePickerOpen && (
               <div className="tv-date-picker absolute z-30 top-full left-0 mt-2 w-[min(340px,calc(100vw-32px))] rounded-2xl border p-4 shadow-2xl">
                 <div className="flex items-center justify-between gap-2 mb-3">
@@ -919,7 +919,7 @@ export default function TvMembersTab({ active = true, embedded = false }) {
                     <div className="grid gap-3 px-4 py-2 text-[11px]" style={{ gridTemplateColumns: COLS, borderBottom: "1px solid var(--line)" }}>
                       <H k="name">ชื่อลูกค้า</H><H k="user">User TV</H>{canSeeNewTv && <H k="email">อีเมล</H>}<H k="status">สถานะ</H><H k="trade">Trade ID</H><H k="exp">หมดอายุ</H>
                       {showAudit && <><H k="memberType">ประเภท</H><H k="channel">ช่องทาง</H><H k="tvGranted">เพิ่มสิทธิ์บน TV</H><H k="create">สร้างเมื่อ</H><H k="by">คนเพิ่ม</H><H k="editby">แก้ไขโดย</H></>}
-                      <span></span>
+                      <span className="text-right" style={{ color: "var(--ink-3)" }}>จัดการ</span>
                     </div>
                     {pageRows.length === 0 ? <div className="px-4 py-6 text-center text-xs" style={{ color: "var(--ink-3)" }}>ยังไม่มีสมาชิกในสคริปต์นี้</div> : pageRows.map((a) => {
                       const st = statusInfo(a);
@@ -950,13 +950,15 @@ export default function TvMembersTab({ active = true, embedded = false }) {
                           <span className="truncate text-xs" style={{ color: "var(--ink-3)" }} title={a.granted_by || ""}>{a.granted_by || "—"}</span>
                           <span className="truncate text-xs min-w-0" style={{ color: "var(--ink-3)" }} title={a.edited_by || ""}>{a.edited_at ? <>{a.edited_by || "—"} · {new Date(a.edited_at).toLocaleDateString("th-TH", { day: "2-digit", month: "short" })}</> : "—"}</span>
                         </>}
-                        <span className="flex items-center justify-end gap-1.5">
-                          <button onClick={() => checkAccess(a)} disabled={!!checkingAccess[a.id]} className="text-slate-400 hover:text-emerald-600 disabled:opacity-50" title="ตรวจสิทธิ์บน TradingView">
+                        {/* ไอคอนเปล่า ๆ ไม่บอกว่ากดได้และกดยาก — ใส่กรอบกับพื้นที่กดให้เห็นชัด
+                            พร้อม aria-label เพราะ title ขึ้นเฉพาะตอนชี้เมาส์ */}
+                        <span className="flex items-center justify-end gap-1">
+                          <button onClick={() => checkAccess(a)} disabled={!!checkingAccess[a.id]} className="tv-row-act" aria-label="ตรวจสิทธิ์บน TradingView" title="ตรวจสิทธิ์บน TradingView">
                             {checkingAccess[a.id] ? <Loader2 size={14} className="animate-spin" /> : <Eye size={14} />}
                           </button>
-                          <button onClick={() => openEdit(a)} className="text-slate-400 hover:text-slate-700" title="แก้ไขข้อมูล"><Pencil size={14} /></button>
-                          <button onClick={() => openExpiry(a)} className="text-slate-400 hover:text-brand-600" title="ตั้งวันหมดอายุ"><Clock size={15} /></button>
-                          <button onClick={() => revoke(a)} className="text-slate-400 hover:text-rose-600" title="ถอนสิทธิ์ (ออกจาก TV อย่างเดียว)"><X size={16} /></button>
+                          <button onClick={() => openEdit(a)} className="tv-row-act" aria-label="แก้ไขข้อมูล" title="แก้ไขข้อมูล"><Pencil size={14} /></button>
+                          <button onClick={() => openExpiry(a)} className="tv-row-act" aria-label="ตั้งวันหมดอายุ" title="ตั้งวันหมดอายุ"><Clock size={14} /></button>
+                          <button onClick={() => revoke(a)} className="tv-row-act tv-row-act-bad" aria-label="ถอนสิทธิ์บน TradingView" title="ถอนสิทธิ์ (ออกจาก TV อย่างเดียว)"><X size={14} /></button>
                         </span>
                       </div>
                       );
