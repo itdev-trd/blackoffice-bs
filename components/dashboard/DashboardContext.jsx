@@ -21,6 +21,7 @@ import {
 import { supabase } from "@/lib/supabase/client";
 import { lsSet } from "@/lib/utils/storage";
 import { logActivity } from "@/lib/utils/activity";
+import { ROLE_LIMITED, isKnownRole, roleSettings, roleTabs } from "@/lib/constants/roles";
 
 // TABS: key ต้องตรงกับค่าที่เก็บใน user_permissions.allowed_tabs (ฐานข้อมูลเดิม) —
 // เปลี่ยนแค่ path (URL) เป็น kebab-case ให้เข้ากับ Next.js route ได้ ผ่าน ROUTE_PATH ด้านล่าง
@@ -111,7 +112,7 @@ export function DashboardProvider({ children }) {
         .select("role, allowed_ad_accounts, allowed_tabs, allowed_pages, allowed_settings, chat_alert, alert_minutes, alert_pages, alert_sound, alert_new")
         .eq("email", user.email.toLowerCase())
         .maybeSingle();
-      if (error || !data || !["admin", "analyze_only"].includes(data.role)) {
+      if (error || !data || !isKnownRole(data.role)) {
         try { localStorage.removeItem(PERM_CACHE_KEY); } catch {}
         setPerm({ role: "denied", email: user.email, error: error?.message || "บัญชีนี้ยังไม่ได้รับสิทธิ์ใช้งาน" });
         return;
@@ -133,7 +134,9 @@ export function DashboardProvider({ children }) {
       try { localStorage.setItem(PERM_CACHE_KEY, JSON.stringify({ _at: Date.now(), perm: next })); } catch {}
     })();
   }, []);
-  const restricted = perm?.role === "analyze_only";
+  // restricted = บทบาทที่ต้องกรองเพจ/บัญชีโฆษณาตามที่มอบไว้ทีละอัน (analyze_only เท่านั้น)
+  // บทบาท admin/ads เห็นเมนูน้อยกว่า owner แต่ยังทำงานกับลูกค้าได้ทุกเพจ จึงไม่นับว่า restricted
+  const restricted = perm?.role === ROLE_LIMITED;
 
   // การมองเห็นเมนู "ออฟฟิศจำลอง" (Game) และ "กระดานแต้ม" (Leaderboard)
   // ดึงสองคีย์ในคำขอเดียว — เดิมแยกเป็นสอง maybeSingle() ทำให้ทุกหน้ามี network ส่วนเกิน 1 ครั้ง
@@ -164,11 +167,19 @@ export function DashboardProvider({ children }) {
   })();
 
   const allowedTabKeys = perm?.allowedTabs || [];
-  const visibleTabs = (!perm ? [] : restricted ? TABS.filter((t) => allowedTabKeys.includes(t.key) || (t.key === "ad_library" && allowedTabKeys.includes("analyze")) || (t.key === "leaderboard" && leaderboardVisible) || (t.key === "customer_list" && allowedTabKeys.includes("customerdb"))) : TABS)
+  // เมนูที่เห็นตามบทบาท — null จาก roleTabs() = เห็นทุกเมนู (owner / ยิงแอด)
+  const roleTabKeys = perm ? roleTabs(perm.role, allowedTabKeys) : [];
+  const visibleTabs = (!perm ? [] : roleTabKeys === null ? TABS : TABS.filter((t) =>
+      roleTabKeys.includes(t.key)
+      // สองเมนูนี้เป็นหน้าลูกของเมนูอื่น ใครได้เมนูแม่ก็ควรเห็นด้วย ไม่ต้องมอบซ้ำ
+      || (t.key === "ad_library" && roleTabKeys.includes("analyze"))
+      || (t.key === "customer_list" && roleTabKeys.includes("customerdb"))
+      || (t.key === "leaderboard" && leaderboardVisible && restricted)))
     .filter((t) => t.key !== "office" || officeVisible)
     .filter((t) => t.key !== "leaderboard" || leaderboardVisible);
   const allowedPages = restricted ? (perm?.allowedPages || []) : null;
-  const allowedSettings = restricted ? (perm?.allowedSettings || []) : null;
+  // หัวข้อตั้งค่าที่เข้าได้ — null = ทุกหัวข้อ (owner) · admin/ads เห็นแค่ข้อความบันทึกไว้
+  const allowedSettings = perm ? roleSettings(perm.role, perm.allowedSettings || []) : null;
   const can = useCallback((k) => visibleTabs.some((t) => t.key === k), [visibleTabs]);
 
   // ถ้าเส้นทางปัจจุบันไม่มีสิทธิ์เข้า → เด้งไปแท็บแรกที่เข้าได้

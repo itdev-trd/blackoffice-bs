@@ -8,6 +8,7 @@ import PasswordInput from "@/components/shared/PasswordInput";
 import NumInput from "@/components/shared/NumInput";
 import Spinner from "@/components/shared/Spinner";
 import { SETTINGS_SECTIONS, CHAT_STAGES } from "@/lib/constants/settings";
+import { ROLES, ROLE_LIMITED } from "@/lib/constants/roles";
 import { exportAnalysisPdf, AnalysisReport } from "@/components/features/analyze/AnalyzeTab";
 
 export function LaunchConfigCard({ config, currentApplied, onApplied }) {
@@ -739,7 +740,7 @@ export function PermissionsPanel() {
     setError("");
     setNotice("");
     const { data, error: fnErr } = await supabase.functions.invoke("manage-permissions", {
-      body: { action: "upsert", email: editing.email.trim(), role: editing.role, nickname: editing.nickname || "", allowed_ad_accounts: editing.role === "analyze_only" ? editing.allowed : [], allowed_tabs: editing.role === "analyze_only" ? editing.tabs : [], allowed_pages: editing.role === "analyze_only" ? editing.pages : [], allowed_settings: editing.role === "analyze_only" && editing.tabs.includes("settings") ? editing.settings : [], chat_alert: editing.chatAlert !== false, alert_minutes: editing.alertMinutes ?? 3, alert_pages: editing.alertPages || [], alert_sound: editing.alertSound !== false, alert_new: editing.alertNew !== false },
+      body: { action: "upsert", email: editing.email.trim(), role: editing.role, nickname: editing.nickname || "", allowed_ad_accounts: editing.role === ROLE_LIMITED ? editing.allowed : [], allowed_tabs: editing.role === ROLE_LIMITED ? editing.tabs : [], allowed_pages: editing.role === ROLE_LIMITED ? editing.pages : [], allowed_settings: editing.role === ROLE_LIMITED && editing.tabs.includes("settings") ? editing.settings : [], chat_alert: editing.chatAlert !== false, alert_minutes: editing.alertMinutes ?? 3, alert_pages: editing.alertPages || [], alert_sound: editing.alertSound !== false, alert_new: editing.alertNew !== false },
     });
     setSaving(false);
     if (fnErr) { setError(await readFunctionErrorMessage(fnErr)); return; }
@@ -766,7 +767,7 @@ export function PermissionsPanel() {
           <h3 className="font-semibold text-slate-800">จัดการสิทธิ์ผู้ใช้</h3>
           <p className="text-xs text-slate-500 mt-0.5">กำหนดว่าใครเห็นทุกเมนู (admin) หรือจำกัดสิทธิ์ — เลือกได้ว่าเข้าถึงเมนูไหน / เพจไหน (ตอบแชท) / บัญชีโฆษณาไหน</p>
         </div>
-        <button onClick={() => setEditing({ email: "", nickname: "", role: "analyze_only", allowed: [], tabs: [], pages: [], settings: [], chatAlert: true, alertMinutes: 3, alertPages: [], alertSound: true, alertNew: true })} className="text-sm bg-brand-600 text-white rounded-lg px-3 py-1.5 font-medium hover:bg-brand-700 shrink-0">+ เพิ่มผู้ใช้</button>
+        <button onClick={() => setEditing({ email: "", nickname: "", role: ROLE_LIMITED, allowed: [], tabs: [], pages: [], settings: [], chatAlert: true, alertMinutes: 3, alertPages: [], alertSound: true, alertNew: true })} className="text-sm bg-brand-600 text-white rounded-lg px-3 py-1.5 font-medium hover:bg-brand-700 shrink-0">+ เพิ่มผู้ใช้</button>
       </div>
 
       {error && <div className="text-sm text-rose-600 bg-rose-50 rounded-lg px-3 py-2">{error}</div>}
@@ -782,11 +783,19 @@ export function PermissionsPanel() {
               <div className="min-w-0">
                 <div className="text-slate-800 truncate">{r.nickname ? <><span className="font-medium">{r.nickname}</span> <span className="text-slate-400 font-normal">· {r.email}</span></> : r.email}</div>
                 <div className="text-[11px] text-slate-400">
-                  {r.role === "admin" ? "ผู้ดูแล (เห็นทุกอย่าง)" : `จำกัดสิทธิ์ · ${(r.allowed_tabs || []).length} เมนู${(r.allowed_tabs || []).includes("settings") ? ` (ตั้งค่า ${(r.allowed_settings || []).length || "ทุก"} หัวข้อ)` : ""} · ${(r.allowed_pages || []).length || "ทุก"} เพจ · ${(r.allowed_ad_accounts || []).length} บัญชีโฆษณา`}
+                  {r.role === ROLE_LIMITED
+                    ? `จำกัดสิทธิ์ · ${(r.allowed_tabs || []).length} เมนู${(r.allowed_tabs || []).includes("settings") ? ` (ตั้งค่า ${(r.allowed_settings || []).length || "ทุก"} หัวข้อ)` : ""} · ${(r.allowed_pages || []).length || "ทุก"} เพจ · ${(r.allowed_ad_accounts || []).length} บัญชีโฆษณา`
+                    : ROLES.find((x) => x.key === r.role)?.hint || r.role}
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                <span className={`text-[11px] px-2 py-0.5 rounded-full ${r.role === "admin" ? "bg-brand-50 text-brand-700" : "bg-slate-100 text-slate-600"}`}>{r.role === "admin" ? "admin" : "จำกัด"}</span>
+                <span className={`text-[11px] px-2 py-0.5 rounded-full ${
+                  r.role === "owner" ? "bg-brand-600 text-white"
+                  : r.role === "ads" ? "bg-brand-50 text-brand-700"
+                  : r.role === "admin" ? "bg-emerald-50 text-emerald-700"
+                  : "bg-slate-100 text-slate-600"}`}>
+                  {ROLES.find((x) => x.key === r.role)?.label || r.role}
+                </span>
                 <button onClick={() => setEditing({ email: r.email, nickname: r.nickname || "", role: r.role, allowed: (r.allowed_ad_accounts || []).map(String), tabs: (r.allowed_tabs || []).map(String), pages: (r.allowed_pages || []).map(String), settings: (r.allowed_settings || []).map(String), chatAlert: r.chat_alert !== false, alertMinutes: r.alert_minutes ?? 3, alertPages: (r.alert_pages || []).map(String), alertSound: r.alert_sound !== false, alertNew: r.alert_new !== false })} className="text-slate-500 hover:text-slate-800 text-xs underline">แก้ไข</button>
                 <button onClick={() => remove(r.email)} className="text-rose-500 hover:text-rose-700"><Trash2 size={15} /></button>
               </div>
@@ -809,9 +818,12 @@ export function PermissionsPanel() {
             <div>
               <label className="text-xs text-slate-600">สิทธิ์</label>
               <select value={editing.role} onChange={(e) => setEditing({ ...editing, role: e.target.value })} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white">
-                <option value="analyze_only">จำกัดสิทธิ์ (เลือกเมนู/เพจ/บัญชีเอง)</option>
-                <option value="admin">ผู้ดูแล (admin — เห็นทุกอย่าง)</option>
+                {ROLES.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
               </select>
+              {/* อธิบายว่าบทบาทที่เลือกทำอะไรได้ — ไม่ให้ต้องเดาจากชื่อบทบาท */}
+              <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
+                {ROLES.find((r) => r.key === editing.role)?.hint || ""}
+              </p>
             </div>
           </div>
 
@@ -875,7 +887,7 @@ export function PermissionsPanel() {
             </>)}
           </div>
 
-          {editing.role === "analyze_only" && (<>
+          {editing.role === ROLE_LIMITED && (<>
             {/* เมนูที่เข้าถึงได้ */}
             <div>
               <div className="flex items-center justify-between">

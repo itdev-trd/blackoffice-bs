@@ -3,14 +3,41 @@
 import { createClient, type SupabaseClient, type User } from "https://esm.sh/@supabase/supabase-js@2";
 import { checkRateLimit, requestClientKey } from "./security.ts";
 
+export type Role = "owner" | "ads" | "admin" | "analyze_only";
+
 export interface UserPermission {
   email: string;
-  role: "admin" | "analyze_only";
+  role: Role;
   allowed: string[];
   allowedTabs: string[];
   allowedPages: string[];
   allowedSettings: string[];
 }
+
+// สำเนากติกาบทบาทฝั่ง server — ต้องตรงกับ lib/constants/roles.js และ public.app_role_tabs()
+// (มีสามที่เพราะบังคับสิทธิ์กันสามชั้น: หน้าเว็บซ่อนเมนู · edge function ปฏิเสธคำขอ · RLS กันที่ข้อมูล)
+const ROLES: Role[] = ["owner", "ads", "admin", "analyze_only"];
+const ADMIN_TABS = ["overview", "inbox", "ad_chats", "feed", "customerdb", "customer_list", "leaderboard", "settings"];
+const OPERATOR_SETTINGS = ["savedreplies"];
+
+// เมนูที่บทบาทนั้นเข้าได้ — null = ทุกเมนู
+const tabsOf = (permission: UserPermission): string[] | null => {
+  if (permission.role === "owner" || permission.role === "ads") return null;
+  if (permission.role === "admin") return ADMIN_TABS;
+  return permission.allowedTabs;
+};
+
+// หัวข้อตั้งค่าที่บทบาทนั้นแก้ได้ — null = ทุกหัวข้อ
+const settingsOf = (permission: UserPermission): string[] | null => {
+  if (permission.role === "owner") return null;
+  if (permission.role === "admin" || permission.role === "ads") return OPERATOR_SETTINGS;
+  return permission.allowedSettings;
+};
+
+// "มีอำนาจกับข้อมูลเต็มที่" — ตอบแชททุกเพจ แก้ข้อมูลลูกค้า ให้สิทธิ์ TradingView
+// แยกจาก "เห็นเมนูอะไร" เพราะแอดมินตอบแชทเห็นเมนูน้อยกว่า owner แต่ทำงานลูกค้าได้เต็มที่
+export const hasFullData = (permission: UserPermission) => permission.role !== "analyze_only";
+export const isOwner = (permission: UserPermission) => permission.role === "owner";
 
 // ทำให้ account id เป็นตัวเลขล้วน (ตัด act_ ออก) เพื่อเทียบกัน
 export const normAcc = (v: unknown) => String(v ?? "").replace(/^act_/, "");
@@ -24,8 +51,8 @@ export async function getPermission(supabaseAsUser: SupabaseClient): Promise<Use
     .select("role, allowed_ad_accounts, allowed_tabs, allowed_pages, allowed_settings")
     .eq("email", user.email.toLowerCase())
     .maybeSingle();
-  if (error || !data || !["admin", "analyze_only"].includes(data.role)) return null;
-  const role = data.role as UserPermission["role"];
+  if (error || !data || !ROLES.includes(data.role as Role)) return null;
+  const role = data.role as Role;
   return {
     email: user.email.toLowerCase(),
     role,
@@ -38,6 +65,7 @@ export async function getPermission(supabaseAsUser: SupabaseClient): Promise<Use
 
 export interface PermissionRequirement {
   admin?: boolean;
+  owner?: boolean;
   tab?: string | string[];
   setting?: string | string[];
   pageId?: string | null;
@@ -56,10 +84,10 @@ const includesAny = (actual: string[], wanted?: string | string[]) => {
 };
 
 export const canAccessPage = (permission: UserPermission, pageId?: string | null) =>
-  permission.role === "admin" || (!!pageId && permission.allowedPages.includes(String(pageId)));
+  hasFullData(permission) || (!!pageId && permission.allowedPages.includes(String(pageId)));
 
 export const canAccessAccount = (permission: UserPermission, accountId?: string | null) =>
-  permission.role === "admin" || (!!accountId && permission.allowed.includes(normAcc(accountId)));
+  hasFullData(permission) || (!!accountId && permission.allowed.includes(normAcc(accountId)));
 
 export async function authorizeRequest(
   req: Request,
@@ -110,22 +138,27 @@ export async function authorizeRequest(
 
   const permission = await getPermission(client);
   if (!permission) return { ok: false, status: 403, error: "ยังไม่ได้รับสิทธิ์ใช้งาน" };
-  if (requirement.admin && permission.role !== "admin") {
-    return { ok: false, status: 403, error: "เฉพาะผู้ดูแล (admin) เท่านั้น" };
+  // requirement.admin = "งานระดับผู้ดูแล" — ผ่านได้ทุกบทบาทที่มีอำนาจกับข้อมูลเต็มที่
+  // ตัวที่คุมจริงว่าใครแตะการตั้งค่าไหนได้คือ requirement.setting ด้านล่าง
+  if (requirement.admin && !hasFullData(permission)) {
+    return { ok: false, status: 403, error: "เฉพาะผู้ดูแลระบบเท่านั้น" };
   }
-  if (permission.role !== "admin") {
-    if (!includesAny(permission.allowedTabs, requirement.tab)) {
-      return { ok: false, status: 403, error: "ไม่มีสิทธิ์ใช้งานเมนูนี้" };
-    }
-    if (!includesAny(permission.allowedSettings, requirement.setting)) {
-      return { ok: false, status: 403, error: "ไม่มีสิทธิ์แก้การตั้งค่านี้" };
-    }
-    if (requirement.pageId && !canAccessPage(permission, requirement.pageId)) {
-      return { ok: false, status: 403, error: "ไม่มีสิทธิ์เข้าถึงเพจนี้" };
-    }
-    if (requirement.accountId && !canAccessAccount(permission, requirement.accountId)) {
-      return { ok: false, status: 403, error: "ไม่มีสิทธิ์เข้าถึงบัญชีโฆษณานี้" };
-    }
+  if (requirement.owner && !isOwner(permission)) {
+    return { ok: false, status: 403, error: "เฉพาะเจ้าของระบบ (owner) เท่านั้น" };
+  }
+  const tabs = tabsOf(permission);
+  if (tabs !== null && !includesAny(tabs, requirement.tab)) {
+    return { ok: false, status: 403, error: "ไม่มีสิทธิ์ใช้งานเมนูนี้" };
+  }
+  const settings = settingsOf(permission);
+  if (settings !== null && !includesAny(settings, requirement.setting)) {
+    return { ok: false, status: 403, error: "ไม่มีสิทธิ์แก้การตั้งค่านี้" };
+  }
+  if (requirement.pageId && !canAccessPage(permission, requirement.pageId)) {
+    return { ok: false, status: 403, error: "ไม่มีสิทธิ์เข้าถึงเพจนี้" };
+  }
+  if (requirement.accountId && !canAccessAccount(permission, requirement.accountId)) {
+    return { ok: false, status: 403, error: "ไม่มีสิทธิ์เข้าถึงบัญชีโฆษณานี้" };
   }
 
   return { ok: true, isService: false, user: userData.user, client, permission };
