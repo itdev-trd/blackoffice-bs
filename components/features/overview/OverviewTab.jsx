@@ -91,6 +91,7 @@ function RunningAdsToday({ onNavigate }) {
   const [rows, setRows] = useState(null);
   const [noAccount, setNoAccount] = useState(false);
   const [acctId, setAcctId] = useState("");
+  const [fetchedAt, setFetchedAt] = useState(null);
 
   useEffect(() => {
     let dead = false;
@@ -105,6 +106,7 @@ function RunningAdsToday({ onNavigate }) {
         body: { ad_account_id: acct, date_preset: "today" },
       });
       if (dead) return;
+      setFetchedAt(data?.fetched_at || null);
       const list = (data?.campaigns || [])
         .filter((c) => String(c.effective_status || "").toUpperCase() === "ACTIVE")
         .map((c) => ({
@@ -124,7 +126,10 @@ function RunningAdsToday({ onNavigate }) {
       <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
         <div className="min-w-0">
           <h3 className="ds-title text-[15px]">โฆษณาที่กำลังยิงอยู่</h3>
-          <p className="mt-0.5 text-2xs text-slate-400">ยอดใช้จ่ายวันนี้ · ไม่รวมแอดที่หยุดแล้ว</p>
+          <p className="mt-0.5 text-2xs text-slate-400">
+            ยอดใช้จ่ายวันนี้ · ไม่รวมแอดที่หยุดแล้ว
+            {fetchedAt ? ` · ข้อมูลจาก Meta ${new Date(fetchedAt).toLocaleString("th-TH", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}` : ""}
+          </p>
         </div>
         <button onClick={() => onNavigate?.("campaigns")} className="shrink-0 text-2xs font-semibold text-brand-700 hover:text-brand-800">
           ดูรายงานเต็ม

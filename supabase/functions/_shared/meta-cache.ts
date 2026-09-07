@@ -22,12 +22,18 @@ export async function cacheSet(key: string, node_id: string, level: string, rang
   } catch { /* เขียน cache พลาดไม่กระทบผล */ }
 }
 
-// อ่านค่า TTL (นาที) จาก settings.meta_list_cache_ttl_min (ว่าง = ค่าเริ่มต้น 60 วัน — อัปเดตเมื่อกดรีเฟรชเอง)
+// อ่านค่า TTL (นาที) จาก settings.meta_list_cache_ttl_min (ว่าง = ใช้ค่าเริ่มต้นด้านล่าง)
 export async function listCacheTtlMs(): Promise<number> {
   try {
     const { data } = await admin().from("settings").select("value").eq("key", "meta_list_cache_ttl_min").maybeSingle();
     const n = Number(data?.value);
     if (n > 0) return n * 60 * 1000;
   } catch { /* ใช้ค่าเริ่มต้น */ }
-  return 60 * 24 * 60 * 60 * 1000;   // 60 วัน
+  // 15 นาที — รายการแคมเปญ/แอดเปลี่ยนได้ทุกวัน (เปิด-หยุด-สร้างใหม่)
+  //
+  // เดิมค่าเริ่มต้นคือ 60 วัน ซึ่งเท่ากับ "ไม่รีเฟรชอีกเลย" — หน้าแคมเปญกับการ์ดภาพรวม
+  // จึงโชว์ข้อมูลเก่า 5 วัน (ทดสอบเจอ: แคมเปญ "Day Trade Setup 4/9/2026 (ALL)" ที่ Meta
+  // ตอบว่า ACTIVE ไม่โผล่ในแอปเลย ส่วนที่โผล่คือแคมเปญเก่าที่หยุดไปแล้วทั้งหมด)
+  // ยังตั้งทับได้ที่ settings.meta_list_cache_ttl_min ถ้าต้องการถี่/ห่างกว่านี้
+  return 15 * 60 * 1000;
 }
