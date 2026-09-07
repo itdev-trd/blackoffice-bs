@@ -1,0 +1,18 @@
+# ตั้งค่า Supabase CLI ของโปรเจกต์นี้ — จำเป็นตอน deploy edge function
+#
+# ทำไมต้องมีไฟล์นี้: `supabase functions deploy` ตั้ง verify_jwt = true ให้ทุกฟังก์ชัน
+# ถ้าไม่ได้ประกาศไว้ที่นี่ — ซึ่งจะทำให้ webhook ตาย เพราะ Meta กับ LINE ยิงเข้ามาโดยไม่มี JWT
+# (ตอนนี้บนเซิร์ฟเวอร์ทั้งสามตัวนี้ตั้งเป็น false อยู่ ไฟล์นี้ล็อกค่านั้นไว้ให้ deploy ครั้งหน้าไม่พลิก)
+project_id = "nmetbatfjiagpjbbmowp"
+
+# webhook ของ Meta — ตรวจตัวจริงด้วย x-hub-signature-256 เองในโค้ด ไม่ใช้ JWT
+[functions.meta-webhook]
+verify_jwt = false
+
+# webhook ของ LINE — ตรวจด้วย x-line-signature เองในโค้ด
+[functions.line-webhook]
+verify_jwt = false
+
+# ตอบแชท/คอมเมนต์ — ตรวจสิทธิ์เองผ่าน authorizeRequest (รับทั้ง user token และ service key)
+[functions.messenger-reply]
+verify_jwt = false
