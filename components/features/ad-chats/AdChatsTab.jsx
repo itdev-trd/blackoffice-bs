@@ -67,6 +67,55 @@ export default function AdChatsTab({ active = true }) {
 
       {err && <div className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-sm text-rose-700">{err}</div>}
 
+      {/* ที่มาของตัวเลขต้องอยู่ติดกับตัวเลข — ไม่งั้นคนอ่านรายงานเดาเอง แล้วเอาไปใช้ตัดสินใจผิด */}
+      <details className="rounded-xl border border-slate-200 bg-white">
+        <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold text-slate-700">
+          ตัวเลขในหน้านี้นับมาจากไหน (กดเพื่อดู)
+        </summary>
+        <div className="space-y-2.5 border-t border-slate-100 px-3 py-2.5 text-[11.5px] leading-relaxed text-slate-600">
+          <div>
+            <div className="font-semibold text-slate-700">แหล่งข้อมูล</div>
+            ทุกตัวเลขนับจากตาราง <span className="font-mono">chat_customers</span> (ห้องแชท/คอมเมนต์ของเราเอง)
+            ไม่ได้ดึงสดจาก Meta ตอนเปิดหน้า · รวมยอดด้วยฟังก์ชันในฐานข้อมูล
+            (<span className="font-mono">app_ad_chat_stats</span> / <span className="font-mono">app_ad_chat_totals</span>)
+            เพราะถ้าให้หน้าเว็บนับเอง ระบบจะคืนแถวได้สูงสุด 1,000 แถว แล้วยอดจะเพี้ยนเงียบ ๆ
+          </div>
+
+          <div>
+            <div className="font-semibold text-slate-700">ที่มาของ “แอด” ต่อ 1 ลูกค้า (นับแอดเดียวเท่านั้น)</div>
+            <ul className="ml-4 list-disc space-y-0.5">
+              <li><b>ทักจากแอด</b> = ช่อง <span className="font-mono">entry_ad_id</span> ที่ Meta ส่งมาพร้อม event
+                <span className="font-mono"> messaging_referrals</span> ตอนลูกค้ากดปุ่มส่งข้อความจากโฆษณา (Click-to-Messenger)</li>
+              <li><b>คอมเมนต์</b> = ช่อง <span className="font-mono">comment_ad_ids</span> ตัวแรก ที่ระบบ map จากโพสต์ของโฆษณา</li>
+              <li>ถ้ามีทั้งสองอย่าง ใช้ “ทักจากแอด” เป็นหลัก — กันการนับซ้ำจนยอดรวมเกินจริง</li>
+            </ul>
+          </div>
+
+          <div>
+            <div className="font-semibold text-slate-700">ความหมายของแต่ละคอลัมน์</div>
+            <ul className="ml-4 list-disc space-y-0.5">
+              <li><b>ลูกค้า</b> = จำนวนห้องที่ผูกกับแอดนั้น</li>
+              <li><b>เปิดบัญชี</b> = ห้องที่สถานะเป็น <span className="font-mono">account_opened</span> ซึ่งแอดมินกดยืนยันเองในระบบ (ไม่ใช่ AI เดา)</li>
+              <li><b>% ปิดได้</b> = เปิดบัญชี ÷ ลูกค้า ของแอดนั้น</li>
+              <li><b>ค้างตอบ</b> = ห้องที่ข้อความล่าสุดยังเป็นของลูกค้า (<span className="font-mono">awaiting_reply</span>)</li>
+              <li><b>ล่าสุด</b> = เวลาข้อความล่าสุดในห้องของแอดนั้น</li>
+              <li><b>ช่วงเวลา 7/30 วัน</b> นับจาก <span className="font-mono">created_at</span> = วันที่ลูกค้าเข้าระบบเรา ไม่ใช่วันที่ยิงแอด</li>
+              <li>ไม่นับห้องที่ถูกบล็อกว่าเป็นสแปม</li>
+            </ul>
+          </div>
+
+          <div>
+            <div className="font-semibold text-slate-700">ข้อจำกัดที่ต้องรู้ก่อนใช้ตัดสินใจ</div>
+            <ul className="ml-4 list-disc space-y-0.5">
+              <li>ad_id เก็บได้เฉพาะลูกค้าที่ทักเข้ามา <b>ตั้งแต่ 07/09/2569 04:41</b> เป็นต้นไป (เวลาที่ webhook เริ่มส่ง referral เข้าระบบ)
+                — ก่อนหน้านั้น Meta ไม่ให้ดึงย้อนหลัง จึงขึ้นเป็น “ไม่รู้ที่มา” ทั้งหมด</li>
+              <li>ลูกค้าที่ทักเองที่เพจ/ค้นเจอเอง จะไม่มี ad_id เป็นเรื่องปกติ ไม่ใช่ข้อมูลหาย</li>
+              <li>ยังไม่มีคอลัมน์ค่าโฆษณา/ต้นทุนต่อลูกค้า (ดูกล่องเหลืองด้านบน)</li>
+            </ul>
+          </div>
+        </div>
+      </details>
+
       {/* บอกข้อจำกัดตรง ๆ ดีกว่าโชว์คอลัมน์ค่าโฆษณาว่างเปล่าให้เข้าใจผิด */}
       <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2 text-[11.5px] text-amber-800">
         <Info size={14} className="mt-0.5 shrink-0" />
@@ -96,14 +145,14 @@ export default function AdChatsTab({ active = true }) {
             <table className="min-w-full text-sm">
               <thead className="bg-slate-50 text-[11px] uppercase text-slate-500">
                 <tr>
-                  <th className="px-3 py-2 text-left font-semibold">โฆษณา</th>
-                  <th className="px-3 py-2 text-right font-semibold">ลูกค้า</th>
-                  <th className="px-3 py-2 text-right font-semibold">ทักจากแอด</th>
-                  <th className="px-3 py-2 text-right font-semibold">คอมเมนต์</th>
-                  <th className="px-3 py-2 text-right font-semibold">เปิดบัญชี</th>
-                  <th className="px-3 py-2 text-right font-semibold">% ปิดได้</th>
-                  <th className="px-3 py-2 text-right font-semibold">ค้างตอบ</th>
-                  <th className="px-3 py-2 text-left font-semibold">ล่าสุด</th>
+                  <th className="px-3 py-2 text-left font-semibold" title="ชื่อ/ไอดีโฆษณาที่ลูกค้าเข้ามาจาก">โฆษณา</th>
+                  <th className="px-3 py-2 text-right font-semibold" title="จำนวนห้องแชท/คอมเมนต์ที่ผูกกับแอดนี้">ลูกค้า</th>
+                  <th className="px-3 py-2 text-right font-semibold" title="กดปุ่มส่งข้อความจากโฆษณา (entry_ad_id จาก event messaging_referrals)">ทักจากแอด</th>
+                  <th className="px-3 py-2 text-right font-semibold" title="คอมเมนต์ใต้โพสต์ของโฆษณานี้ (comment_ad_ids)">คอมเมนต์</th>
+                  <th className="px-3 py-2 text-right font-semibold" title="สถานะ account_opened ที่แอดมินกดยืนยันในระบบ">เปิดบัญชี</th>
+                  <th className="px-3 py-2 text-right font-semibold" title="เปิดบัญชี ÷ ลูกค้า ของแอดนี้">% ปิดได้</th>
+                  <th className="px-3 py-2 text-right font-semibold" title="ข้อความล่าสุดยังเป็นของลูกค้า (awaiting_reply)">ค้างตอบ</th>
+                  <th className="px-3 py-2 text-left font-semibold" title="เวลาข้อความล่าสุดในห้องของแอดนี้">ล่าสุด</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
