@@ -12,7 +12,12 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { authorizeRequest } from "../_shared/permissions.ts";
 import { readJsonBody } from "../_shared/security.ts";
 import { getOpenAIKey } from "../_shared/openai.ts";
+import { cacheGet, cacheSet } from "../_shared/meta-cache.ts";
+import { contentHashOf } from "../_shared/chat-extract.ts";
 
+const FAST_MODEL = "gpt-4.1-mini";                 // งานสกัดข้อมูลใช้โมเดลเร็วพอ
+const FALLBACK_MODEL = "gpt-5";                    // เผื่อคีย์ยังไม่เปิดโมเดลเร็ว
+const EXTRACT_TTL_MS = 24 * 60 * 60 * 1000;        // ผลสแกนของบทสนทนาชุดเดิมใช้ซ้ำได้
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -55,7 +60,7 @@ Deno.serve(async (req) => {
     const id = String(body?.id || "");
     if (!id) return json({ ok: false, error: "ต้องส่ง id ของบทสนทนา" }, 400);
     // อ่านอย่างเดียว ไม่เขียน — สิทธิ์ระดับตอบแชทพอ
-    const auth = await authorizeRequest(req, { tab: ["inbox", "chat"] });
+    const auth = await authorizeRequest(req, { tab: ["inbox", "chat"], allowService: true });
     if (!auth.ok) return json({ ok: false, error: auth.error }, auth.status);
 
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
@@ -71,31 +76,76 @@ Deno.serve(async (req) => {
 
     // ส่งทั้งสองฝั่งไปให้ AI พร้อมป้ายบอกว่าใครพูด — ต้องรู้บริบทว่าแอดมินถามอะไรลูกค้าจึงตอบเลขนั้น
     // แต่กำกับใน prompt ว่าห้ามเอาข้อมูลฝั่งแอดมิน
-    const convo = tr
-      .slice(-60)
-      .filter((m: any) => m?.t)
-      .map((m: any) => `[${m.w === "u" ? "customer" : "admin"}] ${String(m.t).slice(0, 500)}`)
-      .join("\n");
+    // ยิ่ง prompt ยาว AI ยิ่งตอบช้า — คัดเฉพาะข้อความที่ "มีโอกาสมีข้อมูล" (ตัวเลข/อีเมล/คำที่เกี่ยวข้อง)
+    // แล้วพ่วงข้อความก่อนหน้า 1 ข้อไว้เป็นบริบท (แอดมินถามอะไรลูกค้าจึงตอบเลขนั้น)
+    // ต้องคัดจากบทสนทนา "ทั้งห้อง" ไม่ใช่แค่ช่วงท้าย — ลูกค้าหลายคนส่งเลขบัญชีตอนต้นแชท
+    // แล้วคุยเรื่องอื่นต่ออีกยาว (เคยตัดแค่ 40 ข้อความท้ายแล้วพลาดข้อความที่ 12 จาก 53)
+    // ถ้าคัดแล้วไม่เหลืออะไรเลย ค่อยถอยไปใช้ 20 ข้อความท้ายแบบเดิม
+    const CANDIDATE = /[0-9]|@|บัญชี|ไอดี|user|tradingview|tv|เบอร์|อีเมล|mail/i;
+    const all = tr.filter((m: any) => m?.t);
+    const keep = new Set<number>();
+    all.forEach((m: any, i: number) => {
+      if (!CANDIDATE.test(String(m.t))) return;
+      if (i > 0) keep.add(i - 1);
+      keep.add(i);
+    });
+    const picked = keep.size ? all.filter((_: any, i: number) => keep.has(i)) : all.slice(-20);
+    // ตัดด้านท้ายเมื่อยาวเกินงบ (กฎข้อ 5 บอกว่าเอาเลขที่ลูกค้ายืนยันล่าสุด จึงเก็บท้ายไว้)
+    const CHAR_BUDGET = 12000;
+    const lines: string[] = [];
+    let used = 0;
+    for (let i = picked.length - 1; i >= 0; i--) {
+      const m: any = picked[i];
+      const line = `[${m.w === "u" ? "customer" : "admin"}] ${String(m.t).slice(0, 300)}`;
+      if (used + line.length > CHAR_BUDGET && lines.length) break;
+      lines.unshift(line);
+      used += line.length;
+    }
+    const convo = lines.join("\n");
+
+    // สแกนซ้ำห้องเดิมที่บทสนทนาไม่เปลี่ยน = คืนผลเดิมทันที (0 วินาที ไม่เสียค่า AI)
+    const cacheKey = `extract:${row.id}:${contentHashOf(tr)}`;
+    if (body?.force !== true) {
+      const hit = await cacheGet(cacheKey, EXTRACT_TTL_MS).catch(() => null);
+      if (hit?.payload) return json({ ...hit.payload, cached: true });
+    }
 
     const key = await getOpenAIKey();
     if (!key) return json({ ok: false, error: "ยังไม่ได้ตั้งค่า OpenAI API key ในหน้าตั้งค่า" }, 400);
 
-    // ใช้ gpt-5 ให้ตรงกับฟังก์ชัน AI อื่นในระบบ + reasoning_effort low เพราะงานนี้เป็นการสกัดข้อมูล ไม่ต้องคิดลึก
-    const model = String(body?.model || "gpt-5");
-    const resp = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
-      body: JSON.stringify({
-        model,
-        max_completion_tokens: 1200,
-        reasoning_effort: "low",
+    // งานนี้คือ "คัดข้อมูลจากข้อความ" ไม่ใช่งานคิดวิเคราะห์ — ใช้โมเดลเร็ว (ไม่ใช่ reasoning model)
+    // เดิมใช้ gpt-5 ซึ่งคิดก่อนตอบทุกครั้ง จึงกิน ~10 วินาทีต่อการสแกน 1 ห้อง
+    // เปลี่ยนพารามิเตอร์ตามตระกูลโมเดลด้วย: reasoning_effort/max_completion_tokens ใช้ได้เฉพาะตระกูล gpt-5/o
+    // ส่วนรุ่นอื่นต้องใช้ max_tokens (ส่งผิดตระกูล = OpenAI ตอบ 400 ทั้งคำขอ)
+    const isReasoning = (m: string) => /^(gpt-5|o\d)/i.test(m);
+    const askOpenAI = async (m: string) => {
+      const payload: Record<string, unknown> = {
+        model: m,
         response_format: { type: "json_object" },
         messages: [
           { role: "system", content: SYS },
           { role: "user", content: `ชื่อลูกค้า: ${row.customer_name || "(ไม่ทราบ)"}\n\nบทสนทนา:\n${convo}` },
         ],
-      }),
-    });
+      };
+      if (isReasoning(m)) { payload.max_completion_tokens = 1200; payload.reasoning_effort = "low"; }
+      else { payload.max_tokens = 600; payload.temperature = 0; }
+      return await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
+        body: JSON.stringify(payload),
+      });
+    };
+
+    // รับ model จาก body ได้ แต่เพียงสองตัวที่ระบบรองรับ กันการสั่งชื่อโมเดลแพง ๆ เข้ามาจากหน้าเว็บ
+    const requested = String(body?.model || "");
+    let model = requested === FALLBACK_MODEL ? FALLBACK_MODEL : FAST_MODEL;
+    let resp = await askOpenAI(model);
+    // คีย์ของบางบัญชียังไม่เปิดโมเดลเร็ว → ถอยไปตัวที่ระบบใช้อยู่เดิม ไม่ให้ผู้ใช้เจอ error เฉย ๆ
+    if (!resp.ok && model !== FALLBACK_MODEL) {
+      const t = await resp.text();
+      if (/model/i.test(t)) { model = FALLBACK_MODEL; resp = await askOpenAI(model); }
+      else return json({ ok: false, error: `OpenAI ${resp.status}: ${t.slice(0, 200)}` }, 400);
+    }
     if (!resp.ok) {
       const t = await resp.text();
       return json({ ok: false, error: `OpenAI ${resp.status}: ${t.slice(0, 200)}` }, 400);
@@ -127,7 +177,7 @@ Deno.serve(async (req) => {
       ...(phone && !suggestion.phone ? ["phone"] : []),
     ];
 
-    return json({
+    const result = {
       ok: true,
       id: row.id,
       model,
@@ -138,7 +188,9 @@ Deno.serve(async (req) => {
       note: out.note ?? null,
       // ค่าที่มีอยู่แล้วในระบบ — ให้หน้าเว็บโชว์ว่าจะทับอะไร ไม่ทับเงียบ
       current: { trade_id: row.trade_id || null, username: row.username || null, phone: row.phone || null, email: row.email || null },
-    });
+    };
+    cacheSet(cacheKey, row.id, "extract", "-", result).catch(() => {});   // เขียนแคชแบบไม่รอ
+    return json(result);
   } catch (e) {
     return json({ ok: false, error: e instanceof Error ? e.message : String(e) }, 500);
   }
