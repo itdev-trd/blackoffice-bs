@@ -134,6 +134,9 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   //
   // ส่งผ่าน Realtime broadcast ไม่เขียนฐานข้อมูล เพราะเป็นสถานะชั่วคราวไม่กี่วินาที
   // (ถ้าเขียน DB ทุกครั้งที่กดแป้น = เขียนหลายสิบครั้งต่อข้อความเดียว)
+  // ข้อความที่ Meta ปฏิเสธ — เก็บฉบับที่แปลแล้วไว้ให้ก็อปไปวางในกล่องข้อความเพจ
+  // (ระหว่างที่ยังไม่ได้ Advanced Access ทางนี้คือทางเดียวที่ส่งถึงลูกค้าจริงได้)
+  const [failedText, setFailedText] = useState("");
   const [typingBy, setTypingBy] = useState({});
   const typingChanRef = useRef(null);      // ช่องของห้องที่เปิดอยู่
   const typingSentAtRef = useRef(0);       // กันส่งถี่เกิน (ทุก 2 วิ ระหว่างพิมพ์)
@@ -1201,7 +1204,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     const preloaded = cachedChat(item.id);
     setSelected(preloaded || { ...item, transcript: null });
     logActivity("open_chat", { id: item.id, customer_name: item.customer_name, page_id: item.page_id });
-    setTranslations({}); setReply(""); setSendPreview(null); setSendMsg(""); setAdSources([]); setAdLoading(false); setSavedReplies([]); setSavedOpen(false); setKnowledgeOpen(false); setKnowledgeResults([]); setReplyTo(null); setMessageMenu(null); setKnowledgeCapture(null); setKnowledgeCaptureMsg(""); setEmojiOpen(false); setInfoOpen(false); setComposeMode("reply"); setLabelMsg(null); setQuickFillState({});
+    setTranslations({}); setReply(""); setSendPreview(null); setSendMsg(""); setFailedText(""); setAdSources([]); setAdLoading(false); setSavedReplies([]); setSavedOpen(false); setKnowledgeOpen(false); setKnowledgeResults([]); setReplyTo(null); setMessageMenu(null); setKnowledgeCapture(null); setKnowledgeCaptureMsg(""); setEmojiOpen(false); setInfoOpen(false); setComposeMode("reply"); setLabelMsg(null); setQuickFillState({});
     setForceLang(item.source === "line" ? "Thai" : lsGet(`ui.forceLang.${item.id}`, "auto"));   // LINE เป็นภาษาไทย ไม่ต้องแปล
     // LINE OA ใช้ภาษาไทย ไม่ต้องเรียกตัวแปลหรือสร้างคำแปลใต้ข้อความ
     const translationPromise = item.source === "line" ? null : supabase.functions.invoke("messenger-reply", { body: { action: "translate", id: item.id } });
@@ -1445,8 +1448,9 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
           force_lang: selected.source !== "line" && forceLang !== "auto" ? forceLang : undefined,
           comment_reply_mode: isCommentChat(selected) ? "public" : undefined,
         } });
-        if (error) { rollbackOptimistic(); setSendMsg("ส่งไม่สำเร็จ: " + (await readFunctionErrorMessage(error))); return; }
-        if (!data?.ok) { rollbackOptimistic(); setSendMsg("ส่งไม่สำเร็จ: " + (data?.error || "")); return; }
+        if (error) { rollbackOptimistic(); setFailedText(approved.text || sourceText); setSendMsg("ส่งไม่สำเร็จ: " + (await readFunctionErrorMessage(error))); return; }
+        if (!data?.ok) { rollbackOptimistic(); setFailedText(approved.text || sourceText); setSendMsg("ส่งไม่สำเร็จ: " + (data?.error || "")); return; }
+        setFailedText("");
         const realItem = { w: "p", t: data.sent_text, at: optAt, by: myEmail, mid: data.message_id || null, ...(data.quote_token ? { quote_token: data.quote_token } : {}), ...(data.reply_to_text ? { reply_to_text: data.reply_to_text } : {}), ...(data.reply_to_mid ? { reply_to_mid: data.reply_to_mid } : {}), ...(data.reply_to_img ? { reply_to_img: data.reply_to_img } : {}), ...(data.reply_to_at ? { reply_to_at: data.reply_to_at } : {}) };
         setSelected((s) => {
           if (!s) return s;
@@ -2579,12 +2583,22 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                   {/* ตอบผ่านแอปไม่ได้เพราะ Meta ยังไม่อนุมัติ Advanced Access — อย่าปล่อยให้ตัน
                       เปิดกล่องข้อความของเพจไปตอบได้เลย แล้วข้อความจะไหลกลับเข้าห้องนี้เองทาง webhook */}
                   {/Standard Access|App Review/i.test(sendMsg) && selected?.psid && selected?.page_id && (
-                    <a
-                      href={`https://business.facebook.com/latest/inbox/all?asset_id=${encodeURIComponent(selected.page_id)}&thread_id=${encodeURIComponent(selected.psid)}`}
-                      target="_blank" rel="noopener noreferrer"
-                      className="mt-1.5 inline-flex items-center gap-1.5 rounded-lg border border-night-border bg-night-surface2 px-2.5 py-1 text-[11.5px] font-medium text-night-accent">
-                      <ExternalLink size={12} /> ตอบในกล่องข้อความของเพจ (Meta)
-                    </a>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        // ก็อปข้อความฉบับที่แปลแล้ว (คือฉบับที่ลูกค้าควรได้) แล้วเปิดเธรดนั้นให้เลย
+                        // เหลือแค่วาง + กดส่ง — เร็วกว่าไปไล่หาห้องในกล่องข้อความเพจเอง
+                        const text = failedText || reply;
+                        try { if (text) await navigator.clipboard.writeText(text); } catch { /* บางเบราว์เซอร์ไม่ให้เขียนคลิปบอร์ด */ }
+                        window.open(
+                          `https://business.facebook.com/latest/inbox/all?asset_id=${encodeURIComponent(selected.page_id)}&thread_id=${encodeURIComponent(selected.psid)}`,
+                          "_blank", "noopener",
+                        );
+                        setSendMsg("คัดลอกข้อความแล้ว — วางในกล่องข้อความเพจที่เปิดขึ้นมา แล้วกดส่ง · ข้อความจะกลับมาโผล่ในห้องนี้เองภายในไม่กี่วินาที");
+                      }}
+                      className="mt-1.5 inline-flex items-center gap-1.5 rounded-lg border border-night-accent bg-night-surface2 px-2.5 py-1 text-[11.5px] font-medium text-night-accent">
+                      <ExternalLink size={12} /> คัดลอกข้อความ + เปิดกล่องข้อความเพจ
+                    </button>
                   )}
                 </div>
               )}
