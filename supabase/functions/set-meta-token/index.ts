@@ -41,6 +41,36 @@ async function inspectToken(token: string) {
   return { valid: true, name: me.name, id: me.id, can_see_adaccounts: !acc?.error, expires_at, scopes, missing_scopes: missing };
 }
 
+// ตรวจ token ที่จะใช้ "ตอบแชท" — ต้องรู้ว่ามาจากแอปไหน เพราะระดับสิทธิ์ผูกกับแอปนั้น
+// debug_token ใช้ตัว token เองเป็น access_token ได้ จึงตรวจ token ของแอปอื่นได้ด้วย
+// (ต่างจาก inspectToken ที่ใช้ app token ของแอปเรา ซึ่งอ่าน token ของแอปอื่นไม่ได้)
+async function inspectMessagingToken(token: string) {
+  const me = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/me?fields=id,name&access_token=${token}`).then((r) => r.json());
+  if (me?.error) return { valid: false, error: me.error.message };
+  let app_id: string | null = null;
+  let app_name: string | null = null;
+  let scopes: string[] = [];
+  let token_type: string | null = null;
+  let expires_at: number | null = null;
+  try {
+    const dbg = await fetch(
+      `https://graph.facebook.com/${GRAPH_VERSION}/debug_token?input_token=${token}&access_token=${token}`
+    ).then((r) => r.json());
+    app_id = dbg?.data?.app_id ? String(dbg.data.app_id) : null;
+    app_name = dbg?.data?.application ? String(dbg.data.application) : null;
+    scopes = Array.isArray(dbg?.data?.scopes) ? dbg.data.scopes : [];
+    token_type = dbg?.data?.type ? String(dbg.data.type) : null;
+    expires_at = dbg?.data?.expires_at ?? null;
+  } catch (_e) { /* best-effort */ }
+  // เพจที่ token นี้ตอบแชทได้จริง (ต้องมี pages_messaging และเห็นเพจนั้น)
+  const pg = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/me/accounts?fields=id,name&limit=25&access_token=${token}`).then((r) => r.json());
+  const pages = Array.isArray(pg?.data) ? pg.data.map((x: any) => ({ id: String(x.id), name: String(x.name || x.id) })) : [];
+  return {
+    valid: true, name: me?.name || null, app_id, app_name, token_type, expires_at, scopes, pages,
+    has_messaging: scopes.length ? scopes.includes("pages_messaging") : null,
+  };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
@@ -114,6 +144,30 @@ Deno.serve(async (req) => {
       ]);
       return new Response(JSON.stringify({ ok: true, saved: true, app_id: appId, app_name: checked.valid ? checked.name : null, unverified: !checked.valid, error: checked.valid ? null : checked.error }),
         { headers: { ...corsHeaders, "content-type": "application/json" } });
+    }
+
+    // ---- token สำหรับตอบแชทโดยเฉพาะ (แยกจาก token หลักที่ใช้งานโฆษณา) ----
+    if (action === "messaging_status") {
+      const { data: row } = await admin.from("app_secrets").select("value, updated_at").eq("key", "meta_messaging_token").maybeSingle();
+      const tok = String(row?.value || "").trim();
+      if (!tok) return new Response(JSON.stringify({ ok: true, has_token: false }), { headers: { ...corsHeaders, "content-type": "application/json" } });
+      const info = await inspectMessagingToken(tok);
+      return new Response(JSON.stringify({ ok: true, has_token: true, updated_at: row?.updated_at ?? null, ...info }),
+        { headers: { ...corsHeaders, "content-type": "application/json" } });
+    }
+
+    if (action === "save_messaging") {
+      const tok = String(body.token || "").trim();
+      // ส่งค่าว่างมา = เลิกใช้ token แยก กลับไปใช้ token หลัก
+      if (!tok) {
+        await admin.from("app_secrets").delete().eq("key", "meta_messaging_token");
+        return new Response(JSON.stringify({ ok: true, cleared: true }), { headers: { ...corsHeaders, "content-type": "application/json" } });
+      }
+      const info = await inspectMessagingToken(tok);
+      if (!info.valid) throw new Error(`token ใช้ไม่ได้: ${info.error || "ไม่ทราบสาเหตุ"}`);
+      if (!info.pages?.length) throw new Error("token นี้ไม่เห็นเพจใดเลย (ต้องมีสิทธิ์ pages_show_list + pages_messaging และเป็นแอดมินเพจ)");
+      await admin.from("app_secrets").upsert({ key: "meta_messaging_token", value: tok, updated_at: new Date().toISOString() });
+      return new Response(JSON.stringify({ ok: true, saved: true, ...info }), { headers: { ...corsHeaders, "content-type": "application/json" } });
     }
 
     if (action === "status") {

@@ -529,6 +529,104 @@ export function MetaTokenPanel() {
   );
 }
 
+// token แยกสำหรับ "ตอบแชท" — ทางออกเดียวที่ตอบลูกค้าจริงได้โดยไม่ต้องรอ App Review
+//
+// Meta ตรวจระดับสิทธิ์ pages_messaging ที่ "แอปที่ออก token" ไม่ใช่ที่ตัวโค้ดหรือชนิด token
+// (โค้ดส่งข้อความของระบบเก่ากับระบบนี้เหมือนกันเป๊ะ — ใช้ page access token ทั้งคู่)
+// ถ้ามีแอป Meta ตัวอื่นที่ได้ Advanced Access อยู่แล้ว วาง token ของแอปนั้นที่นี่
+// ระบบจะใช้เฉพาะกับการตอบแชท ส่วนงานโฆษณา/รายงานยังใช้ token หลักเดิมไม่กระทบ
+export function MetaMessagingTokenPanel() {
+  const [status, setStatus] = useState(null);
+  const [token, setToken] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
+
+  async function loadStatus() {
+    const { data } = await supabase.functions.invoke("set-meta-token", { body: { action: "messaging_status" } });
+    if (data?.ok) setStatus(data);
+  }
+  useEffect(() => { loadStatus(); }, []);
+
+  async function save(clear = false) {
+    setBusy(true); setErr(""); setMsg("");
+    const { data, error } = await supabase.functions.invoke("set-meta-token", {
+      body: { action: "save_messaging", token: clear ? "" : token },
+    });
+    setBusy(false);
+    if (error) { setErr(await readFunctionErrorMessage(error)); return; }
+    if (!data?.ok) { setErr(data?.error || "บันทึกไม่สำเร็จ"); return; }
+    setMsg(clear ? "เลิกใช้ token แยกแล้ว — กลับไปใช้ token หลัก" : `บันทึกแล้ว · แอป: ${data.app_name || data.app_id || "ไม่ทราบ"} · เห็น ${data.pages?.length || 0} เพจ`);
+    setToken("");
+    loadStatus();
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-3">
+      <div>
+        <h3 className="font-semibold text-slate-800">Token สำหรับตอบแชท (แยกจาก token หลัก)</h3>
+        <p className="mt-1 text-xs text-slate-500">
+          Meta ตรวจสิทธิ์ส่งข้อความที่ <b>แอปที่ออก token</b> — ถ้ามีแอป Meta ตัวอื่นที่ได้ Advanced Access
+          ของ pages_messaging อยู่แล้ว วาง token ของแอปนั้นที่นี่ จะตอบลูกค้าจริงได้ทันทีโดยไม่ต้องรอ App Review
+          · งานโฆษณา/รายงานยังใช้ token หลักเดิม ไม่กระทบ
+        </p>
+      </div>
+
+      {status && (
+        <div className="text-xs">
+          {status.has_token ? (
+            <div className="space-y-1">
+              <div className={status.valid ? "text-emerald-700" : "text-rose-600"}>
+                ● {status.valid ? "ใช้ token แยกอยู่" : `token มีปัญหา: ${status.error || "ใช้ไม่ได้"}`}
+              </div>
+              {status.valid && (
+                <div className="rounded-lg bg-slate-50 px-2 py-1.5 text-slate-600">
+                  แอปที่ออก token: <b>{status.app_name || "—"}</b>
+                  {status.app_id ? <span className="font-mono"> ({status.app_id})</span> : null}
+                  {status.token_type ? ` · ชนิด ${status.token_type}` : ""}
+                  <br />
+                  เพจที่ตอบได้: {status.pages?.length ? status.pages.map((p) => p.name).join(", ") : "— (token ไม่เห็นเพจใดเลย)"}
+                  {status.has_messaging === false && (
+                    <div className="mt-1 text-amber-700">⚠ token นี้ไม่มีสิทธิ์ pages_messaging</div>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : (
+            <span className="text-slate-500">● ยังไม่ได้ตั้ง — ตอบแชทใช้ token หลักอยู่</span>
+          )}
+        </div>
+      )}
+
+      <PasswordInput
+        placeholder="วาง token ของแอปที่มีสิทธิ์ตอบแชท..."
+        value={token}
+        onChange={(e) => setToken(e.target.value)}
+        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+        autoComplete="off"
+      />
+      <div className="flex flex-wrap items-center gap-2">
+        <button onClick={() => save(false)} disabled={busy || !token.trim()}
+          className="flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60">
+          {busy ? <Loader2 className="animate-spin" size={16} /> : null} บันทึก token ตอบแชท
+        </button>
+        {status?.has_token && (
+          <button onClick={() => save(true)} disabled={busy}
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-60">
+            เลิกใช้ (กลับไป token หลัก)
+          </button>
+        )}
+        {msg && <span className="text-sm text-emerald-700">{msg}</span>}
+      </div>
+      {err && <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">{err}</div>}
+      <p className="text-[11px] text-slate-400">
+        ระบบตรวจกับ Meta ก่อนบันทึก และบอกให้ว่า token มาจากแอปไหน เห็นเพจอะไร — ถ้าเป็นแอปเดิมที่ยังเป็น
+        Standard Access ผลจะไม่ต่างจากเดิม ต้องเป็น token จากแอปที่ได้ Advanced Access แล้วเท่านั้น
+      </p>
+    </div>
+  );
+}
+
 // App ID + App Secret ของ Meta app — ใช้ 2 อย่าง: ตรวจลายเซ็น webhook (x-hub-signature-256)
 // และสร้าง app access token สำหรับตั้ง callback URL ของ webhook
 // เดิมอยู่ใน env ของ edge function อย่างเดียว ทำให้ย้ายไปใช้ Meta app ตัวอื่นต้องเข้า Supabase ไปแก้เอง

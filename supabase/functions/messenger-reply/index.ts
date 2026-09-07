@@ -5,7 +5,7 @@
 // ต้องมีสิทธิ์ pages_messaging และส่งได้ภายในกรอบ 24 ชม.หลังลูกค้าพิมพ์ล่าสุด (messaging_type=RESPONSE)
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { getMetaToken } from "../_shared/meta.ts";
+import { getMetaMessagingToken } from "../_shared/meta.ts";
 import { getMetaPages } from "../_shared/meta-pages.ts";
 import { authorizeRequest } from "../_shared/permissions.ts";
 import { getLineConfig, lineApi } from "../_shared/line.ts";
@@ -307,7 +307,7 @@ Deno.serve(async (req) => {
       const pageId = body?.page_id ? String(body.page_id) : null;
       if (!pageId) throw new Error("ต้องส่ง page_id");
       // สิทธิ์ตอบแชทไม่ผูกกับเพจ — ใครเข้าหน้าตอบแชทได้ ก็ตอบได้ทุกเพจและทุก LINE OA
-      const token = await getMetaToken();
+      const token = await getMetaMessagingToken();
       if (!token) throw new Error("ยังไม่ได้ตั้งค่า Meta access token");
       const pd = await getMetaPages(GRAPH_BASE, token, { mustIncludePageId: pageId });
       const pageTok = (pd?.data ?? []).find((p: any) => p.id === pageId)?.access_token;
@@ -500,7 +500,7 @@ Deno.serve(async (req) => {
         send = { ...send, message_id: send?.sentMessages?.[0]?.id || null, quote_token: send?.sentMessages?.[0]?.quoteToken || null, _delivery_mode: "line_push" };
       } else {
         // ช่องทาง Meta เท่านั้นจึงต้องดึง Page access token
-        const token = await getMetaToken();
+        const token = await getMetaMessagingToken();
         const pagesData = await getMetaPages(GRAPH_BASE, token, {
           mustIncludePageId: row.page_id,
           mustIncludeInstagramForPageId: row.source === "instagram" || isInstagramComment ? row.page_id : undefined,
@@ -670,7 +670,7 @@ Deno.serve(async (req) => {
       if (!row.psid) return json({ ok: true, profile_pic: row.profile_pic || null });
       // เฉพาะ IG เท่านั้น — FB ปิด User Profile API แล้ว (GET /{psid}?fields=profile_pic คืน error 100/33) ยิงไปก็เปล่า
       if (row.source !== "instagram") return json({ ok: true, profile_pic: row.profile_pic || null });
-      const token = await getMetaToken();
+      const token = await getMetaMessagingToken();
       const pd = await getMetaPages(GRAPH_BASE, token, {
         mustIncludePageId: row.page_id,
         mustIncludeInstagramForPageId: row.source === "instagram" ? row.page_id : undefined,
@@ -706,7 +706,7 @@ Deno.serve(async (req) => {
         send = await lineApi("/v2/bot/message/push", cfg.accessToken, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ to: row.psid, messages: [lineMessage] }) });
         send = { ...send, message_id: send?.sentMessages?.[0]?.id || null };
       } else {
-        const token = await getMetaToken();
+        const token = await getMetaMessagingToken();
         const pd = await getMetaPages(GRAPH_BASE, token, {
           mustIncludePageId: row.page_id,
           mustIncludeInstagramForPageId: row.source === "instagram" ? row.page_id : undefined,
@@ -759,7 +759,7 @@ Deno.serve(async (req) => {
       // was_unread = หน้าเว็บเพิ่งเขียน unread=false ลงฐานข้อมูลเองก่อนเรียกมา (กันจุดแดงเด้งกลับตอน poll)
       // ถ้าเช็คแค่ row.unread จะกลายเป็นไม่เคยแจ้ง Meta เลย ทำให้กล่องข้อความเพจยังขึ้นว่ายังไม่อ่าน
       if ((row.unread || body?.was_unread === true) && row.psid && row.source !== "line") {
-        const token = await getMetaToken();
+        const token = await getMetaMessagingToken();
         const pd = await getMetaPages(GRAPH_BASE, token, { mustIncludePageId: row.page_id });
         const pageTok = (pd?.data ?? []).find((p: any) => p.id === row.page_id)?.access_token;
         if (pageTok) {

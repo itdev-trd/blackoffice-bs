@@ -35,6 +35,42 @@ export async function getMetaToken(): Promise<string> {
   return cachedToken;
 }
 
+// ---------- token สำหรับ "ตอบแชท" แยกจาก token หลัก ----------
+//
+// ทำไมต้องแยก: token หลัก (system user ของธุรกิจ) มีสิทธิ์บัญชีโฆษณาและใช้กับรายงานอยู่
+// แต่การส่งข้อความติดที่ "แอปไหนออก token" — Meta ตรวจระดับสิทธิ์ของแอปนั้น
+// ถ้ามีแอปอื่นที่ได้ Advanced Access ของ pages_messaging อยู่แล้ว
+// วาง token ของแอปนั้นไว้ที่นี่ = ตอบแชทได้ทันทีโดยไม่ต้องแตะ token ของงานโฆษณา
+//
+// ไม่ได้ตั้ง = ใช้ token หลักเหมือนเดิม (พฤติกรรมเดิมไม่เปลี่ยน)
+let cachedMsgToken = "";
+let cachedMsgTokenAt = 0;
+
+export async function getMetaMessagingToken(): Promise<string> {
+  const now = Date.now();
+  if (cachedMsgToken && now - cachedMsgTokenAt < TOKEN_CACHE_MS) return cachedMsgToken;
+  try {
+    const admin = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+    );
+    const { data } = await admin
+      .from("app_secrets")
+      .select("value")
+      .eq("key", "meta_messaging_token")
+      .maybeSingle();
+    const v = String(data?.value || "").trim();
+    if (v) {
+      cachedMsgToken = v;
+      cachedMsgTokenAt = now;
+      return cachedMsgToken;
+    }
+  } catch (_e) { /* ไป fallback token หลัก */ }
+  cachedMsgToken = "";
+  cachedMsgTokenAt = now;
+  return await getMetaToken();
+}
+
 // ---------- ข้อมูลของ "Meta app" (App ID / App Secret) ----------
 // ใช้ตรวจลายเซ็น webhook (x-hub-signature-256) และสร้าง app access token (`{app_id}|{app_secret}`)
 // สำหรับตั้ง callback URL ของ webhook — ตั้งจากหน้าเว็บได้เหมือน token เพื่อไม่ต้องเข้าไปแก้ env
