@@ -40,17 +40,23 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const tradeId = String(body?.trade_id ?? "").trim();
     if (!tradeId) return json({ ok: false, error: "กรุณาระบุเลขไอดีเทรด" }, 400);
+    // force = ยิงเช็คสดใหม่ ไม่อ่านผล "ไม่ผ่าน" ที่แคชไว้
+    // จำเป็นเพราะลูกค้าที่เพิ่งสมัคร/เพิ่งย้ายมาอยู่ใต้ IB เรา จะติดผลเก่าไปอีก 10 นาที
+    // แล้วแอดมินจะกดเท่าไหร่ก็เห็นข้อความเดิม เข้าใจผิดว่าระบบพัง
+    const force = body?.force === true;
 
     // 0) cache — ผล "ผ่าน" เก็บถาวร, ผล "ไม่ผ่าน" ใช้ได้ชั่วคราว (FAIL_TTL_MS)
     try {
       const { data: c } = await admin().from("trade_id_cache").select("pass, via, platform, insertdate, checked_at").eq("trade_id", tradeId).maybeSingle();
       if (c?.pass) return json({ ok: true, pass: true, via: c.via || "cache", trade_id: tradeId, platform: c.platform || null, insertdate: c.insertdate || null, cached: true });
-      if (c && c.pass === false && c.checked_at && Date.now() - new Date(c.checked_at).getTime() < FAIL_TTL_MS) {
-        return json({ ok: true, pass: false, trade_id: tradeId, cached: true });
+      if (!force && c && c.pass === false && c.checked_at && Date.now() - new Date(c.checked_at).getTime() < FAIL_TTL_MS) {
+        return json({ ok: true, pass: false, trade_id: tradeId, cached: true, checked_at: c.checked_at, can_force: true });
       }
     } catch { /* cache พลาด = เช็คสด */ }
 
     const notes: string[] = [];
+    let apiResult: string | null = null;      // คำตอบดิบจาก api.trdapi.com (pass / fails)
+    let emailResult: string | null = null;    // คำตอบดิบจาก ai.traderider.com (pass / fails)
     const saveCache = (row: Record<string, unknown>) => admin().from("trade_id_cache").upsert({ trade_id: tradeId, checked_at: new Date().toISOString(), ...row }).then(() => {}, () => {});
 
     // 1) API — เช็คก่อนเสมอ (result === "pass" = ผ่าน)
@@ -61,9 +67,10 @@ Deno.serve(async (req) => {
         body: JSON.stringify({ broker: BROKER, trade_id: tradeId }),
       });
       const j = await r.json().catch(() => ({}));
+      apiResult = j?.result ? String(j.result) : null;
       if (String(j?.result ?? "").toLowerCase() === "pass") {
         await saveCache({ pass: true, via: "api", platform: null, insertdate: null });
-        return json({ ok: true, pass: true, via: "api", trade_id: tradeId });
+        return json({ ok: true, pass: true, via: "api", trade_id: tradeId, campaign: j?.campaignName ?? null, account_type: j?.accountType ?? null });
       }
     } catch (e) {
       notes.push(`API: ${String(e instanceof Error ? e.message : e)}`);
@@ -73,6 +80,7 @@ Deno.serve(async (req) => {
     try {
       const r = await fetchTimeout(`${EMAIL_URL}?trade_id=${encodeURIComponent(tradeId)}`);
       const j = await r.json().catch(() => ({}));
+      emailResult = j?.verified ? String(j.verified) : null;
       if (String(j?.verified ?? "").toLowerCase() === "pass") {
         await saveCache({ pass: true, via: "email", platform: j?.platform || null, insertdate: j?.insertdate || null });
         return json({ ok: true, pass: true, via: "email", trade_id: tradeId, platform: j?.platform || null, insertdate: j?.insertdate || null });
@@ -83,7 +91,13 @@ Deno.serve(async (req) => {
 
     // ไม่ผ่านทั้งสองช่องทาง — cache แบบ TTL สั้น (ยกเว้นตอน external ล่ม จะไม่ cache กันจำผลผิด)
     if (!notes.length) await saveCache({ pass: false, via: null, platform: null, insertdate: null });
-    return json({ ok: true, pass: false, trade_id: tradeId, ...(notes.length ? { note: notes.join(" · ") } : {}) });
+    return json({
+      ok: true, pass: false, trade_id: tradeId,
+      api_result: apiResult, email_result: emailResult,
+      // upstream ล่ม (มี note) ต่างจาก "เช็คแล้วไม่ใช่ลูกค้าเรา" (ไม่มี note) — แอดมินต้องแยกออก
+      upstream_error: notes.length > 0,
+      ...(notes.length ? { note: notes.join(" · ") } : {}),
+    });
   } catch (err) {
     return json({ ok: false, error: String(err instanceof Error ? err.message : err) }, 500);
   }

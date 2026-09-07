@@ -79,6 +79,7 @@ export default function TvMembersTab({ active = true, embedded = false }) {
     return Math.max(1, Math.ceil((target - Date.now()) / 86400000));
   };
   const [granting, setGranting] = useState(false);
+  const [verifyFail, setVerifyFail] = useState(null);   // ผลเช็คไอดีเทรดที่ไม่ผ่าน + สาเหตุ
   // ปรับวันหมดอายุ (เพิ่ม/ลด) ของสมาชิกที่มีอยู่
   const [adjRow, setAdjRow] = useState(null);   // แถว tv_access ที่กำลังตั้งวันหมดอายุ
   const [adjMode, setAdjMode] = useState("days");   // days | date | lifetime
@@ -317,7 +318,15 @@ export default function TvMembersTab({ active = true, embedded = false }) {
   const durLabel = (d) => d.mode === "lifetime" ? "ตลอดชีพ"
     : d.mode === "date" ? `ถึง ${d.expDate ? new Date(`${d.expDate}T00:00:00+07:00`).toLocaleDateString("th-TH", { day: "2-digit", month: "short", year: "2-digit" }) : "—"}`
     : `${Number(d.days) || 30} วัน`;
-  async function grant() {
+  // อธิบายผล "ไม่ผ่าน" ให้ตรงสาเหตุ — เดิมบอกแค่ "ไม่ผ่าน" แอดมินจึงไม่รู้ว่าต้องทำอะไรต่อ
+  // (ลูกค้าไม่ได้อยู่ใต้ IB เรา / เพิ่งสมัครยังไม่ขึ้นระบบ / ปลายทางล่ม เป็นสามเรื่องที่แก้ต่างกัน)
+  function failReason(vt) {
+    if (vt?.upstream_error) return "ระบบตรวจของ XM ตอบไม่ได้ตอนนี้ (ไม่ใช่ว่าไอดีผิด) — รอสักครู่แล้วกดตรวจใหม่";
+    if (vt?.cached) return "เป็นผลที่เพิ่งตรวจไปไม่เกิน 10 นาที — ถ้าลูกค้าเพิ่งสมัคร/เพิ่งย้ายมาอยู่ใต้ลิงก์เรา กด “ตรวจใหม่” ได้เลย";
+    return "ตรวจแล้วทั้ง 2 ช่องทาง (API ของ XM และระบบอีเมล) ไม่พบไอดีนี้ใต้ IB ของเรา — ให้ลูกค้าสมัครใหม่ผ่านลิงก์ของเรา หรือแจ้งเลขบัญชีที่ถูกต้อง";
+  }
+
+  async function grant(opts = {}) {
     if (!uname.trim()) { setMsg("ใส่ TradingView username ก่อน"); return; }
     if (!pineIds.length) { setMsg("เลือกสคริปต์อย่างน้อย 1 อัน"); return; }
     if (!tradeId.trim()) { setMsg("ใส่ไอดีเทรดก่อน (ระบบจะเช็คก่อนให้สิทธิ์)"); return; }
@@ -329,9 +338,17 @@ export default function TvMembersTab({ active = true, embedded = false }) {
     setGranting(true);
     // 1) เช็คไอดีเทรดก่อน — ต้องผ่านถึงจะเพิ่มสิทธิ์ TV
     setMsg("กำลังเช็คไอดีเทรด...");
-    const { data: vt, error: ve } = await supabase.functions.invoke("verify-trade-id", { body: { trade_id: tradeId.trim() } });
-    if (ve || !vt?.ok) { setGranting(false); setMsg("✗ เช็คไอดีเทรดไม่สำเร็จ: " + (vt?.error || (ve ? "ลองใหม่" : ""))); return; }
-    if (!vt.pass) { setGranting(false); setMsg(`✗ ไอดีเทรด "${tradeId.trim()}" ไม่ผ่าน — ยังเพิ่มสิทธิ์ TradingView ไม่ได้`); return; }
+    const { data: vt, error: ve } = await supabase.functions.invoke("verify-trade-id", {
+      body: { trade_id: tradeId.trim(), ...(opts.force ? { force: true } : {}) },
+    });
+    if (ve || !vt?.ok) { setGranting(false); setVerifyFail(null); setMsg("✗ เช็คไอดีเทรดไม่สำเร็จ: " + (vt?.error || (ve ? "ลองใหม่" : ""))); return; }
+    if (!vt.pass) {
+      setGranting(false);
+      setVerifyFail({ tradeId: tradeId.trim(), reason: failReason(vt), api: vt.api_result || null, email: vt.email_result || null, cached: !!vt.cached });
+      setMsg("");
+      return;
+    }
+    setVerifyFail(null);
     // 2) ผ่านแล้ว → ให้สิทธิ์ทีละสคริปต์ (แต่ละตัวใช้วันหมดอายุของตัวเอง)
     const summ = []; const fails = []; let realUser = uname.trim();
     for (const pid of pineIds) {
@@ -747,6 +764,23 @@ export default function TvMembersTab({ active = true, embedded = false }) {
           <button onClick={grant} disabled={granting} className="w-full rounded-lg bg-brand-600 text-white py-2.5 text-sm font-semibold hover:bg-brand-700 disabled:opacity-50">
             {granting ? "กำลังเพิ่ม..." : "เพิ่มสิทธิ์"}
           </button>
+          {verifyFail && (
+            <div className="mt-2 rounded-lg border p-2.5 text-xs" style={{ borderColor: "var(--amber-border, #fcd34d)", background: "rgba(251,191,36,0.08)" }}>
+              <div className="font-semibold" style={{ color: "var(--ink-1)" }}>
+                ไอดีเทรด “{verifyFail.tradeId}” ไม่ผ่าน — ยังเพิ่มสิทธิ์ TradingView ไม่ได้
+              </div>
+              <div className="mt-1" style={{ color: "var(--ink-2)" }}>{verifyFail.reason}</div>
+              <div className="mt-1 text-[10.5px]" style={{ color: "var(--ink-3)" }}>
+                ผลที่ได้: API ของ XM = {verifyFail.api || "—"} · ระบบอีเมล = {verifyFail.email || "—"}
+                {verifyFail.cached ? " · (ผลจากแคช)" : ""}
+              </div>
+              <button type="button" onClick={() => grant({ force: true })} disabled={granting}
+                className="mt-2 rounded-lg border px-2.5 py-1 text-[11px] font-semibold disabled:opacity-50"
+                style={{ borderColor: "var(--line-2)", color: "var(--ink-1)" }}>
+                ตรวจใหม่อีกครั้ง (ข้ามแคช)
+              </button>
+            </div>
+          )}
           </div>
         </details>
 
