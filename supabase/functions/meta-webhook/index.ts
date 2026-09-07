@@ -610,6 +610,11 @@ Deno.serve(async (req) => {
               const dupByUrl = firstUrl && tail.some((m: any) => m?.w === "p" && m.img === firstUrl && recent(m));
               // Meta ไม่ส่งตัวตนแอดมินมากับ echo (sender.id = PAGE_ID เสมอ) → ตอบจากเพจ = ไม่ระบุชื่อ
               const adminName: string | null = null;
+              // Meta ใส่ app_id มากับ echo เฉพาะข้อความที่ "แอปยิงผ่าน Send API"
+              // ไม่มี app_id = คนกดตอบมือจากกล่องข้อความเพจ/แอป Messenger เอง
+              // เก็บไว้เพื่อตอบให้ได้ว่าข้อความที่ส่งถึงลูกค้าสำเร็จมาจากแอปไหน (สิทธิ์ผูกกับแอปนั้น)
+              const echoAppId = msg?.app_id != null ? String(msg.app_id) : null;
+              console.log(`[echo] page=${pageId} psid=${custPsid} app_id=${echoAppId ?? "none(human)"} mid=${msg?.mid ?? ""}`);
               // ข้อความล่าสุดฝั่งเพจ — เอาไปโชว์บนป้ายชื่อซ้าย (ข้อ 3: เดิมโชว์แต่ข้อความลูกค้า)
               const echoPreview = msg.text ? String(msg.text).slice(0, 300)
                 : msgAttachPreview(msg.attachments || []);
@@ -642,7 +647,7 @@ Deno.serve(async (req) => {
                 }).eq("id", row.id);
               } else {
                 const items: any[] = [];
-                if (msg.text) items.push({ w: "p", t: transcriptText(msg.text), at: nowIso, mid, ...(adminName ? { by_name: adminName } : {}) });
+                if (msg.text) items.push({ w: "p", t: transcriptText(msg.text), at: nowIso, mid, ...(adminName ? { by_name: adminName } : {}), ...(echoAppId ? { app: echoAppId } : {}) });
                 for (const att of (msg.attachments || [])) {
                   const aType = att?.type; const aUrl = att?.payload?.url || null;
                   const isSticker = !!att?.payload?.sticker_id || !!msg.sticker_id;
@@ -650,6 +655,7 @@ Deno.serve(async (req) => {
                     w: "p", at: nowIso, mid,
                     t: isSticker ? "[สติกเกอร์]" : aType === "image" ? "[รูปภาพ]" : aType === "video" ? "[วิดีโอ]" : aType === "audio" ? "[เสียง]" : aType === "file" ? "[ไฟล์]" : "[สื่อ]",
                     ...(adminName ? { by_name: adminName } : {}),
+                    ...(echoAppId ? { app: echoAppId } : {}),
                   };
                   if (isSticker) it.sticker = true;
                   if (aUrl && (isSticker || aType === "image" || aType === "video")) { it.img = aUrl; it.img_source = "webhook"; }  // ข้อ 2: มี url ก็โชว์รูปสติกเกอร์
