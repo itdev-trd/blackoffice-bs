@@ -3,9 +3,16 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const CACHE_KEY = "meta_pages_cache";
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
 
-let memoryPages: any[] | null = null;
-let memoryUpdatedAt = 0;
-let inFlight: Promise<any> | null = null;
+// แคชแยกตาม cacheKey — page access token ผูกกับ "แอปที่ออก user token" ที่เอาไปแลก
+// ถ้าใช้ช่องเดียวร่วมกัน token ตอบแชท (แอปที่มีสิทธิ์ส่งถึงลูกค้า) จะถูกแคชของงานโฆษณาทับ
+// แล้วการส่งจะกลับไปใช้ page token ของแอปที่ส่งไม่ได้ = ตั้ง token ตอบแชทแล้วไม่มีผล
+type CacheSlot = { pages: any[] | null; updatedAt: number; inFlight: Promise<any> | null };
+const slots = new Map<string, CacheSlot>();
+const slotOf = (key: string): CacheSlot => {
+  let slot = slots.get(key);
+  if (!slot) { slot = { pages: null, updatedAt: 0, inFlight: null }; slots.set(key, slot); }
+  return slot;
+};
 
 async function fetchJson(url: string): Promise<any> {
   const response = await fetch(url);
@@ -37,9 +44,12 @@ export async function getMetaPages(
     mustIncludePageId?: string;
     mustIncludeInstagramAccountId?: string;
     mustIncludeInstagramForPageId?: string;
+    cacheKey?: string;
   } = {},
 ): Promise<any> {
   const ttlMs = options.ttlMs ?? DEFAULT_TTL_MS;
+  const cacheKey = options.cacheKey || CACHE_KEY;
+  const slot = slotOf(cacheKey);
   const now = Date.now();
   // ถ้าระบุว่า "ต้องมีเพจนี้" แล้ว cache ไม่มี (เช่นเพิ่งลิงก์เพจใหม่) → บังคับดึงสด 1 ครั้ง
   const lacks = (pages: any[] | null) => {
@@ -54,8 +64,8 @@ export async function getMetaPages(
     return false;
   };
 
-  if (!options.forceRefresh && memoryPages?.length && now - memoryUpdatedAt < ttlMs && !lacks(memoryPages)) {
-    return { data: memoryPages, cached: true, cache: "memory" };
+  if (!options.forceRefresh && slot.pages?.length && now - slot.updatedAt < ttlMs && !lacks(slot.pages)) {
+    return { data: slot.pages, cached: true, cache: "memory" };
   }
 
   const admin = createClient(
@@ -70,7 +80,7 @@ export async function getMetaPages(
     const { data: row } = await admin
       .from("app_secrets")
       .select("value, updated_at")
-      .eq("key", CACHE_KEY)
+      .eq("key", cacheKey)
       .maybeSingle();
 
     if (row?.value) {
@@ -78,8 +88,8 @@ export async function getMetaPages(
       staleUpdatedAt = row.updated_at ? new Date(row.updated_at).getTime() : 0;
       const age = now - staleUpdatedAt;
       if (!options.forceRefresh && stalePages.length && age >= 0 && age < ttlMs && !lacks(stalePages)) {
-        memoryPages = stalePages;
-        memoryUpdatedAt = staleUpdatedAt || now;
+        slot.pages = stalePages;
+        slot.updatedAt = staleUpdatedAt || now;
         return { data: stalePages, cached: true, cache: "database", age_ms: age };
       }
     }
@@ -87,19 +97,19 @@ export async function getMetaPages(
     console.warn("meta pages cache read failed", error);
   }
 
-  if (inFlight) return await inFlight;
+  if (slot.inFlight) return await slot.inFlight;
 
-  inFlight = (async () => {
+  slot.inFlight = (async () => {
     const fresh = await fetchJson(
       `${base}/me/accounts?fields=id,name,access_token,picture.width(96).height(96){url},instagram_business_account{id,username,profile_picture_url}&limit=100&access_token=${userToken}`,
     );
 
     if (Array.isArray(fresh?.data) && fresh.data.length) {
       const updatedAt = new Date().toISOString();
-      memoryPages = fresh.data;
-      memoryUpdatedAt = Date.now();
+      slot.pages = fresh.data;
+      slot.updatedAt = Date.now();
       const { error } = await admin.from("app_secrets").upsert({
-        key: CACHE_KEY,
+        key: cacheKey,
         value: JSON.stringify(fresh.data),
         updated_at: updatedAt,
       });
@@ -109,8 +119,8 @@ export async function getMetaPages(
 
     // Do not keep hammering Meta when it is unavailable/rate-limited.
     if (stalePages.length) {
-      memoryPages = stalePages;
-      memoryUpdatedAt = staleUpdatedAt || Date.now();
+      slot.pages = stalePages;
+      slot.updatedAt = staleUpdatedAt || Date.now();
       return { data: stalePages, cached: true, stale: true, cache: "database-stale", meta_error: fresh?.error ?? null };
     }
 
@@ -118,8 +128,8 @@ export async function getMetaPages(
   })();
 
   try {
-    return await inFlight;
+    return await slot.inFlight;
   } finally {
-    inFlight = null;
+    slot.inFlight = null;
   }
 }

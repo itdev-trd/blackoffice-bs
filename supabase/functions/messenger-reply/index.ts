@@ -5,7 +5,7 @@
 // ต้องมีสิทธิ์ pages_messaging และส่งได้ภายในกรอบ 24 ชม.หลังลูกค้าพิมพ์ล่าสุด (messaging_type=RESPONSE)
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { getMetaMessagingToken } from "../_shared/meta.ts";
+import { getMetaMessagingContext } from "../_shared/meta.ts";
 import { getMetaPages } from "../_shared/meta-pages.ts";
 import { authorizeRequest } from "../_shared/permissions.ts";
 import { getLineConfig, lineApi } from "../_shared/line.ts";
@@ -34,6 +34,21 @@ const isAppReviewBlock = (...errs: any[]) => errs.some((e) => {
   return /pages_messaging/i.test(text) && /(ผู้ทดสอบ|ผู้พัฒนา|testers|developers)/i.test(text);
 });
 
+// code 100 / subcode 2018276 = แอปที่ออก token ยังไม่ได้รับอนุมัติฟีเจอร์ Human Agent
+// เจอเฉพาะตอนตอบนอกกรอบ 24 ชม. — คนละเรื่องกับ Standard Access ที่กันตามผู้รับ
+// ต้องแยกข้อความให้ชัด ไม่งั้นแอดมินจะคิดว่าตอบลูกค้าไม่ได้เลยทั้งที่ในกรอบ 24 ชม.ตอบได้ปกติ
+const HUMAN_AGENT_HINT = "ตอบไม่ได้เพราะเกินกรอบ 24 ชั่วโมงนับจากข้อความล่าสุดของลูกค้า "
+  + "และแอปที่ออก token ตอบแชทยังไม่ได้รับอนุมัติฟีเจอร์ Human Agent (ที่ขยายเป็น 7 วัน) "
+  + "· ในกรอบ 24 ชม. ตอบได้ปกติ · ถ้าจะตามลูกค้าเก่า ต้องรอเขาทักมาใหม่ หรือขอฟีเจอร์ Human Agent กับ Meta";
+const isHumanAgentNotApproved = (...errs: any[]) => errs.some((e) =>
+  Number(e?.error_subcode) === 2018276 || /HUMAN_AGENT/i.test(String(e?.message || ""))
+);
+// subcode 2018278 = Meta บอกเองว่าเลยกรอบ 24 ชม. — เชื่อ Meta มากกว่าการคำนวณจาก transcript
+// (ห้องที่ประวัติขาเข้าไม่ครบ จะคำนวณว่ายังอยู่ในกรอบทั้งที่จริงเลยไปแล้ว)
+const isOutsideWindow = (...errs: any[]) => errs.some((e) =>
+  Number(e?.error_subcode) === 2018278 || /ช่วงเวลาที่อนุญาต|outside of allowed window/i.test(String(e?.message || ""))
+);
+
 // ส่งเข้า Messenger: ลอง RESPONSE ก่อน (กรอบ 24 ชม.) ถ้า Meta ปฏิเสธ → retry ด้วย Human Agent tag (ขยายเป็น 7 วัน)
 // message = object ของ Send API (เช่น { text } หรือ { attachment })
 async function sendMessage(pageId: string, pageTok: string, psid: string, message: any, version: string, preferHumanAgent = false, extra: Record<string, unknown> = {}) {
@@ -56,9 +71,16 @@ async function sendMessage(pageId: string, pageTok: string, psid: string, messag
     console.warn("[messenger send failed]", JSON.stringify({ preferHumanAgent, firstErr, retryErr: retry.error }));
     // ติดสิทธิ์ระดับแอป ไม่ใช่ระดับห้องแชท — บอกให้ตรงสาเหตุ ไม่งั้นแอดมินจะไล่แก้ผิดทาง
     if (isAppReviewBlock(firstErr, retry.error)) throw new Error(APP_REVIEW_HINT);
-    // อยู่ในกรอบ 24 ชม.แต่ยังส่งไม่ได้ = ไม่ใช่เรื่องหมดเวลา — มักเป็นลูกค้าบล็อกเพจ/ปิดรับข้อความ/บัญชีถูกจำกัด
-    if (!preferHumanAgent) {
-      throw new Error(`ส่งไม่สำเร็จ (ยังอยู่ในกรอบ 24 ชม.): ${metaMsg || "Meta ปฏิเสธการส่ง"} — สาเหตุที่พบบ่อย: ลูกค้าบล็อกเพจ/ปิดรับข้อความ, บัญชีลูกค้าถูกจำกัด, หรือลิงก์/เนื้อหาถูกบล็อก (code ${code}${subcode ? `, subcode ${subcode}` : ""})`);
+    // เลยกรอบ 24 ชม.จริง + แท็ก Human Agent ไม่ได้รับอนุมัติ = บอกสาเหตุนี้ตรง ๆ
+    const outside = preferHumanAgent || isOutsideWindow(firstErr);
+    if (outside && isHumanAgentNotApproved(firstErr, retry.error)) throw new Error(HUMAN_AGENT_HINT);
+    // ยังอยู่ในกรอบ 24 ชม.แต่ส่งไม่ได้ = ไม่ใช่เรื่องหมดเวลา — อ่านสาเหตุจาก error ของ RESPONSE
+    // (ไม่ใช่ของ retry ซึ่งอาจล้มเพราะแท็กไม่อนุมัติ ซึ่งคนละเรื่องกับที่แอดมินต้องแก้)
+    if (!outside) {
+      const firstMsg = firstErr?.error_user_msg || firstErr?.message || metaMsg;
+      const firstCode = Number(firstErr?.code ?? code);
+      const firstSub = firstErr?.error_subcode ? Number(firstErr.error_subcode) : null;
+      throw new Error(`ส่งไม่สำเร็จ (ยังอยู่ในกรอบ 24 ชม.): ${firstMsg || "Meta ปฏิเสธการส่ง"} — สาเหตุที่พบบ่อย: ลูกค้าบล็อกเพจ/ปิดรับข้อความ, บัญชีลูกค้าถูกจำกัด, หรือลิงก์/เนื้อหาถูกบล็อก (code ${firstCode}${firstSub ? `, subcode ${firstSub}` : ""})`);
     }
     if (code === 10 || code === 200 || code === 613 || code === 551) {
       throw new Error(`Meta ไม่อนุญาตให้ส่งนอกกรอบ 24 ชม.ด้วย HUMAN_AGENT — อาจเกิน 7 วันหรือแอปยังไม่ได้รับสิทธิ์ Human Agent (code ${code}${subcode ? `, subcode ${subcode}` : ""})`);
@@ -307,9 +329,9 @@ Deno.serve(async (req) => {
       const pageId = body?.page_id ? String(body.page_id) : null;
       if (!pageId) throw new Error("ต้องส่ง page_id");
       // สิทธิ์ตอบแชทไม่ผูกกับเพจ — ใครเข้าหน้าตอบแชทได้ ก็ตอบได้ทุกเพจและทุก LINE OA
-      const token = await getMetaMessagingToken();
-      if (!token) throw new Error("ยังไม่ได้ตั้งค่า Meta access token");
-      const pd = await getMetaPages(GRAPH_BASE, token, { mustIncludePageId: pageId });
+      const meta = await getMetaMessagingContext();
+      if (!meta.token) throw new Error("ยังไม่ได้ตั้งค่า Meta access token");
+      const pd = await getMetaPages(GRAPH_BASE, meta.token, { mustIncludePageId: pageId, cacheKey: meta.cacheKey });
       const pageTok = (pd?.data ?? []).find((p: any) => p.id === pageId)?.access_token;
       if (!pageTok) throw new Error("ไม่พบ access token ของเพจนี้ (เช็คสิทธิ์ pages_messaging)");
       let r = await fetchJson(`https://graph.facebook.com/${GRAPH_VERSION}/${pageId}/saved_message_responses?fields=id,title,message,image,is_enabled&limit=200&access_token=${pageTok}`);
@@ -500,10 +522,11 @@ Deno.serve(async (req) => {
         send = { ...send, message_id: send?.sentMessages?.[0]?.id || null, quote_token: send?.sentMessages?.[0]?.quoteToken || null, _delivery_mode: "line_push" };
       } else {
         // ช่องทาง Meta เท่านั้นจึงต้องดึง Page access token
-        const token = await getMetaMessagingToken();
-        const pagesData = await getMetaPages(GRAPH_BASE, token, {
+        const meta = await getMetaMessagingContext();
+        const pagesData = await getMetaPages(GRAPH_BASE, meta.token, {
           mustIncludePageId: row.page_id,
           mustIncludeInstagramForPageId: row.source === "instagram" || isInstagramComment ? row.page_id : undefined,
+          cacheKey: meta.cacheKey,
         });
         const pageTok = (pagesData?.data ?? []).find((p: any) => p.id === row.page_id)?.access_token;
         const metaPage = (pagesData?.data ?? []).find((p: any) => p.id === row.page_id);
@@ -670,10 +693,11 @@ Deno.serve(async (req) => {
       if (!row.psid) return json({ ok: true, profile_pic: row.profile_pic || null });
       // เฉพาะ IG เท่านั้น — FB ปิด User Profile API แล้ว (GET /{psid}?fields=profile_pic คืน error 100/33) ยิงไปก็เปล่า
       if (row.source !== "instagram") return json({ ok: true, profile_pic: row.profile_pic || null });
-      const token = await getMetaMessagingToken();
-      const pd = await getMetaPages(GRAPH_BASE, token, {
+      const meta = await getMetaMessagingContext();
+      const pd = await getMetaPages(GRAPH_BASE, meta.token, {
         mustIncludePageId: row.page_id,
         mustIncludeInstagramForPageId: row.source === "instagram" ? row.page_id : undefined,
+        cacheKey: meta.cacheKey,
       });
       const pageTok = (pd?.data ?? []).find((p: any) => p.id === row.page_id)?.access_token;
       if (!pageTok) return json({ ok: true, profile_pic: row.profile_pic || null });
@@ -706,10 +730,11 @@ Deno.serve(async (req) => {
         send = await lineApi("/v2/bot/message/push", cfg.accessToken, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ to: row.psid, messages: [lineMessage] }) });
         send = { ...send, message_id: send?.sentMessages?.[0]?.id || null };
       } else {
-        const token = await getMetaMessagingToken();
-        const pd = await getMetaPages(GRAPH_BASE, token, {
+        const meta = await getMetaMessagingContext();
+        const pd = await getMetaPages(GRAPH_BASE, meta.token, {
           mustIncludePageId: row.page_id,
           mustIncludeInstagramForPageId: row.source === "instagram" ? row.page_id : undefined,
+          cacheKey: meta.cacheKey,
         });
         const metaPage = (pd?.data ?? []).find((p: any) => p.id === row.page_id);
         const pageTok = metaPage?.access_token;
@@ -759,8 +784,8 @@ Deno.serve(async (req) => {
       // was_unread = หน้าเว็บเพิ่งเขียน unread=false ลงฐานข้อมูลเองก่อนเรียกมา (กันจุดแดงเด้งกลับตอน poll)
       // ถ้าเช็คแค่ row.unread จะกลายเป็นไม่เคยแจ้ง Meta เลย ทำให้กล่องข้อความเพจยังขึ้นว่ายังไม่อ่าน
       if ((row.unread || body?.was_unread === true) && row.psid && row.source !== "line") {
-        const token = await getMetaMessagingToken();
-        const pd = await getMetaPages(GRAPH_BASE, token, { mustIncludePageId: row.page_id });
+        const meta = await getMetaMessagingContext();
+        const pd = await getMetaPages(GRAPH_BASE, meta.token, { mustIncludePageId: row.page_id, cacheKey: meta.cacheKey });
         const pageTok = (pd?.data ?? []).find((p: any) => p.id === row.page_id)?.access_token;
         if (pageTok) {
           await fetchJson(`${GRAPH_BASE}/${row.page_id}/messages?access_token=${pageTok}`, {

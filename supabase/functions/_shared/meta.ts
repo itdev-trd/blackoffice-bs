@@ -46,9 +46,17 @@ export async function getMetaToken(): Promise<string> {
 let cachedMsgToken = "";
 let cachedMsgTokenAt = 0;
 
-export async function getMetaMessagingToken(): Promise<string> {
+// page access token ที่แลกมาจาก token ตอบแชท ต้องเก็บแยกช่องจากของงานโฆษณา
+// (page token ผูกกับแอปที่ออก user token — ปนกันแล้วการส่งจะไปใช้ token ของแอปที่ส่งไม่ได้)
+export const MESSAGING_PAGES_CACHE_KEY = "meta_pages_cache_messaging";
+
+// คืนทั้ง token และธงว่าเป็น "token แยกสำหรับตอบแชท" หรือ fallback ไป token หลัก
+// ผู้เรียกต้องใช้ cacheKey ที่คืนมานี้กับ getMetaPages เสมอ
+export async function getMetaMessagingContext(): Promise<{ token: string; dedicated: boolean; cacheKey: string }> {
   const now = Date.now();
-  if (cachedMsgToken && now - cachedMsgTokenAt < TOKEN_CACHE_MS) return cachedMsgToken;
+  if (cachedMsgToken && now - cachedMsgTokenAt < TOKEN_CACHE_MS) {
+    return { token: cachedMsgToken, dedicated: true, cacheKey: MESSAGING_PAGES_CACHE_KEY };
+  }
   try {
     const admin = createClient(
       Deno.env.get("SUPABASE_URL")!,
@@ -63,12 +71,16 @@ export async function getMetaMessagingToken(): Promise<string> {
     if (v) {
       cachedMsgToken = v;
       cachedMsgTokenAt = now;
-      return cachedMsgToken;
+      return { token: v, dedicated: true, cacheKey: MESSAGING_PAGES_CACHE_KEY };
     }
   } catch (_e) { /* ไป fallback token หลัก */ }
   cachedMsgToken = "";
   cachedMsgTokenAt = now;
-  return await getMetaToken();
+  return { token: await getMetaToken(), dedicated: false, cacheKey: "meta_pages_cache" };
+}
+
+export async function getMetaMessagingToken(): Promise<string> {
+  return (await getMetaMessagingContext()).token;
 }
 
 // ---------- ข้อมูลของ "Meta app" (App ID / App Secret) ----------
