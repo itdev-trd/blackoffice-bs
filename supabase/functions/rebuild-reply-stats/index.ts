@@ -199,7 +199,7 @@ Deno.serve(async (req) => {
       for (let i = 0; i < all.length; i += 500) {
         const chunk = all.slice(i, i + 500);
         const { error: upErr } = await admin.from("reply_stats").upsert(chunk, { onConflict: "round_key" });
-        if (upErr) throw new Error(`บันทึก reply_stats ไม่สำเร็จ: ${errMsg(upErr)} — รัน supabase-migration-reply-stats-v2.sql แล้วหรือยัง?`);
+        if (upErr) throw new Error(`บันทึก reply_stats ไม่สำเร็จ: ${errMsg(upErr)} — คีย์กันซ้ำครบไหม? ดู supabase/migrations/20260907080000_reply_stats_round_key_unique.sql`);
         saved += chunk.length;
       }
 
