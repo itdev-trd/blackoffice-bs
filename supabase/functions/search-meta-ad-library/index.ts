@@ -1,3 +1,4 @@
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getMetaToken } from "../_shared/meta.ts";
 import { authorizeRequest } from "../_shared/permissions.ts";
 import { RequestError, errorResponse, readJsonBody } from "../_shared/security.ts";
@@ -33,6 +34,19 @@ async function pageAll(url: string, token: string) {
   return { rows, truncated };
 }
 
+// จำไว้ว่า Meta ให้ใช้ Ad Library API แล้วหรือยัง เพื่อให้หน้าเว็บบอกผู้ใช้ได้ตั้งแต่ก่อนกดค้นหา
+// (สิทธิ์ตัวนี้ Meta ต้องอนุมัติแยก ไม่ใช่ของที่แก้ได้ในโค้ด — ถ้าไม่บอกไว้ก่อน
+//  คนใช้จะพิมพ์คำค้นแล้วไปเจอ error ทุกครั้งโดยไม่รู้ว่าต้องไปทำอะไรที่ไหน)
+async function noteApiStatus(ok: boolean, error?: string) {
+  try {
+    const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    await admin.from("settings").upsert({
+      key: "ad_library_api",
+      value: { ok, error: error || null, checked_at: new Date().toISOString() },
+    }, { onConflict: "key" });
+  } catch { /* บันทึกสถานะไม่สำเร็จไม่ควรทำให้การค้นหาล้ม */ }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
@@ -57,7 +71,12 @@ Deno.serve(async (req) => {
       ...(body?.delivery_date_min ? { ad_delivery_date_min: String(body.delivery_date_min) } : {}),
       ...(body?.delivery_date_max ? { ad_delivery_date_max: String(body.delivery_date_max) } : {}),
     });
-    const result = await pageAll(`${GRAPH_BASE}/ads_archive?${params}`, token);
+    const result = await pageAll(`${GRAPH_BASE}/ads_archive?${params}`, token).catch(async (err) => {
+      const message = err instanceof Error ? err.message : String(err);
+      if (/permission|not authorized|OAuth/i.test(message)) await noteApiStatus(false, message);
+      throw err;
+    });
+    await noteApiStatus(true);
     const ads = result.rows.map((ad) => ({
       ...ad,
       reached_countries: countries,

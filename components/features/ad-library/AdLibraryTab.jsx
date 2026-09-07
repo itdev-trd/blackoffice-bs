@@ -1,12 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
   ChevronDown,
   ExternalLink,
   Eye,
   Globe2,
+  Info,
   Megaphone,
   Search,
   Wallet,
@@ -196,6 +197,15 @@ export default function AdLibraryTab() {
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  // Meta ต้องอนุมัติสิทธิ์ Ad Library API แยกจากสิทธิ์อื่นของแอป (ยืนยันตัวตน + ยืนยันธุรกิจ)
+  // ระหว่างที่ยังไม่อนุมัติ การค้นหาในระบบจะขึ้น error ทุกครั้ง — บอกไว้ตั้งแต่ต้นดีกว่าให้ไปเจอเอง
+  const [apiStatus, setApiStatus] = useState(null);
+  useEffect(() => {
+    let dead = false;
+    supabase.from("settings").select("value").eq("key", "ad_library_api").maybeSingle()
+      .then(({ data }) => { if (!dead) setApiStatus(data?.value || null); });
+    return () => { dead = true; };
+  }, []);
 
   const parsedTerms = useMemo(
     () => terms.split(/[\n,]/).map((value) => value.trim()).filter(Boolean),
@@ -252,6 +262,30 @@ export default function AdLibraryTab() {
           </span>
         }
       />
+
+      {apiStatus?.ok === false && (
+        <div className="flex min-w-0 flex-col gap-2.5 rounded-2xl border border-amber-200 bg-amber-50/70 p-4 sm:flex-row sm:items-start">
+          <Info size={16} className="mt-0.5 shrink-0 text-amber-600" />
+          <div className="min-w-0 flex-1 text-[12.5px] leading-relaxed text-amber-900">
+            <div className="font-semibold">การค้นหาในระบบยังใช้ไม่ได้ — Meta ยังไม่อนุมัติสิทธิ์ Ad Library API</div>
+            <div className="mt-1">
+              สิทธิ์นี้ Meta อนุมัติแยกจากสิทธิ์อื่นของแอป และเปิดเองในโค้ดไม่ได้ ต้องทำ 3 อย่างที่ฝั่ง Meta:
+            </div>
+            <ol className="ml-4 mt-1 list-decimal space-y-0.5">
+              <li>ยืนยันตัวตน (ID verification) ที่ facebook.com/ID</li>
+              <li>ยืนยันธุรกิจใน Business Manager ให้ผ่าน</li>
+              <li>สมัครใช้ Ad Library API ที่ facebook.com/ads/library/api แล้วรอ Meta อนุมัติ</li>
+            </ol>
+            <div className="mt-1.5 text-[11.5px] text-amber-700">
+              ตรวจครั้งล่าสุด {apiStatus.checked_at ? new Date(apiStatus.checked_at).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" }) : "—"}
+              {" · "}พออนุมัติแล้วกดค้นหาได้เลย แบนเนอร์นี้จะหายไปเอง
+            </div>
+          </div>
+          <Button variant="primary" size="sm" icon={ExternalLink} onClick={openOnMeta} className="shrink-0">
+            ค้นในเว็บ Ad Library
+          </Button>
+        </div>
+      )}
 
       <Card className="min-w-0 space-y-6 p-4 sm:p-6">
         <Step number={1} title="พิมพ์คำที่อยากค้นหา" hint="เช่น ชื่อสินค้า หรือชื่อเพจคู่แข่ง">

@@ -79,6 +79,82 @@ function LiveSummary({ onNavigate }) {
 }
 
 // หน้าแรกของระบบ — ต้องตอบคำถามเดียวให้ได้ในสายตาแรก: "ตอนนี้มีอะไรต้องทำ"
+// โฆษณาที่กำลังยิงอยู่วันนี้ — ดึงสดจาก Meta ไม่ใช่จากตาราง ad_content/metrics_log
+//
+// เดิมการ์ดนี้อ่านจาก metrics_log + ad_content ซึ่งเป็นตารางของ "ระบบยิงแอดในตัวแอป"
+// ทั้งสองตารางมี 0 แถว (ทีมยิงแอดจาก Meta Ads Manager เอง) การ์ดจึงว่างตลอด
+// และถ้ามีข้อมูลก็จะโชว์แอดที่หยุดไปแล้วด้วย เพราะนับจากยอดใช้จ่ายไม่ได้ดูสถานะ
+//
+// ตอนนี้เอาจาก list-campaigns (ผ่านแคชร่วม ไม่ยิง Meta ซ้ำ) แล้วกรองเหลือเฉพาะ
+// effective_status = ACTIVE คือที่ Meta ยืนยันว่ากำลังแสดงจริง ๆ
+function RunningAdsToday({ onNavigate }) {
+  const [rows, setRows] = useState(null);
+  const [noAccount, setNoAccount] = useState(false);
+
+  useEffect(() => {
+    let dead = false;
+    (async () => {
+      const stored = localStorage.getItem("ui.campaigns.adAccount") || "";
+      let acct = stored;
+      try { const j = JSON.parse(stored); if (j) acct = String(j); } catch { /* สตริงดิบ ใช้ได้เลย */ }
+      acct = String(acct || "").replace(/^"|"$/g, "").trim();
+      if (!acct) { if (!dead) { setNoAccount(true); setRows([]); } return; }
+      const { data } = await supabase.functions.invoke("list-campaigns", {
+        body: { ad_account_id: acct, date_preset: "today" },
+      });
+      if (dead) return;
+      const list = (data?.campaigns || [])
+        .filter((c) => String(c.effective_status || "").toUpperCase() === "ACTIVE")
+        .map((c) => ({
+          id: c.id,
+          name: c.name || "(ไม่มีชื่อ)",
+          spend: Number(c?.metrics?.spend || 0),
+          results: Number(c?.metrics?.result_value || 0),
+        }))
+        .sort((a, b) => b.spend - a.spend);
+      setRows(list);
+    })().catch(() => { if (!dead) setRows([]); });
+    return () => { dead = true; };
+  }, []);
+
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
+        <div className="min-w-0">
+          <h3 className="ds-title text-[15px]">โฆษณาที่กำลังยิงอยู่</h3>
+          <p className="mt-0.5 text-2xs text-slate-400">ยอดใช้จ่ายวันนี้ · ไม่รวมแอดที่หยุดแล้ว</p>
+        </div>
+        <button onClick={() => onNavigate?.("campaigns")} className="shrink-0 text-2xs font-semibold text-brand-700 hover:text-brand-800">
+          ดูรายงานเต็ม
+        </button>
+      </div>
+      {rows === null ? (
+        <div className="px-5 py-6 text-[13px] text-slate-500">กำลังดึงจาก Meta…</div>
+      ) : noAccount ? (
+        <EmptyState icon={BarChart3} title="ยังไม่ได้เลือกบัญชีโฆษณา"
+          hint="เปิดหน้าแคมเปญแล้วเลือกบัญชีโฆษณาหนึ่งครั้ง ระบบจะจำไว้ให้เอง" />
+      ) : rows.length === 0 ? (
+        <EmptyState icon={PauseCircle} title="ตอนนี้ไม่มีโฆษณาที่กำลังยิง"
+          hint="ทุกแคมเปญในบัญชีนี้หยุดอยู่ (หรือ Meta ยังไม่อัปเดตสถานะ)" />
+      ) : (
+        /* โชว์ทุกตัวที่ยิงอยู่ ไม่ตัดเหลือ 8 ตัวแบบเดิม — ถ้ามีเยอะให้เลื่อนดูในกล่อง */
+        <ul className="max-h-[320px] divide-y divide-slate-100 overflow-y-auto">
+          {rows.map((r) => (
+            <li key={r.id} className="flex items-center gap-3 px-5 py-3">
+              <span title="กำลังแสดง" className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[13.5px] font-medium text-slate-700">{r.name}</span>
+                {r.results > 0 && <span className="block text-2xs text-slate-400">ได้ผลลัพธ์วันนี้ {int(r.results)} ครั้ง</span>}
+              </span>
+              <span className="shrink-0 font-mono text-[13.5px] tabular-nums text-slate-900">{thb(r.spend)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
 // เรียงเป็น ตัวเลขสรุป → เงินไปลงที่แอดตัวไหน → คิวงานที่ต้องมีคนกด
 export default function OverviewTab({ adContent = [], adCopies = [], adImages = [], metricsToday = [], onNavigate }) {
   // รออนุมัติ นับจากแหล่งเดียวกับหน้า "รออนุมัติ" (copies + images ที่ยัง pending)
@@ -90,18 +166,6 @@ export default function OverviewTab({ adContent = [], adCopies = [], adImages = 
   const pausedAuto = adContent.filter((a) => a.status === "paused_auto").length;
   const scaleSuggested = adContent.filter((a) => a.scale_suggested).length;
   const spendToday = metricsToday.reduce((sum, m) => sum + (m.spend || 0), 0);
-
-  // แอดที่มีการใช้จ่ายวันนี้ เรียงจากมากไปน้อย — ข้อมูลจริงจาก metrics_log + ad_content
-  const spendByAd = {};
-  metricsToday.forEach((m) => {
-    if (!m.ad_content_id) return;
-    spendByAd[m.ad_content_id] = (spendByAd[m.ad_content_id] || 0) + (m.spend || 0);
-  });
-  const topAds = Object.entries(spendByAd)
-    .map(([adId, spend]) => ({ ad: adContent.find((a) => a.id === adId), spend }))
-    .filter((row) => row.ad && row.spend > 0)
-    .sort((a, b) => b.spend - a.spend)
-    .slice(0, 8);
 
   // คิวงานที่ต้องมีคนกด — เรียงตามความเร่ง (เงินไหลอยู่มาก่อน)
   const queue = [
@@ -179,54 +243,8 @@ export default function OverviewTab({ adContent = [], adCopies = [], adImages = 
       </div>
 
       <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(320px,1fr)]">
-        {/* เงินไปลงที่แอดตัวไหน */}
-        <Card className="overflow-hidden">
-          <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
-            <div className="min-w-0">
-              <h3 className="ds-title text-[15px]">โฆษณาที่ใช้จ่ายวันนี้</h3>
-              <p className="mt-0.5 text-2xs text-slate-400">เรียงจากค่าโฆษณาสูงสุด</p>
-            </div>
-            <button
-              onClick={() => onNavigate?.("analyze")}
-              className="shrink-0 text-2xs font-semibold text-brand-700 hover:text-brand-800"
-            >
-              ดูรายงานเต็ม
-            </button>
-          </div>
-          {topAds.length === 0 ? (
-            <EmptyState
-              icon={BarChart3}
-              title="ยังไม่มีการใช้จ่ายวันนี้"
-              hint="ตัวเลขจะขึ้นเมื่อระบบดึงผลจาก Meta รอบถัดไป"
-            />
-          ) : (
-            <ul className="divide-y divide-slate-100">
-              {topAds.map(({ ad, spend }) => (
-                <li key={ad.id} className="flex items-center gap-3 px-5 py-3">
-                  <span
-                    title={ad.status}
-                    className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                      ad.status === "active"
-                        ? "bg-emerald-500"
-                        : ad.status === "paused_auto"
-                          ? "bg-rose-500"
-                          : "bg-slate-300"
-                    }`}
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[13.5px] font-medium text-slate-700">
-                      {ad.headline || ad.product || "(ไม่มีชื่อ)"}
-                    </span>
-                    {ad.product && ad.headline && (
-                      <span className="block truncate text-2xs text-slate-400">{ad.product}</span>
-                    )}
-                  </span>
-                  <span className="shrink-0 font-mono text-[13.5px] tabular-nums text-slate-900">{baht(spend)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
+        {/* เงินไปลงที่แอดตัวไหน — ดึงสดจาก Meta เฉพาะที่กำลังยิงอยู่ */}
+        <RunningAdsToday onNavigate={onNavigate} />
 
         {/* คิวงาน — ว่างแล้วต้องบอกว่าว่างจริง ไม่ปล่อยพื้นที่โหวง */}
         <Card className="overflow-hidden">

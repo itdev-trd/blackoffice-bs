@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
+import { hasFullData } from "@/lib/constants/roles";
 import { beToCe } from "@/lib/utils/date";
 import { X, Clock, Pencil, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Loader2, Eye, Users, CheckCircle2, AlertTriangle, Tv } from "lucide-react";
 import { Button, SectionTitle, StatCard } from "@/components/ui";
@@ -43,7 +44,7 @@ function ChannelPicker({ value, onChange }) {
   );
 }
 
-export default function TvMembersTab({ active = true, embedded = false }) {
+export default function TvMembersTab({ active = true, embedded = false, onOpenChat }) {
   const [scripts, setScripts] = useState([]);
   const [access, setAccess] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -127,12 +128,21 @@ export default function TvMembersTab({ active = true, embedded = false }) {
     const email = u?.user?.email;
     if (email) {
       const { data: p } = await supabase.from("user_permissions").select("role").eq("email", email).maybeSingle();
-      setIsAdmin(p?.role === "admin");
+      // เดิมเช็ค role === "admin" ตรง ๆ ซึ่งพอเพิ่มบทบาท owner แล้วเจ้าของระบบจะกดลบสคริปต์ไม่ได้
+      setIsAdmin(hasFullData(p?.role));
     }
     setUpdatedAt(new Date());
     setLoading(false);
   }
   useEffect(() => { if (active) load(); /* eslint-disable-next-line */ }, [active]);
+
+  // เปิดห้องแชทของสมาชิกคนนี้ — ค้นด้วยเลขบัญชีเทรดก่อน (ตรงตัวที่สุด)
+  // ถ้ายังไม่มีเลขบัญชีในระบบค่อยใช้ username TradingView
+  const openChatOf = (a) => {
+    if (!onOpenChat) return;
+    if (a.trade_id) onOpenChat({ trade_id: String(a.trade_id) });
+    else if (a.username) onOpenChat({ username: String(a.username) });
+  };
   // เปลี่ยนแบรนด์ในฟอร์มเพิ่ม → ล้างสคริปต์ที่เลือกไว้ (สคริปต์คนละแบรนด์ไม่ปน)
   useEffect(() => { setPineIds([]); setDur({}); /* eslint-disable-next-line */ }, [brandSel]);
   // realtime: มีการเปลี่ยนสิทธิ์ → รีเฟรชฟีด
@@ -926,8 +936,11 @@ export default function TvMembersTab({ active = true, embedded = false }) {
                       const nearExp = a.expiration && new Date(a.expiration).getTime() - now < 7 * 86400000 && new Date(a.expiration).getTime() > now;
                       return (
                       <div key={a.id} className="tv-row grid gap-3 px-4 py-2.5 text-sm items-center" style={{ gridTemplateColumns: COLS }}>
-                        {a.display_name && (a.trade_id || a.username)
-                          ? <a href={`${window.location.pathname}?tab=inbox&${a.trade_id ? `open_trade=${encodeURIComponent(a.trade_id)}` : `open_tv=${encodeURIComponent(a.username)}`}`} target="_blank" rel="noopener noreferrer" className="min-w-0 font-medium hover:underline truncate" style={{ color: "var(--brand)" }} title={`เปิดแชทของ ${a.display_name}`}>{a.display_name}</a>
+                        {/* กดชื่อ = เปิดประวัติแชทของลูกค้าคนนั้น
+                            เดิมเป็นลิงก์ `?tab=inbox&open_trade=...` ซึ่งเป็น URL ของแอปเวอร์ชันหน้าเดียว
+                            พอย้ายมาเป็นหลายเส้นทางของ Next.js ลิงก์นั้นเปิดแท็บใหม่มาที่หน้าเดิมแล้วไม่เกิดอะไรขึ้น */}
+                        {onOpenChat && a.display_name && (a.trade_id || a.username)
+                          ? <button type="button" onClick={() => openChatOf(a)} className="min-w-0 text-left font-medium hover:underline truncate" style={{ color: "var(--brand)" }} title={`เปิดประวัติแชทของ ${a.display_name}`}>{a.display_name}</button>
                           : <span className="min-w-0 font-medium truncate" style={{ color: "var(--ink)" }} title={a.display_name || ""}>{a.display_name || "—"}</span>}
                         <span className="min-w-0 truncate" style={{ color: "var(--ink-2)" }} title={a.username}>{a.username}</span>
                         {canSeeNewTv && <span className="min-w-0 truncate text-xs" style={{ color: "var(--ink-3)" }} title={a.email || ""}>{a.email || "—"}</span>}
@@ -1028,11 +1041,10 @@ export default function TvMembersTab({ active = true, embedded = false }) {
                 <Row k="แก้ไขโดย" v={a.edited_at ? `${a.edited_by || "—"} · ${new Date(a.edited_at).toLocaleDateString("th-TH", { day: "2-digit", month: "short" })}` : null} />
               </div>
 
-              {a.display_name && (a.trade_id || a.username) && (
-                <a href={`${window.location.pathname}?tab=inbox&${a.trade_id ? `open_trade=${encodeURIComponent(a.trade_id)}` : `open_tv=${encodeURIComponent(a.username)}`}`}
-                  target="_blank" rel="noopener noreferrer"
-                  className="mt-3 flex items-center justify-center gap-1.5 rounded-control py-2.5 text-xs font-semibold"
-                  style={{ background: "var(--brand-soft)", color: "var(--brand)" }}>เปิดแชทของลูกค้า</a>
+              {onOpenChat && a.display_name && (a.trade_id || a.username) && (
+                <button type="button" onClick={() => { setSheetRow(null); openChatOf(a); }}
+                  className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-control py-2.5 text-xs font-semibold"
+                  style={{ background: "var(--brand-soft)", color: "var(--brand)" }}>เปิดประวัติแชทของลูกค้า</button>
               )}
 
               <div className="mt-2 flex gap-2">

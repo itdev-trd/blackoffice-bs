@@ -9,6 +9,7 @@ import { SavedRepliesPanel } from "@/components/features/settings/SettingsTab";
 import LineBroadcastPanel from "@/components/features/customer-ops/LineBroadcastPanel";
 import { SectionTitle } from "@/components/ui";
 import { useDashboard } from "@/components/dashboard/DashboardContext";
+import { hasFullData } from "@/lib/constants/roles";
 
 const MODES = [
   ["customers", "ลูกค้า", Users],
@@ -27,7 +28,9 @@ export default function CustomerOperationsTab({ allowedPages = null, onOpenChat 
   // และ tv_members ถูกถอดออกจาก TABS ไปแล้ว (ไม่มีเมนูซ้ายของตัวเอง) — ใช้ can() จะได้ false เสมอทุกคน
   const { perm, restricted } = useDashboard();
   const canTv = !!perm && (!restricted || (perm.allowedTabs || []).includes("tv_members"));
-  const canBroadcast = perm?.role === "admin";
+  // Broadcast LINE = ส่งออกหาลูกค้าจำนวนมาก ให้เฉพาะบทบาทที่มีอำนาจกับข้อมูลเต็มที่
+  // (เดิมเช็ค role === "admin" ตรง ๆ ซึ่งพอเพิ่มบทบาท owner แล้วเจ้าของระบบจะมองไม่เห็นเมนูนี้)
+  const canBroadcast = hasFullData(perm?.role);
   const modes = MODES.filter(([key]) => (key !== "tv" || canTv) && (key !== "broadcast" || canBroadcast));
   const activeMode = mode === "tv" && !canTv ? "customers" : mode;
   return (
@@ -62,7 +65,7 @@ export default function CustomerOperationsTab({ allowedPages = null, onOpenChat 
         ))}
       </div>
       {activeMode === "customers" && <CustomerDatabaseTab onOpenChat={onOpenChat} />}
-      {activeMode === "tv" && <TvMembersTab active embedded />}
+      {activeMode === "tv" && <TvMembersTab active embedded onOpenChat={onOpenChat} />}
       {activeMode === "detected" && <DetectedDataReview onOpenChat={onOpenChat} />}
       {activeMode === "replies" && <SavedRepliesPanel allowedPages={allowedPages} />}
       {activeMode === "broadcast" && <LineBroadcastPanel />}

@@ -1382,14 +1382,13 @@ function CompareView({ items, onClose, aiModel }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-50 overflow-y-auto">
-      <div className="safe-top sticky top-0 z-10 bg-white border-b border-slate-200">
-        <div className="w-full px-4 sm:px-6 py-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+    <div className="space-y-3">
+      <div>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3 min-w-0">
             <button onClick={onClose} className="text-slate-500 hover:text-slate-800 flex items-center gap-1 text-sm shrink-0">
               <ArrowLeft size={18} /> กลับ
             </button>
-            <HomeButton />
             <div className="font-semibold text-slate-800 truncate">เปรียบเทียบ {items.length} รายการ</div>
           </div>
           <div className="flex items-center gap-2 flex-wrap sm:justify-end">
@@ -1403,7 +1402,7 @@ function CompareView({ items, onClose, aiModel }) {
           </div>
         </div>
       </div>
-      <div className="w-full p-4 sm:p-6 space-y-3">
+      <div className="w-full space-y-3">
         {(aiResult || aiError) && (
           <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-1.5">
             {aiError ? (
@@ -1945,16 +1944,18 @@ function CampaignOverviewView({ initialResult, campaignIds, range, textModel, on
     setResult(data);
   }
 
+  // เดิมหน้านี้เป็นแผ่นครอบเต็มจอ (fixed inset-0) ที่ทับเมนูข้างไว้ แล้วมีแถบนำทางของตัวเอง
+  // (ปุ่มกลับ + หน้าแรก) ซ้อนกับเมนูของแอป — เปิดรายงานแล้วเหมือนหลุดออกจากระบบไปอีกหน้า
+  // ตอนนี้วางเป็นเนื้อหาปกติของหน้า /analyze เมนูข้างจึงอยู่ครบ และเหลือปุ่มกลับไปหน้ารายการ
   return (
-    <div className="fixed inset-0 z-50 bg-slate-50 overflow-y-auto">
+    <div className="space-y-3">
       {dashItem && <AdDashboardModal ad={dashItem} ai={null} onClose={() => setDashItem(null)} onNavigate={setDashItem} />}
-      <div className="safe-top sticky top-0 z-10 bg-white border-b border-slate-200">
-        <div className="w-full px-4 sm:px-6 py-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-3 min-w-0">
             <button onClick={onClose} className="text-slate-500 hover:text-slate-800 flex items-center gap-1 text-sm shrink-0">
               <ArrowLeft size={18} /> กลับ
             </button>
-            <HomeButton />
             <div className="font-semibold text-slate-800 truncate">รายงานแคมเปญ ({result.campaigns.length}) · {rangeLabel(range)}</div>
           </div>
           <div className="flex items-center gap-2 flex-wrap sm:justify-end">
@@ -1968,7 +1969,7 @@ function CampaignOverviewView({ initialResult, campaignIds, range, textModel, on
         </div>
       </div>
 
-      <div className="w-full p-4 sm:p-6 space-y-3">
+      <div className="w-full space-y-3">
         {aiError && <div className="text-sm text-rose-600 bg-rose-50 rounded-lg px-3 py-2">{aiError}</div>}
         {result.ai === "failed" && <div className="text-xs text-amber-600">คำวิเคราะห์ AI ไม่สำเร็จ (แสดงเฉพาะตัวเลข)</div>}
         {result.campaigns.map((c) => (

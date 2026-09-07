@@ -13,6 +13,7 @@ import { Loader2, Search, FileDown, RefreshCw, ClipboardList } from "lucide-reac
 import { supabase } from "@/lib/supabase/client";
 import { EmptyState } from "@/components/ui";
 import Spinner from "@/components/shared/Spinner";
+import MiniChatWindow from "@/components/features/customer-list/MiniChatWindow";
 
 // คำที่ทีมใช้ในชีต ไม่ใช่ค่า stage ดิบในฐานข้อมูล
 const SHEET_STATUS = {
@@ -53,7 +54,7 @@ const COLS = ["ลำดับ", "ชื่อ", "สถานะ", "เลข�
 
 const DB_COLS = "id, customer_name, page_id, page_name, source, stage, stage_manual, trade_id, email, username, entry_ad_id, entry_ad_name, comment_is_ad, first_customer_message_at";
 
-export default function CustomerListTab() {
+export default function CustomerListTab({ onOpenChat }) {
   const [pages, setPages] = useState([]);
   const [pageFilter, setPageFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -72,6 +73,8 @@ export default function CustomerListTab() {
   // เดิมมีสองชั้น: ช่วงที่ "ดึงจากฐานข้อมูล" กับช่วงที่ "ย่อดูจากที่โหลดมาแล้ว" = ช่องวันที่ 4 ช่อง
   // ซึ่งต่างกันแค่เร็ว/ช้า ไม่ต่างกันที่ผลลัพธ์ คนใช้จึงไม่รู้ว่าควรกรอกช่องคู่ไหน
   // เพจใหญ่สุดมีลูกค้า ~1,200 คน = โหลดใหม่ 2 คำขอ เร็วพอที่จะไม่ต้องมีชั้นที่สอง
+  // ห้องที่เปิดอ่านในหน้าต่างแชทเล็กมุมขวา (null = ไม่ได้เปิด)
+  const [chatRow, setChatRow] = useState(null);
   const [rangeKey, setRangeKey] = useState("all");     // all | 7 | 30 | 90 | custom
   const [loadFrom, setLoadFrom] = useState("");
   const [loadTo, setLoadTo] = useState("");
@@ -275,6 +278,8 @@ export default function CustomerListTab() {
         {error && <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">โหลดไม่สำเร็จ: {error}</div>}
       </div>
 
+      <MiniChatWindow row={chatRow} onClose={() => setChatRow(null)} onOpenInInbox={onOpenChat} />
+
       <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         {!pageFilter ? (
           <EmptyState icon={ClipboardList} title="เลือกเพจหรือบัญชีก่อน" hint="เลือกจากช่องด้านบน แล้วระบบจะโหลดรายชื่อลูกค้าให้" />
@@ -299,7 +304,10 @@ export default function CustomerListTab() {
                     <div className="min-w-0">
                       <div className="flex items-baseline gap-2">
                         <span className="text-[11px] tabular-nums text-slate-400">{c[0]}</span>
-                        <span className="font-medium text-slate-900 break-words">{c[1] || "—"}</span>
+                        <button type="button" onClick={() => setChatRow(r)} title="ดูบทสนทนาของลูกค้าคนนี้"
+                          className="break-words text-left font-medium text-brand-700 hover:underline">
+                          {c[1] || "—"}
+                        </button>
                       </div>
                       <div className="mt-1 text-[11px] text-slate-500">{c[9]} · ติดต่อ {c[10] || "—"}</div>
                     </div>
@@ -330,10 +338,16 @@ export default function CustomerListTab() {
                 {pageRows.map((r, i) => {
                   const cells = cellsOf(r, start + i);
                   return (
-                    <tr key={r.id} className="border-b border-slate-100 hover:bg-slate-50/70">
+                    <tr key={r.id} className={`border-b border-slate-100 hover:bg-slate-50/70 ${chatRow?.id === r.id ? "bg-brand-50/50" : ""}`}>
                       {cells.map((v, ci) => (
                         <td key={ci} className={`px-3 py-2.5 ${ci === 0 ? "tabular-nums text-slate-500" : "text-slate-700"} ${ci === 1 ? "font-medium text-slate-900" : ""}`}>
-                          {ci === 2 ? (
+                          {ci === 1 ? (
+                            /* ชื่อลูกค้าเป็นปุ่ม — กดแล้วเปิดหน้าต่างแชทเล็กมุมขวา ไม่ต้องออกจากตาราง */
+                            <button type="button" onClick={() => setChatRow(r)} title="ดูบทสนทนาของลูกค้าคนนี้"
+                              className="text-left font-medium text-brand-700 hover:underline">
+                              {v || "—"}
+                            </button>
+                          ) : ci === 2 ? (
                             <span className={`inline-block whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_STYLE[v] || "bg-slate-100 text-slate-600"}`}>{v}</span>
                           ) : v || <span className="text-slate-300">—</span>}
                         </td>
