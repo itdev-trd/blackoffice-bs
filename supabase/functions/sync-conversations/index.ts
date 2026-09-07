@@ -69,6 +69,31 @@ function shouldFlagUnread(row: any): boolean {
   return lastAt > seenAt;
 }
 
+// เติมชื่อโฆษณาให้ห้องที่รู้แค่ ad_id
+// เดิมชื่อแอดถูกเติมตอนแอดมิน "เปิดแชท" เท่านั้น (หน้าเว็บ resolve แล้วส่งกลับมาบันทึก)
+// ทำให้ลิสต์ซ้ายเห็นแค่ "มาจากแอด" ลอย ๆ ต้องคลิกเข้าไปทีละคนถึงจะรู้ว่าแอดตัวไหน
+// ถามทีละ ad เพราะพารามิเตอร์ ?ids= ถูกยกเลิกตั้งแต่ v26 ("The ids query parameter is deprecated")
+// แต่ ad หนึ่งตัวใช้กับลูกค้าหลายคน จำนวนคำขอจริงจึงน้อย (นับ ad ไม่ซ้ำ และแคปไว้ต่อรอบ)
+const AD_NAME_MAX_PER_RUN = 5;
+async function fillMissingAdNames(admin: any, base: string, token: string): Promise<number> {
+  if (!token) return 0;
+  const { data: rows } = await admin.from("chat_customers")
+    .select("entry_ad_id").not("entry_ad_id", "is", null).is("entry_ad_name", null).limit(200);
+  const ids = [...new Set((rows ?? []).map((r: any) => String(r.entry_ad_id)).filter(Boolean))].slice(0, AD_NAME_MAX_PER_RUN);
+  if (!ids.length) return 0;
+  let filled = 0;
+  for (const adId of ids) {
+    const res = await fetchJson(`${base}/${adId}?fields=name&access_token=${token}`, 2);
+    const name = res?.error ? null : safeShort(res?.name, 300);
+    if (!name) continue;
+    const { data: upd } = await admin.from("chat_customers")
+      .update({ entry_ad_name: name, updated_at: new Date().toISOString() })
+      .eq("entry_ad_id", adId).is("entry_ad_name", null).select("id");
+    filled += upd?.length ?? 0;
+  }
+  return filled;
+}
+
 async function syncPushState(conversationId: string) {
   try {
     const sb = Deno.env.get("SUPABASE_URL") || "";
@@ -543,7 +568,9 @@ Deno.serve(async (req) => {
         recentUpserted += rb.upserted;
         recentChanged += rb.worked;
       }
-      return jsonResp({ ok: recentErrors.length === 0, job, pages: due.length, probed_only: probedOnly, upserted: recentUpserted, changed: recentChanged, errors: recentErrors });
+      // มีห้องใหม่/ห้องขยับ = อาจมี ad_id ที่ยังไม่รู้ชื่อ เติมให้เลยด้วยคำขอเดียว
+      const adNamesFilled = recentUpserted > 0 ? await fillMissingAdNames(admin, base, await getMetaToken()) : 0;
+      return jsonResp({ ok: recentErrors.length === 0, job, pages: due.length, probed_only: probedOnly, upserted: recentUpserted, changed: recentChanged, ad_names_filled: adNamesFilled, errors: recentErrors });
     }
 
     // ---- โหมดปกติ: ทุกเพจที่เปิด ดึงจนได้ "งานที่ต้องทำ" ครบ per_page ----

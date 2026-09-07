@@ -10,6 +10,7 @@ import {
   BarChart3,
   Inbox,
   MessageSquare,
+  Megaphone,
   UsersRound,
   ClipboardList,
   Trophy,
@@ -33,6 +34,8 @@ export const TABS = [
   { key: "inbox", label: "ตอบแชท", icon: Inbox },
   // แยกจาก "ตอบแชท" เพราะงานคนละแบบ — คอมเมนต์ใต้โพสต์/โฆษณาไว้กวาดตอบทีละหลายอัน
   { key: "feed", label: "ฟีด (คอมเมนต์)", icon: MessageSquare },
+  // รายงานว่าเงินโฆษณาที่ยิงไป แอดตัวไหนทำให้เกิดแชท/เปิดบัญชีจริง
+  { key: "ad_chats", label: "แอดไหนได้ลูกค้า", icon: Megaphone },
   { key: "customerdb", label: "จัดการลูกค้า", icon: UsersRound },
   // หน้าดูอย่างเดียว — คอลัมน์ตรงกับชีตสรุปรายชื่อลูกค้าที่ทีมใช้อยู่
   // แยกจาก "จัดการลูกค้า" เพราะหน้านั้นไว้แก้ไข/นำเข้า/เช็คไอดี ส่วนหน้านี้ไว้เปิดดูและส่งต่อ
@@ -53,6 +56,7 @@ export const ROUTE_PATH = {
   ad_library: "/ad-library",
   inbox: "/inbox",
   feed: "/feed",
+  ad_chats: "/ad-chats",
   customerdb: "/customerdb",
   customer_list: "/customer-list",
   leaderboard: "/leaderboard",

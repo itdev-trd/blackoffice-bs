@@ -696,6 +696,7 @@ const GRANTABLE_TABS = [
   { key: "review", label: "รออนุมัติ" }, { key: "campaigns", label: "แคมเปญ" },
   { key: "analyze", label: "วิเคราะห์" }, { key: "inbox", label: "ตอบแชท" },
   { key: "feed", label: "ฟีด (คอมเมนต์)" },
+  { key: "ad_chats", label: "แอดไหนได้ลูกค้า" },
   { key: "customerdb", label: "รีพอร์ตลูกค้าทักแชท" },
   { key: "tv_members", label: "จัดการสมาชิก TV" },
   { key: "settings", label: "ตั้งค่า" },
