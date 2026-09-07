@@ -48,7 +48,8 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...corsHeaders, "content-type": "application/json" } });
   try {
-    const auth = await authorizeRequest(req, { tab: ["inbox", "chat"] });
+    // allowService = ให้เรียกตรวจจาก cron/สคริปต์หลังบ้านได้ (ใช้เช็คว่าการ์ดแอดคืนข้อมูลถูกต้องไหม)
+    const auth = await authorizeRequest(req, { tab: ["inbox", "chat", "feed"], allowService: true });
     if (!auth.ok) return json({ ok: false, error: auth.error }, auth.status);
     const body = await req.json().catch(() => ({}));
     const adIds: string[] = Array.isArray(body?.ad_ids) ? body.ad_ids.map(String).filter(Boolean).slice(0, 20) : [];
