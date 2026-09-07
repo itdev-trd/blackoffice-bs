@@ -19,6 +19,8 @@ import {
 } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { beToCe, bangkokDate } from "@/lib/utils/date";
+import { hasFullData } from "@/lib/constants/roles";
+import { COUNTRIES, normalizeCountry } from "@/lib/constants/countries";
 import { logActivity } from "@/lib/utils/activity";
 import { lsGet, lsSet } from "@/lib/utils/storage";
 import { readFunctionErrorMessage } from "@/lib/utils/errors";
@@ -104,7 +106,9 @@ export function TradeIdChecker({ darkMode = false, standalone = false }) {
 // compact = เวอร์ชันย่อสำหรับกล่องตอบแชท ซึ่งพื้นที่จำกัดและมีแท็บบอกอยู่แล้วว่านี่คือ "ข้อมูลลูกค้า"
 // จึงตัดหัวข้อซ้ำ ย่อคำอธิบาย และลดระยะห่าง — ที่อื่น (แผงขวา/หน้าจัดการลูกค้า) ยังเหมือนเดิม
 export function CustomerDataForm({ row, onSaved, darkMode = false, compact = false }) {
-  const [f, setF] = useState({ trade_id: "", username: "", phone: "", email: "" });
+  // country อยู่ในฟอร์มเดียวกัน — ตัวตรวจอัตโนมัติเดาไม่ได้ทุกภาษา (อังกฤษ/ตากาล็อกเดาไม่ได้เลย)
+  // แอดมินที่คุยอยู่รู้ดีที่สุด และค่าที่คนระบุจะไม่ถูกตัวตรวจเขียนทับ (country_source = manual)
+  const [f, setF] = useState({ trade_id: "", username: "", phone: "", email: "", country: "" });
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);   // {ok, text}
   // ให้ AI อ่านบทสนทนาแล้วเสนอว่าเลข/ข้อความไหนคืออะไร — เสนอเท่านั้น ไม่เติมลงช่องเองจนแอดมินกดรับ
@@ -128,10 +132,13 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
   const daysFromDate = (d) => { if (!d) return 0; const t = new Date(`${d}T23:59:59+07:00`).getTime(); return Math.max(1, Math.ceil((t - Date.now()) / 86400000)); };
 
   useEffect(() => {
-    setF({ trade_id: row?.trade_id || "", username: row?.username || "", phone: row?.phone || "", email: row?.email || "" });
+    setF({
+      trade_id: row?.trade_id || "", username: row?.username || "", phone: row?.phone || "",
+      email: row?.email || "", country: normalizeCountry(row?.country) || "",
+    });
     setMsg(null);
     setAi(null);
-  }, [row?.id, row?.trade_id, row?.username, row?.phone, row?.email]);
+  }, [row?.id, row?.trade_id, row?.username, row?.phone, row?.email, row?.country]);
 
   // โหลด role + flag ปล่อยอัปเดต + สคริปต์ ครั้งเดียว
   // โหลด role + สถานะปล่อยอัปเดต (ครั้งเดียว)
@@ -141,7 +148,9 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
       const { data: u } = await supabase.auth.getUser();
       let admin = false;
       const email = u?.user?.email;
-      if (email) { const { data: p } = await supabase.from("user_permissions").select("role").eq("email", email).maybeSingle(); admin = p?.role === "admin"; }
+      // เดิมเช็ค role === "admin" ตรง ๆ พอเพิ่มบทบาท owner กล่อง "เพิ่มสิทธิ์ TradingView"
+      // หายไปจากหน้าตอบแชทของเจ้าของระบบทันที (เพิ่มอินดี้ให้ลูกค้าไม่ได้เลย)
+      if (email) { const { data: p } = await supabase.from("user_permissions").select("role").eq("email", email).maybeSingle(); admin = hasFullData(p?.role); }
       const { data: tf } = await supabase.from("settings").select("value").eq("key", "tv_features").maybeSingle();
       if (stop) return;
       setTvOn(admin || tf?.value?.released === true);
@@ -173,7 +182,7 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
     const { data, error } = await supabase.functions.invoke("save-lead-fields", { body: { id: row.id, ...f } });
     if (error || !data?.ok) return { ok: false, error: data?.error || error?.message || "อาจยังไม่ได้ deploy save-lead-fields" };
     logActivity("save_lead_fields", { id: row.id, customer_name: row?.customer_name });
-    onSaved?.({ trade_id: data.trade_id, username: data.username, phone: data.phone, email: data.email, manual_data: true, classified_by: "manual", needs_ai: false, needs_verify: false, manual_data_by: data.manual_data_by, manual_data_at: data.manual_data_at });
+    onSaved?.({ trade_id: data.trade_id, username: data.username, phone: data.phone, email: data.email, country: data.country ?? row?.country, manual_data: true, classified_by: "manual", needs_ai: false, needs_verify: false, manual_data_by: data.manual_data_by, manual_data_at: data.manual_data_at });
     return { ok: true };
   }
 
@@ -387,6 +396,16 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
         {inp("username", "User TradingView", "username TV")}
         {inp("phone", "เบอร์โทร", "เบอร์โทร")}
         {inp("email", "อีเมล", "อีเมล")}
+        <div className="min-w-0 col-span-2">
+          <label className="text-[11px] text-slate-400">ประเทศของลูกค้า</label>
+          <select value={f.country} onChange={(e) => setF((st) => ({ ...st, country: e.target.value }))}
+            className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm bg-white">
+            <option value="">— ยังไม่ระบุ —</option>
+            {COUNTRIES.map((c) => <option key={c} value={c}>{c}</option>)}
+            {/* ค่าที่มีอยู่แต่ไม่อยู่ในลิสต์ (ข้อมูลเก่า) ต้องยังเลือกอยู่ได้ ไม่ถูกล้างเงียบ ๆ */}
+            {f.country && !COUNTRIES.includes(f.country) && <option value={f.country}>{f.country}</option>}
+          </select>
+        </div>
       </div>
 
       {/* ตัวเลือก TV (เหมือนหน้าจัดการสมาชิก TV) — เห็นเฉพาะแอดมินจนกว่าจะปล่อย */}

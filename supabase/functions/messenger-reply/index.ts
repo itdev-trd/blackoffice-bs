@@ -617,9 +617,28 @@ Deno.serve(async (req) => {
       }
 
       if (!mergedIntoExisting) {
-        if (gotPsid && !row.psid) updSend.psid = gotPsid;   // ไม่มีแชทเดิม → ใช้แถวนี้เป็นห้อง Messenger ใหม่
-        if (isComment && commentReplyMode === "private") updSend.comment_promoted_to_inbox = true;
-        await admin.from("chat_customers").update(updSend).eq("id", id);
+        // ต่อ transcript ที่ฝั่งฐานข้อมูล (transcript || item) ไม่ใช่เขียนทับทั้งอาร์เรย์จากที่อ่านมา
+        //
+        // เดิมสองแอดมินที่กดส่งพร้อมกันจะอ่าน transcript สภาพเดียวกัน แล้วคนเขียนทีหลัง
+        // ทับข้อความของคนแรกหายไป (ยืนยันจากข้อมูลจริง: ข้อความที่หายกลับมาทาง echo
+        // ของ Meta โดยไม่มีชื่อคนตอบ จึงขึ้นว่า "ตอบจากเพจ")
+        const { error: appendErr } = await admin.rpc("app_append_page_messages", {
+          p_id: id,
+          p_items: [replyItem],
+          p_reply_text: String(replyText || "").slice(0, 300),
+          p_reply_by: String(body?.by || ""),
+          p_at: nowIso,
+          p_lang: lang || null,
+        });
+        // ถ้า RPC ล้ม (เช่นยังไม่ได้ apply migration) ถอยไปใช้วิธีเดิม ดีกว่าตอบแล้วไม่ถูกบันทึก
+        if (appendErr) await admin.from("chat_customers").update(updSend).eq("id", id);
+        // คอลัมน์ที่ RPC ไม่ได้แตะ — อัปเดตแยกเฉพาะตอนที่มีค่าจริง
+        const extra: Record<string, unknown> = {};
+        if (gotPsid && !row.psid) extra.psid = gotPsid;     // ไม่มีแชทเดิม → ใช้แถวนี้เป็นห้อง Messenger ใหม่
+        if (isComment && commentReplyMode === "private") extra.comment_promoted_to_inbox = true;
+        if (Object.keys(extra).length) {
+          await admin.from("chat_customers").update({ ...extra, updated_at: nowIso }).eq("id", id);
+        }
       }
       // สร้างคู่คำถาม/คำตอบเป็น candidate เท่านั้น (ยังค้นไม่เจอจนกว่าแอดมินอนุมัติ)
       // เก็บเฉพาะช่วงคำถามล่าสุด ไม่คัดลอกประวัติทั้งห้อง และตัด PII ก่อนบันทึก

@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import {
   CheckCircle2,
+  CheckCheck,
   Loader2,
   ArrowUpCircle,
   AlertTriangle,
@@ -128,6 +129,14 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   const [instagramUnreadCount, setInstagramUnreadCount] = useState(0);
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
+  // ใครกำลังพิมพ์อยู่ในห้องที่เปิด — { [email]: เวลาที่ได้รับสัญญาณล่าสุด (ms) }
+  //
+  // ส่งผ่าน Realtime broadcast ไม่เขียนฐานข้อมูล เพราะเป็นสถานะชั่วคราวไม่กี่วินาที
+  // (ถ้าเขียน DB ทุกครั้งที่กดแป้น = เขียนหลายสิบครั้งต่อข้อความเดียว)
+  const [typingBy, setTypingBy] = useState({});
+  const typingChanRef = useRef(null);      // ช่องของห้องที่เปิดอยู่
+  const typingSentAtRef = useRef(0);       // กันส่งถี่เกิน (ทุก 2 วิ ระหว่างพิมพ์)
+
   const [pendingFiles, setPendingFiles] = useState([]);   // ไฟล์ที่พักไว้รอกดส่ง [{file,name,type,preview}]
   const [replyTo, setReplyTo] = useState(null);           // { text, img, mid, at, side } ข้อความ/รูปที่กำลัง reply อ้างอิง
   const [forceLang, setForceLang] = useState("auto");     // ภาษาที่แอดมินเลือกเอง (auto = ให้ AI ตรวจ)
@@ -886,6 +895,43 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     }
   }
   // โหลด + Realtime + poll — ทำงานเฉพาะตอน "เปิดแท็บตอบแชทอยู่" (active) เพื่อประหยัด egress
+  // ช่อง "กำลังพิมพ์" ของห้องที่เปิดอยู่ — เข้าห้องไหนก็ฟังแค่ห้องนั้น
+  // ต่ออายุ 6 วินาที: ถ้าไม่มีสัญญาณใหม่ถือว่าหยุดพิมพ์แล้ว (กันค้างเมื่อคนปิดแท็บไปเลย)
+  useEffect(() => {
+    setTypingBy({});
+    typingChanRef.current = null;
+    const id = selected?.id;
+    if (!active || !id) return;
+    const chan = supabase.channel(`typing:${id}`, { config: { broadcast: { self: false } } })
+      .on("broadcast", { event: "typing" }, ({ payload }) => {
+        const who = String(payload?.by || "").trim();
+        if (!who || who === myEmail) return;
+        setTypingBy((cur) => ({ ...cur, [who]: Date.now() }));
+      })
+      .subscribe();
+    typingChanRef.current = chan;
+    const sweep = setInterval(() => {
+      setTypingBy((cur) => {
+        const next = {};
+        let changed = false;
+        for (const [who, at] of Object.entries(cur)) {
+          if (Date.now() - at < 6000) next[who] = at; else changed = true;
+        }
+        return changed ? next : cur;
+      });
+    }, 1500);
+    return () => { clearInterval(sweep); supabase.removeChannel(chan); typingChanRef.current = null; };
+  }, [active, selected?.id, myEmail]);
+
+  // บอกเพื่อนร่วมทีมว่าเรากำลังพิมพ์ — ส่งอย่างมากทุก 2 วินาที
+  const notifyTyping = () => {
+    const chan = typingChanRef.current;
+    if (!chan || !myEmail) return;
+    if (Date.now() - typingSentAtRef.current < 2000) return;
+    typingSentAtRef.current = Date.now();
+    chan.send({ type: "broadcast", event: "typing", payload: { by: myEmail } });
+  };
+
   // เมื่อสลับไปแท็บอื่น: หยุด subscription/poll ทั้งหมด (การแจ้งเตือนตอนปิดแอปยังทำงานผ่าน push/cron ฝั่ง server — ไม่กระทบ)
   useEffect(() => {
     if (!active) return;
@@ -1237,6 +1283,32 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   function removePending(idx) {
     setPendingFiles((p) => { const c = [...p]; const [rm] = c.splice(idx, 1); if (rm?.preview && String(rm.preview).startsWith("blob:")) URL.revokeObjectURL(rm.preview); return c; });
   }
+  // ลดขนาดรูปก่อนอัปโหลด — รูปจากมือถือมักหนัก 3-8 MB ซึ่งต้องอัปขึ้น storage หนึ่งรอบ
+  // แล้ว Meta ยังต้องมาโหลดต่ออีกรอบ รวมแล้วรอเป็นสิบวินาที
+  // Messenger แสดงรูปกว้างไม่เกินราว 1600px อยู่แล้ว ย่อเท่านี้ตาเปล่าไม่เห็นต่าง
+  const IMG_MAX_EDGE = 1600;
+  const IMG_SKIP_BYTES = 400 * 1024;      // เล็กกว่านี้บีบแล้วไม่คุ้มเวลาที่ใช้บีบ
+  async function compressImage(file) {
+    if (!file?.type?.startsWith("image/")) return file;
+    if (file.type === "image/gif") return file;          // GIF ขยับได้ บีบแล้วภาพเคลื่อนไหวหาย
+    if (file.size <= IMG_SKIP_BYTES) return file;
+    try {
+      const bmp = await createImageBitmap(file);
+      const scale = Math.min(1, IMG_MAX_EDGE / Math.max(bmp.width, bmp.height));
+      const w = Math.max(1, Math.round(bmp.width * scale));
+      const h = Math.max(1, Math.round(bmp.height * scale));
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      canvas.getContext("2d").drawImage(bmp, 0, 0, w, h);
+      bmp.close?.();
+      const blob = await new Promise((res) => canvas.toBlob(res, "image/jpeg", 0.82));
+      if (!blob || blob.size >= file.size) return file;   // บีบแล้วไม่เล็กลง = ส่งไฟล์เดิม
+      return new File([blob], String(file.name || "image").replace(/\.\w+$/, "") + ".jpg", { type: "image/jpeg" });
+    } catch {
+      return file;                                        // เบราว์เซอร์ไม่รองรับ = ส่งไฟล์เดิม
+    }
+  }
+
   async function uploadToStorage(file) {
     const ext = (file.name.split(".").pop() || "bin").toLowerCase();
     const path = `${selected.page_id || "p"}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
@@ -1328,7 +1400,10 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
       // อัปโหลดขึ้น storage (ถ้ายังไม่มี URL) แล้วส่งทีละไฟล์
       let prepared;
       try {
-        prepared = await Promise.all(fileTemps.map(async (f) => ({ ...f, url: f.pf.url || await uploadToStorage(f.pf.file) })));
+        prepared = await Promise.all(fileTemps.map(async (f) => ({
+          ...f,
+          url: f.pf.url || await uploadToStorage(await compressImage(f.pf.file)),
+        })));
       } catch (er) {
         restoreFiles(); rollbackOptimistic();
         setSendMsg("อัปโหลดไฟล์ไม่สำเร็จ: " + (er?.message || er));
@@ -1430,6 +1505,36 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     loadList();
     updateAppBadge();   // อัปเดตจุดแดงบนไอคอนทันที
   }
+  // อ่านแล้วทั้งหมด — เดิมต้องเปิดทีละห้องจุดแดงถึงจะหาย ห้องค้าง 100+ ห้องคือไล่เปิด 100 ครั้ง
+  //
+  // เคลียร์แค่ห้องที่ "เห็นอยู่ในลิสต์ตอนนี้" ตามตัวกรองที่เลือกไว้ ไม่ใช่ล้างทั้งฐานข้อมูล
+  // (ถ้าล้างหมดทุกเพจ คนที่ดูแลเพจอื่นจะเสียจุดแดงของตัวเองไปด้วย)
+  //
+  // ไม่ยิง mark_seen ไป Meta ทีละห้องเพราะ 100 ห้อง = 100 คำขอ เสี่ยงชน rate limit
+  // แต่ยังเขียน read_at ให้ทุกห้อง ซึ่งเป็นตัวที่ตัวซิงก์ใช้ตัดสิน จุดแดงจึงไม่เด้งกลับ
+  const [markAllBusy, setMarkAllBusy] = useState(false);
+  async function markAllRead() {
+    const ids = (list || []).filter((x) => x.unread).map((x) => x.id);
+    if (!ids.length) return;
+    if (!window.confirm(`ทำเครื่องหมายว่าอ่านแล้ว ${ids.length} ห้องที่เห็นในลิสต์นี้?`)) return;
+    setMarkAllBusy(true);
+    const now = new Date().toISOString();
+    ids.forEach((id) => markReadLocally(id));
+    setList((l) => (l || []).map((x) => (ids.includes(x.id) ? { ...x, unread: false, read_at: now } : x)));
+    setSelected((sel) => (sel && ids.includes(sel.id) ? { ...sel, unread: false, read_at: now } : sel));
+    // แบ่งก้อนละ 100 — PostgREST มีเพดานความยาว URL ของ .in()
+    for (let i = 0; i < ids.length; i += 100) {
+      const chunk = ids.slice(i, i + 100);
+      await supabase.from("chat_customers")
+        .update({ unread: false, read_at: now, updated_at: now })
+        .in("id", chunk);
+    }
+    setMarkAllBusy(false);
+    loadList();
+    updateAppBadge();
+    logActivity("mark_all_read", { count: ids.length });
+  }
+
   async function pushLabel(id) {
     setLabelMsg({ type: "loading", text: "กำลังส่งป้ายไป Meta..." });
     const { data, error } = await supabase.functions.invoke("meta-push-labels", { body: { id } });
@@ -1992,6 +2097,15 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
               <span className="inline-flex items-center gap-1">🚫 ไม่สนใจ</span>
             </FilterPill>
           </div>
+          {/* กดครั้งเดียวเคลียร์จุดแดงของทุกห้องที่เห็นในลิสต์นี้ — โชว์เฉพาะตอนมีห้องค้างจริง */}
+          {(list || []).some((x) => x.unread) && (
+            <button type="button" onClick={markAllRead} disabled={markAllBusy}
+              title="ทำเครื่องหมายว่าอ่านแล้วให้ทุกห้องที่เห็นในลิสต์นี้ (ตามตัวกรองที่เลือกอยู่)"
+              className="inline-flex items-center gap-1.5 self-start rounded-lg border border-night-border bg-night-surface2 px-2.5 py-1 text-[11.5px] font-medium text-night-ink-2 hover:text-night-ink disabled:opacity-50">
+              {markAllBusy ? <Loader2 size={12} className="animate-spin" /> : <CheckCheck size={12} />}
+              อ่านแล้วทั้งหมด ({(list || []).filter((x) => x.unread).length})
+            </button>
+          )}
           {/* แยกลูกค้าตามประเทศ / ตามแอดที่ทักมา — สร้างจากลิสต์ที่โหลดอยู่ ไม่ต้อง query แยก
               ใช้ select เพราะจำนวนกลุ่มอาจเยอะ (หลายประเทศ/หลายแอด) ถ้าทำเป็นชิปจะล้นจอ */}
           {(allCountries.length > 1 || allAds.length > 0) && (
@@ -2404,6 +2518,17 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                   )
                 ))}<div ref={bottomRef} /></>}
               </div>
+              {/* ใครกำลังพิมพ์อยู่ในห้องนี้ — กันสองคนตอบทับกัน */}
+              {Object.keys(typingBy).length > 0 && (
+                <div className="flex items-center gap-2 border-t border-night-border-subtle px-4 py-1.5 text-[11px] text-night-accent">
+                  <span className="flex gap-0.5">
+                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-night-accent [animation-delay:0ms]" />
+                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-night-accent [animation-delay:120ms]" />
+                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-night-accent [animation-delay:240ms]" />
+                  </span>
+                  {Object.keys(typingBy).map((who) => who.split("@")[0]).join(", ")} กำลังพิมพ์อยู่…
+                </div>
+              )}
               {sendMsg && <div className="px-4 py-1.5 text-[11px] text-night-ink-2 border-t border-night-border-subtle whitespace-pre-wrap break-words">{sendMsg}</div>}
               {knowledgeCaptureMsg && !knowledgeCapture && <div className="px-4 py-1.5 text-[11px] font-medium text-emerald-400 border-t border-emerald-100 bg-emerald-500/15">{knowledgeCaptureMsg}</div>}
               <div className="p-3 border-t border-night-border relative shrink-0" style={{ paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom))" }}>
@@ -2546,7 +2671,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                 )}
                 <div className="relative">
                   <div className="flex items-end gap-2 rounded-lg border border-night-border bg-night-surface2 overflow-hidden pr-1.5 py-1.5">
-                    <textarea value={reply} onChange={(e) => { setReply(e.target.value); setSendPreview(null); }} onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) prepareSendPreview(); }} rows={2} placeholder="พิมพ์คำตอบเป็นไทย..." className="flex-1 bg-transparent border-0 px-3 py-1 text-sm resize-none focus:outline-none" />
+                    <textarea value={reply} onChange={(e) => { setReply(e.target.value); setSendPreview(null); notifyTyping(); }} onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) prepareSendPreview(); }} rows={2} placeholder="พิมพ์คำตอบเป็นไทย..." className="flex-1 bg-transparent border-0 px-3 py-1 text-sm resize-none focus:outline-none" />
                     <button onClick={prepareSendPreview} disabled={sending || (!reply.trim() && pendingFiles.length === 0)} className="bg-night-accent text-white rounded-md px-3.5 py-2 text-sm font-semibold disabled:opacity-50 flex items-center gap-1.5 shrink-0 self-end">
                       {sending ? <Loader2 className="animate-spin" size={15} /> : (!reply.trim() && pendingFiles.length > 0) ? <ArrowUpCircle size={15} /> : <Send size={15} />} {(!reply.trim() && pendingFiles.length > 0) ? "ส่งรูป" : "ส่ง"}
                     </button>

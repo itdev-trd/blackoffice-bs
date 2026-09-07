@@ -55,7 +55,9 @@ function lastReplyFromTranscript(tr: any[]): { text: string; at: string; by: str
     const m = tr[i];
     if (m?.w === "p") {
       const text = (String(m.t || "").trim() || (m.img ? "[รูปภาพ]" : "")).slice(0, 300);
-      return { text, at: String(m.at || new Date().toISOString()), by: String(m.by_name || "") };
+      // แอปเขียนชื่อคนตอบลงฟิลด์ "by" ส่วน "by_name" ใช้กับคำตอบที่มาจากกล่องข้อความเพจ
+      // เดิมอ่านแค่ by_name จึงได้ค่าว่างทุกครั้งที่แอดมินตอบจากแอป แล้วชื่อกลายเป็น "ตอบจากเพจ"
+      return { text, at: String(m.at || new Date().toISOString()), by: String(m.by || m.by_name || "") };
     }
   }
   return null;
@@ -633,7 +635,8 @@ Deno.serve(async (req) => {
                 await admin.from("chat_customers").update({
                   transcript: mergedTr, awaiting_reply: false, unread: false, read_at: nowIso,
                   last_reply_text: lpDup ? lpDup.text : echoPreview,
-                  last_reply_by: (lpDup?.by) || adminName,
+                  // ค่าว่าง = ไม่รู้ว่าใครตอบ ให้คงชื่อเดิมไว้ (เดิมเขียนทับเป็น null = "ตอบจากเพจ")
+                  ...(lpDup?.by ? { last_reply_by: lpDup.by } : {}),
                   last_reply_at: lpDup ? lpDup.at : nowIso,
                   updated_at: nowIso,
                 }).eq("id", row.id);
@@ -652,15 +655,29 @@ Deno.serve(async (req) => {
                   if (aUrl && (isSticker || aType === "image" || aType === "video")) { it.img = aUrl; it.img_source = "webhook"; }  // ข้อ 2: มี url ก็โชว์รูปสติกเกอร์
                   items.push(it);
                 }
-                const newTr = items.length ? [...tr, ...items].slice(-80) : tr;
-                const lpNew = lastReplyFromTranscript(newTr);   // ข้อความเพจตัวสุดท้ายตามลำดับจริง
-                await admin.from("chat_customers").update({
-                  transcript: newTr, awaiting_reply: false, unread: false, read_at: nowIso,
-                  last_reply_text: lpNew ? lpNew.text : echoPreview,
-                  last_reply_by: (lpNew?.by) || adminName,
-                  last_reply_at: lpNew ? lpNew.at : nowIso,
-                  last_message_at: nowIso, updated_at: nowIso,
-                }).eq("id", row.id);
+                // ต่อรายการที่ฝั่งฐานข้อมูล (transcript || items) แทนการเขียนทับทั้งอาร์เรย์
+                // ไม่งั้น echo ที่มาระหว่างแอดมินอีกคนกำลังบันทึกข้อความ จะทับข้อความคนนั้นหาย
+                //
+                // p_reply_by ส่งค่าว่างมาโดยเจตนา: Meta ไม่บอกว่าแอดมินคนไหนตอบ
+                // ฟังก์ชันจึงเก็บชื่อคนตอบเดิมไว้ ไม่เขียนทับเป็นค่าว่าง (= "ตอบจากเพจ")
+                if (items.length) {
+                  const { error: appendErr } = await admin.rpc("app_append_page_messages", {
+                    p_id: row.id, p_items: items,
+                    p_reply_text: echoPreview || null,
+                    p_reply_by: "", p_at: nowIso, p_lang: null,
+                  });
+                  if (appendErr) {
+                    const newTr = [...tr, ...items];
+                    const lpNew = lastReplyFromTranscript(newTr);
+                    await admin.from("chat_customers").update({
+                      transcript: newTr, awaiting_reply: false, unread: false, read_at: nowIso,
+                      last_reply_text: lpNew ? lpNew.text : echoPreview,
+                      last_reply_by: (lpNew?.by) || adminName,
+                      last_reply_at: lpNew ? lpNew.at : nowIso,
+                      last_message_at: nowIso, updated_at: nowIso,
+                    }).eq("id", row.id);
+                  }
+                }
               }
               await clearRelatedUnread(admin, pageId, custPsid, null, nowIso);
               await syncPushState(row.id);
