@@ -81,7 +81,12 @@ Deno.serve(async (req) => {
 
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const body = await req.json().catch(() => ({}));
-    const action = ["status", "app_status", "save_app"].includes(String(body.action)) ? String(body.action) : "save";
+    // รายชื่อนี้ต้องมี action ใหม่ทุกตัว ไม่งั้นคำขอจะตกไปเป็น "save"
+    // (บั๊กที่เจอจริง: messaging_status/save_messaging ไม่ได้อยู่ในลิสต์ → token ที่วางในช่อง
+    //  "ตอบแชท" ถูกบันทึกทับ token หลักแทน และหน้าเว็บโชว์ "แอป: ไม่ทราบ · เห็น 0 เพจ"
+    //  เพราะได้ผลลัพธ์ของ action save ที่ไม่มีฟิลด์เหล่านั้น)
+    const ACTIONS = ["status", "app_status", "save_app", "messaging_status", "save_messaging"];
+    const action = ACTIONS.includes(String(body.action)) ? String(body.action) : "save";
 
     // ---------- App ID / App Secret ของ Meta app ----------
     // ตรวจโดยขอ app access token (`{app_id}|{app_secret}`) ไปอ่านข้อมูลแอปตัวเอง
