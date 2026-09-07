@@ -4,7 +4,7 @@
 // คอมเมนต์เก็บอยู่ในตารางเดียวกับแชท (chat_customers) แต่ id ขึ้นต้น fbc_ (Facebook) / igc_ (Instagram)
 // การตอบใช้ edge function เดิม (messenger-reply) โหมด comment_reply_mode = public = ตอบใต้คอมเมนต์นั้น
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, MessageSquare, RefreshCw, Send, ExternalLink, Megaphone } from "lucide-react";
+import { Loader2, MessageSquare, RefreshCw, Send, ExternalLink, Megaphone, Check } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { logActivity } from "@/lib/utils/activity";
 import { readFunctionErrorMessage } from "@/lib/utils/errors";
@@ -28,6 +28,12 @@ function fmtTime(value) {
     : d.toLocaleString("th-TH", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
+// คำตอบทั้งหมดของฝั่งเพจในเธรดนี้ (เรียงเก่า→ใหม่) — ทั้งที่ตอบจากแอปและที่ตอบจาก Facebook เอง
+function replies(row) {
+  const tr = Array.isArray(row?.transcript) ? row.transcript : [];
+  return tr.filter((m) => m?.w === "p" && m?.t);
+}
+
 // ข้อความคอมเมนต์ล่าสุดของลูกค้า — ใช้ transcript ก่อนเพราะเก็บครบกว่า last_user_text ที่ถูกตัดที่ 300 ตัว
 function commentText(row) {
   const tr = Array.isArray(row?.transcript) ? row.transcript : [];
@@ -44,10 +50,16 @@ export default function FeedTab({ active = true }) {
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState(null);   // { id, ok, message }
   const [email, setEmail] = useState("");
+  const [translate, setTranslate] = useState(false);   // ค่าเริ่มต้น = ส่งตามที่พิมพ์ (เหมือนตอบผ่าน Facebook)
+  const [asDm, setAsDm] = useState(false);             // ตอบเป็นข้อความส่วนตัวแทนการตอบใต้คอมเมนต์
+  const [saved, setSaved] = useState([]);              // คลังคำตอบ (ใช้ร่วมกับหน้าตอบแชท)
   const loadingRef = useRef(false);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setEmail(data?.user?.email || ""));
+    // คลังคำตอบชุดเดียวกับหน้าตอบแชท (เอาเฉพาะข้อความ ไม่เอารูป เพราะคอมเมนต์ตอบด้วยข้อความ)
+    supabase.from("saved_replies").select("id, title, message, page_id, sort").order("sort").order("created_at")
+      .then(({ data }) => setSaved((data || []).filter((r) => r.message)));
   }, []);
 
   const load = useCallback(async () => {
@@ -83,16 +95,31 @@ export default function FeedTab({ active = true }) {
     const body = text.trim();
     if (!body || sending) return;
     setSending(true); setNotice(null);
+    // approved_text = ข้อความที่ผ่านการอนุมัติแล้ว ฝั่ง server จะส่งตามนี้ตรง ๆ ไม่แปลอีก
+    // ค่าเริ่มต้นของหน้าฟีดคือ "ส่งตามที่พิมพ์" ให้เหมือนตอบคอมเมนต์ผ่าน Facebook เอง
+    // ติ๊ก "แปลก่อนส่ง" เมื่อไหร่ค่อยปล่อยให้ server แปลเป็นภาษาลูกค้า (ส่งแค่ text_th)
     const { data, error } = await supabase.functions.invoke("messenger-reply", {
-      body: { action: "send", id: row.id, text_th: body, by: email, comment_reply_mode: "public" },
+      body: {
+        action: "send", id: row.id, text_th: body, by: email,
+        ...(translate ? {} : { approved_text: body }),
+        comment_reply_mode: asDm ? "private" : "public",
+      },
     });
     setSending(false);
     if (error) { setNotice({ id: row.id, ok: false, message: await readFunctionErrorMessage(error) }); return; }
     if (!data?.ok) { setNotice({ id: row.id, ok: false, message: data?.error || "ตอบคอมเมนต์ไม่สำเร็จ" }); return; }
     logActivity("reply_comment", { id: row.id, page_id: row.page_id, customer_name: row.customer_name });
-    setNotice({ id: row.id, ok: true, message: "ตอบแล้ว" });
+    setNotice({ id: row.id, ok: true, message: asDm ? "ส่งข้อความส่วนตัวแล้ว" : "ตอบใต้คอมเมนต์แล้ว" });
     setText(""); setOpenId(null);
     load();
+  }
+
+  // ปิดงานเองได้ (คอมเมนต์ที่ไม่ต้องตอบ เช่น อีโมจิ/สแปม) — ไม่ต้องตอบทิ้งไว้ให้ค้างในลิสต์
+  async function markHandled(row) {
+    const { error } = await supabase.from("chat_customers")
+      .update({ awaiting_reply: false, updated_at: new Date().toISOString() }).eq("id", row.id);
+    if (error) { setNotice({ id: row.id, ok: false, message: error.message }); return; }
+    setRows((cur) => (cur || []).map((r) => (r.id === row.id ? { ...r, awaiting_reply: false } : r)));
   }
 
   const list = (rows || []).filter((r) => (onlyUnanswered ? r.awaiting_reply !== false : true));
@@ -170,10 +197,17 @@ export default function FeedTab({ active = true }) {
                         </div>
                       )}
 
-                      {row.last_reply_text && (
-                        <div className="mt-1.5 rounded-lg bg-slate-50 px-2 py-1.5 text-[12px] text-slate-600">
-                          <span className="text-slate-400">ตอบไปแล้ว: </span>{row.last_reply_text}
-                          {row.last_reply_at && <span className="ml-1 text-[10.5px] text-slate-400">({fmtTime(row.last_reply_at)})</span>}
+                      {/* เธรดใต้คอมเมนต์ — โชว์คำตอบทุกอันเรียงตามเวลาเหมือนที่เห็นบน Facebook
+                          รวมคำตอบที่แอดมินตอบจาก Facebook เองด้วย (webhook echo เขียนเข้า transcript ให้) */}
+                      {replies(row).length > 0 && (
+                        <div className="mt-1.5 space-y-1 border-l-2 border-slate-200 pl-2.5">
+                          {replies(row).map((m, i) => (
+                            <div key={m.mid || i} className="text-[12px] text-slate-600">
+                              <span className="text-slate-400">↳ {m.by_name || m.by || "เพจ"}: </span>
+                              <span className="whitespace-pre-wrap break-words">{m.t}</span>
+                              {m.at && <span className="ml-1 text-[10.5px] text-slate-400">({fmtTime(m.at)})</span>}
+                            </div>
+                          ))}
                         </div>
                       )}
 
@@ -181,14 +215,40 @@ export default function FeedTab({ active = true }) {
                         <div className="mt-2 space-y-1.5">
                           <textarea
                             value={text} onChange={(e) => setText(e.target.value)} rows={2} autoFocus
-                            placeholder="พิมพ์คำตอบเป็นไทย — ระบบแปลเป็นภาษาลูกค้าให้ก่อนส่ง"
+                            placeholder={translate ? "พิมพ์ไทย — ระบบจะแปลเป็นภาษาลูกค้าก่อนส่ง" : "พิมพ์คำตอบ — ส่งตามที่พิมพ์เลย (เหมือนตอบใน Facebook)"}
                             onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") sendReply(row); }}
                             className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm"
                           />
+
+                          {/* คลังคำตอบชุดเดียวกับหน้าตอบแชท — กดแล้วเติมข้อความลงกล่องเลย */}
+                          {saved.filter((r) => !r.page_id || String(r.page_id) === String(row.page_id)).length > 0 && (
+                            <div className="flex flex-wrap gap-1">
+                              {saved.filter((r) => !r.page_id || String(r.page_id) === String(row.page_id)).slice(0, 8).map((r) => (
+                                <button key={r.id} type="button" onClick={() => setText(r.message)}
+                                  title={r.message}
+                                  className="rounded-full border border-slate-300 px-2 py-0.5 text-[10.5px] text-slate-600 hover:bg-slate-50">
+                                  {r.title || String(r.message).slice(0, 20)}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+
+                          <div className="flex items-center gap-3 flex-wrap text-[11px] text-slate-600">
+                            <label className="inline-flex items-center gap-1.5 cursor-pointer">
+                              <input type="checkbox" checked={translate} onChange={(e) => setTranslate(e.target.checked)} />
+                              แปลเป็นภาษาลูกค้าก่อนส่ง
+                            </label>
+                            <label className="inline-flex items-center gap-1.5 cursor-pointer" title="Meta อนุญาตให้ส่งข้อความส่วนตัวถึงคนคอมเมนต์ได้ 1 ครั้งต่อคอมเมนต์">
+                              <input type="checkbox" checked={asDm} onChange={(e) => setAsDm(e.target.checked)} />
+                              ส่งเป็นข้อความส่วนตัว (DM) แทน
+                            </label>
+                          </div>
+
                           <div className="flex items-center gap-2">
                             <button type="button" onClick={() => sendReply(row)} disabled={sending || !text.trim()}
                               className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50">
-                              {sending ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />} ตอบใต้คอมเมนต์
+                              {sending ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+                              {asDm ? "ส่งข้อความส่วนตัว" : "ตอบใต้คอมเมนต์"}
                             </button>
                             <button type="button" onClick={() => { setOpenId(null); setText(""); }}
                               className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-600 hover:bg-slate-50">ยกเลิก</button>
@@ -196,10 +256,18 @@ export default function FeedTab({ active = true }) {
                           </div>
                         </div>
                       ) : (
-                        <button type="button" onClick={() => { setOpenId(row.id); setText(""); setNotice(null); }}
-                          className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-brand-400/60 px-2.5 py-1 text-xs font-semibold text-brand-600 hover:bg-brand-50">
-                          <Send size={12} /> ตอบคอมเมนต์
-                        </button>
+                        <div className="mt-2 flex items-center gap-2 flex-wrap">
+                          <button type="button" onClick={() => { setOpenId(row.id); setText(""); setNotice(null); }}
+                            className="inline-flex items-center gap-1.5 rounded-lg border border-brand-400/60 px-2.5 py-1 text-xs font-semibold text-brand-600 hover:bg-brand-50">
+                            <Send size={12} /> ตอบคอมเมนต์
+                          </button>
+                          {row.awaiting_reply !== false && (
+                            <button type="button" onClick={() => markHandled(row)}
+                              className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-50">
+                              <Check size={12} /> จัดการแล้ว
+                            </button>
+                          )}
+                        </div>
                       )}
 
                       {note && (
