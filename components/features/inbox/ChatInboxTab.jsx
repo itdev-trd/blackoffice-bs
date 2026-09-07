@@ -461,13 +461,20 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     if (syncErr || !sync?.ok) setSendMsg("บันทึกเพจแล้ว แต่เปิดรับคอมเมนต์ไม่สำเร็จ: " + (sync?.error || syncErr?.message || ""));
     else setSendMsg(`เปิดรับคอมเมนต์ Ads แบบเรียลไทม์ ${sync.selected_comment_pages?.length || 0} เพจแล้ว ✓`);
   }
+  // การ์ด "มาจากแอด" — ใช้ตัวเดียวกันทั้งเลย์เอาต์มือถือและจอใหญ่
+  // from_referral = ข้อมูลที่ Meta แถมมาตอนลูกค้ากดแอด (ชื่อแอด + รูป) ใช้เมื่ออ่านจาก Graph ไม่ได้
+  // เพราะ token ไม่มีสิทธิ์บัญชีโฆษณานั้น — มีแค่ชื่อแอดกับรูป ไม่มีแคมเปญ/ชุดโฆษณา จึงไม่ต้องโชว์ "-" ให้เข้าใจผิด
   const renderAd = (ad) => (
     <div key={ad.ad_id} className="rounded-lg border border-night-border overflow-hidden bg-night-surface2/50">
       {ad.media_url && (ad.media_type === "video"
         ? <video src={ad.media_url} poster={ad.thumb_url || undefined} controls className="w-full max-h-40 object-cover bg-black" />
-        : <img src={ad.media_url} alt="" className="w-full max-h-40 object-cover" />)}
+        : <img src={ad.media_url} alt="" className="w-full max-h-40 object-cover" loading="lazy"
+            onError={(e) => { e.currentTarget.style.display = "none"; }} />)}
       <div className="p-2 space-y-0.5">
-        {ad.error ? <div className="text-[11px] text-night-ink-3">โหลดรายละเอียดแอดไม่ได้ — แอดอาจถูกลบ หรือไม่มีสิทธิ์เข้าถึงบัญชีโฆษณานี้</div> : (<>
+        {ad.error ? <div className="text-[11px] text-night-ink-3">โหลดรายละเอียดแอดไม่ได้ — แอดอาจถูกลบ หรือไม่มีสิทธิ์เข้าถึงบัญชีโฆษณานี้</div> : ad.from_referral ? (<>
+          <div className="text-[11px] text-night-ink-2">โฆษณา: <span className="text-night-ink">{ad.name || "-"}</span></div>
+          <div className="text-[10px] text-night-ink-3">ข้อมูลจากตอนลูกค้ากดแอด · ยังไม่มีสิทธิ์อ่านบัญชีโฆษณานี้ จึงไม่มีชื่อแคมเปญ/ชุดโฆษณา</div>
+        </>) : (<>
           <div className="text-[11px] text-night-ink-2">แคมเปญ: <span className="text-night-ink">{ad.campaign_name || "-"}</span></div>
           <div className="text-[11px] text-night-ink-2">ชุดโฆษณา: <span className="text-night-ink">{ad.adset_name || "-"}</span></div>
           <div className="text-[11px] text-night-ink-2">โฆษณา: <span className="text-night-ink">{ad.name || "-"}</span></div>
@@ -2671,23 +2678,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
               <div className="text-xs text-night-ink-3">มาจากแอด{adSources.length ? ` (${adSources.length})` : ""}</div>
               {adLoading && <div className="text-[11px] text-night-ink-3">กำลังโหลดข้อมูลแอด...</div>}
               {!adLoading && adSources.length === 0 && <div className="text-[11px] text-night-ink-2">{srcLabel(selected)}</div>}
-              {adSources.map((ad) => (
-                <div key={ad.ad_id} className="rounded-lg border border-night-border overflow-hidden bg-night-surface2/50">
-                  {ad.media_url && (ad.media_type === "video"
-                    ? <video src={ad.media_url} poster={ad.thumb_url || undefined} controls className="w-full max-h-40 object-cover bg-black" />
-                    : <img src={ad.media_url} alt="" className="w-full max-h-40 object-cover" />)}
-                  <div className="p-2 space-y-0.5">
-                    {ad.error ? <div className="text-[11px] text-night-ink-3">โหลดรายละเอียดแอดไม่ได้ — แอดอาจถูกลบ หรือไม่มีสิทธิ์เข้าถึงบัญชีโฆษณานี้</div> : (
-                      <>
-                        <div className="text-[11px] text-night-ink-2">แคมเปญ: <span className="text-night-ink">{ad.campaign_name || "-"}</span></div>
-                        <div className="text-[11px] text-night-ink-2">ชุดโฆษณา: <span className="text-night-ink">{ad.adset_name || "-"}</span></div>
-                        <div className="text-[11px] text-night-ink-2">โฆษณา: <span className="text-night-ink">{ad.name || "-"}</span></div>
-                      </>
-                    )}
-                    <div className="text-[10px] text-night-ink-3 break-all">ad_id: {ad.ad_id}</div>
-                  </div>
-                </div>
-              ))}
+              {adSources.map(renderAd)}
             </div>
             <CustomerDataForm darkMode row={selected} onSaved={(v) => { setSelected((s) => (s ? { ...s, ...v } : s)); setList((l) => (l || []).map((x) => (x.id === selected.id ? { ...x, ...v } : x))); }} />
             {isBeSightPage(selected) && <TradeIdChecker darkMode />}

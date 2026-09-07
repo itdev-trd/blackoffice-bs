@@ -81,10 +81,22 @@ async function fillMissingAdNames(admin: any, base: string, token: string): Prom
     .select("entry_ad_id").not("entry_ad_id", "is", null).is("entry_ad_name", null).limit(200);
   const ids = [...new Set((rows ?? []).map((r: any) => String(r.entry_ad_id)).filter(Boolean))].slice(0, AD_NAME_MAX_PER_RUN);
   if (!ids.length) return 0;
+  // ชื่อแอดจาก referral ที่ Meta แถมมาตอนลูกค้ากดแอด (ads_context_data.ad_title)
+  // ใช้ก่อนถาม Graph เพราะได้ฟรี ไม่ต้องมีสิทธิ์บัญชีโฆษณา และไม่เสียคำขอ
+  const { data: refs } = await admin.from("chat_referrals")
+    .select("ad_id, ads_context").in("ad_id", ids).not("ads_context", "is", null);
+  const titleByAd: Record<string, string> = {};
+  for (const r of refs ?? []) {
+    const title = safeShort((r as any)?.ads_context?.ad_title, 300);
+    if (title) titleByAd[String((r as any).ad_id)] = title;
+  }
   let filled = 0;
   for (const adId of ids) {
-    const res = await fetchJson(`${base}/${adId}?fields=name&access_token=${token}`, 2);
-    const name = res?.error ? null : safeShort(res?.name, 300);
+    let name = titleByAd[adId] ?? null;
+    if (!name) {
+      const res = await fetchJson(`${base}/${adId}?fields=name&access_token=${token}`, 2);
+      name = res?.error ? null : safeShort(res?.name, 300);
+    }
     if (!name) continue;
     const { data: upd } = await admin.from("chat_customers")
       .update({ entry_ad_name: name, updated_at: new Date().toISOString() })
