@@ -22,7 +22,7 @@
 //   Instagram (IGSID) และ LINE ใช้ไม่ได้ — ต้องบอกผู้ใช้ตรงๆ ไม่ใช่ปล่อยให้กดแล้วเงียบ
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { getMetaToken } from "../_shared/meta.ts";
+import { getMetaMessagingContext } from "../_shared/meta.ts";
 import { getMetaPages } from "../_shared/meta-pages.ts";
 import { authorizeRequest } from "../_shared/permissions.ts";
 import { readJsonBody } from "../_shared/security.ts";
@@ -71,19 +71,23 @@ Deno.serve(async (req) => {
     if (!auth.ok) return json({ ok: false, error: auth.error }, auth.status);
 
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-    const token = await getMetaToken();
+    // ป้ายกำกับเป็นฟีเจอร์ใต้ pages_messaging เหมือนการส่งข้อความ จึงต้องใช้ token ตัวเดียวกับที่ตอบแชท
+    // (token หลักของบริษัทยังเป็น Standard Access — ติดป้ายให้ลูกค้าจริงไม่ได้)
+    const meta = await getMetaMessagingContext();
+    const token = meta.token;
     if (!token) return json({ ok: false, error: "ยังไม่ได้ตั้งค่า Meta access token" }, 400);
 
     // ---- หาเพจ + psid ที่จะทำงานด้วย ----
     let pageId = body?.page_id ? String(body.page_id) : "";
     let psid = "";
     let localLabels: any[] = [];   // ป้ายที่แอปนี้จดไว้ว่าเคยติดให้ลูกค้ารายนี้
-    if (["of", "attach", "detach"].includes(action)) {
+    let webTags: string[] = [];
+    if (["of", "attach", "detach", "mirror"].includes(action)) {
       const rowId = String(body?.id || "");
       if (!rowId) return json({ ok: false, error: "ต้องส่ง id ของบทสนทนา" }, 400);
       const { data: row } = await admin
         .from("chat_customers")
-        .select("id, page_id, psid, source, meta_labels")
+        .select("id, page_id, psid, source, meta_labels, tags")
         .eq("id", rowId)
         .maybeSingle();
       if (!row) return json({ ok: false, error: "ไม่พบบทสนทนานี้" }, 404);
@@ -94,11 +98,12 @@ Deno.serve(async (req) => {
       pageId = String(row.page_id || "");
       psid = String(row.psid);
       localLabels = Array.isArray(row.meta_labels) ? row.meta_labels : [];
+      webTags = Array.isArray(row.tags) ? row.tags.map((t: any) => String(t).trim()).filter(Boolean) : [];
     }
     if (!pageId) return json({ ok: false, error: "ต้องส่ง page_id" }, 400);
     // สิทธิ์ตอบแชทไม่ผูกกับเพจ — ใครเข้าหน้าตอบแชทได้ ก็ตอบได้ทุกเพจและทุก LINE OA
 
-    const pd = await getMetaPages(GRAPH_BASE, token, { mustIncludePageId: pageId });
+    const pd = await getMetaPages(GRAPH_BASE, token, { mustIncludePageId: pageId, cacheKey: meta.cacheKey });
     const pageTok = (pd?.data ?? []).find((p: any) => String(p.id) === pageId)?.access_token;
     if (!pageTok) return json({ ok: false, error: "ไม่พบ access token ของเพจนี้ (เช็คสิทธิ์ pages_messaging)" }, 400);
 
@@ -182,6 +187,94 @@ Deno.serve(async (req) => {
         .eq("id", String(body?.id || ""));
 
       return json({ ok: true, applied: action, label_id: labelId, labels: next });
+    }
+
+    // ---- ซิงก์ป้ายในเว็บ (chat_customers.tags) ขึ้นไปเป็น Custom Labels ของ Meta ----
+    //
+    // เรียกทุกครั้งที่แอดมินติด/ถอดป้ายในเว็บ — ทำงานแบบ "ปรับให้ตรงกัน" ไม่ใช่สั่งทีละใบ
+    // จึงเรียกซ้ำได้ปลอดภัย และถ้าเคยพลาดไปรอบก่อน รอบถัดไปจะตามเก็บให้เอง
+    //
+    // ทิศทางกลับ (คนไปติดป้ายใน Meta แล้วให้เข้าเว็บ) ทำไม่ได้ — ทดสอบกับ Graph v22.0
+    // ด้วย token ที่มีสิทธิ์ครบแล้วทุกทาง ปิดหมด: GET /{psid}/custom_labels (subcode 33),
+    // GET /{label_id} (subcode 33), /{label_id}/label และ /{label_id}/users (ไม่มี field),
+    // conversations?fields=labels (Meta ตัด field ทิ้งเงียบ ๆ) และไม่มี webhook แจ้งการติดป้าย
+    // เราจึงอ่านได้แค่ "รายชื่อป้ายของเพจ" เพื่อให้ตัวเลือกในเว็บตรงกับใน Meta
+    if (action === "mirror") {
+      const cur = await fetchJson(`${GRAPH_BASE}/${pageId}/custom_labels?fields=name,page_label_name&limit=500&access_token=${pageTok}`);
+      if (cur?.error) return json({ ok: false, error: cur.error.error_user_msg || cur.error.message || "อ่านป้ายของเพจไม่สำเร็จ" }, 400);
+      const idByName = new Map<string, string>();
+      for (const l of cur?.data ?? []) {
+        const name = labelName(l);
+        if (name && !idByName.has(name.toLowerCase())) idByName.set(name.toLowerCase(), String(l.id));
+      }
+
+      const want = [...new Set(webTags.map((t) => t.trim()).filter(Boolean))];
+      const wantKeys = new Set(want.map((t) => t.toLowerCase()));
+      const haveKeys = new Set(localLabels.map((l: any) => String(l?.name || "").toLowerCase()).filter(Boolean));
+
+      const toAttach = want.filter((t) => !haveKeys.has(t.toLowerCase()));
+      const toDetach = localLabels.filter((l: any) => !wantKeys.has(String(l?.name || "").toLowerCase()));
+
+      // กันลูปพัง: ครั้งละไม่เกิน 25 รายการ ที่เหลือรอบถัดไปตามเก็บ (mirror เรียกซ้ำได้)
+      const CAP = 25;
+      const attached: string[] = [];
+      const detached: string[] = [];
+      const failed: { name: string; error: string }[] = [];
+      let next = [...localLabels];
+
+      for (const name of toAttach.slice(0, CAP)) {
+        let labelId = idByName.get(name.toLowerCase()) || "";
+        if (!labelId) {
+          // ยังไม่มีป้ายชื่อนี้ในเพจ → สร้างให้ (field ต่างกันตามเวอร์ชัน Graph จึงลองทั้งสองแบบ)
+          for (const field of ["page_label_name", "name"]) {
+            const r = await fetchJson(`${GRAPH_BASE}/${pageId}/custom_labels?access_token=${pageTok}`, {
+              method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ [field]: name.slice(0, 100) }),
+            });
+            if (r?.id) { labelId = String(r.id); idByName.set(name.toLowerCase(), labelId); break; }
+            if (!r?.error) break;
+          }
+        }
+        if (!labelId) { failed.push({ name, error: "สร้างป้ายในเพจไม่สำเร็จ" }); continue; }
+        let r = await fetchJson(`${GRAPH_BASE}/${labelId}/label?user=${encodeURIComponent(psid)}&access_token=${pageTok}`, { method: "POST" });
+        if (r?.success !== true) {
+          r = await fetchJson(`${GRAPH_BASE}/${labelId}/label?access_token=${pageTok}`, {
+            method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ user: psid }),
+          });
+        }
+        if (r?.success === true) {
+          next = [...next.filter((l: any) => String(l?.id) !== labelId), { id: labelId, name }];
+          attached.push(name);
+        } else {
+          failed.push({ name, error: r?.error?.error_user_msg || r?.error?.message || "ติดป้ายไม่สำเร็จ" });
+        }
+      }
+
+      for (const l of toDetach.slice(0, CAP)) {
+        const labelId = String(l?.id || "");
+        const name = String(l?.name || labelId);
+        if (!labelId) { next = next.filter((x: any) => x !== l); continue; }
+        const r = await fetchJson(`${GRAPH_BASE}/${labelId}/label?user=${encodeURIComponent(psid)}&access_token=${pageTok}`, { method: "DELETE" });
+        // ถอดป้ายที่ Meta ไม่มีแล้ว (คนไปลบใน Meta เอง) ให้ถือว่าสำเร็จ ไม่ค้างอยู่ในรายการเราตลอดไป
+        const gone = Number(r?.error?.error_subcode) === 33 || /does not exist/i.test(String(r?.error?.message || ""));
+        if (r?.success === true || gone) {
+          next = next.filter((x: any) => String(x?.id) !== labelId);
+          detached.push(name);
+        } else {
+          failed.push({ name, error: r?.error?.error_user_msg || r?.error?.message || "ถอดป้ายไม่สำเร็จ" });
+        }
+      }
+
+      if (attached.length || detached.length) {
+        await admin.from("chat_customers")
+          .update({ meta_labels: next, updated_at: new Date().toISOString() })
+          .eq("id", String(body?.id || ""));
+      }
+      return json({
+        ok: true,
+        attached, detached, failed,
+        labels: next,
+        remaining: Math.max(0, (toAttach.length - Math.min(toAttach.length, CAP)) + (toDetach.length - Math.min(toDetach.length, CAP))),
+      });
     }
 
     return json({ ok: false, error: `ไม่รู้จัก action "${action}"` }, 400);

@@ -210,6 +210,11 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   const adSourceCacheRef = useRef(new Map());
   const [labelMsg, setLabelMsg] = useState(null);   // ผลการส่งป้ายไป Meta {type: loading|ok|err, text}
   const [tagMsg, setTagMsg] = useState("");
+  // สถานะซิงก์ป้ายขึ้น Meta ของห้องที่เปิดอยู่ — { id, state: saving|ok|error|unsupported, note }
+  const [metaSync, setMetaSync] = useState(null);
+  // ชื่อป้ายที่มีอยู่จริงในเพจบน Meta — เอามาเป็นตัวเลือกให้กด เพื่อให้ป้ายสองฝั่งใช้ชื่อชุดเดียวกัน
+  const [metaLabelNames, setMetaLabelNames] = useState([]);
+  const metaLabelPageRef = useRef("");
   const [overdueAlert, setOverdueAlert] = useState(null);   // { count, pages: [ชื่อเพจ] } → โชว์ popup
   // แจ้งเตือนระดับระบบปฏิบัติการ (เด้งทับแอปอื่น) — บังคับเปิดเสมอ ผู้ใช้ปิดเองไม่ได้
   // เหลืออย่างเดียวที่ต้องให้ผู้ใช้กดคือ "อนุญาต" ตอนแรก เพราะเบราว์เซอร์บังคับว่าต้องมาจากการคลิกของผู้ใช้
@@ -1612,11 +1617,56 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   }
   async function persistTags(id, nextTags, previousTags) {
     const { error } = await supabase.from("chat_customers").update({ tags: nextTags, updated_at: new Date().toISOString() }).eq("id", id);
-    if (!error) return true;
-    setSelected((s) => (s && s.id === id ? { ...s, tags: previousTags } : s));
-    setList((l) => (l || []).map((x) => (x.id === id ? { ...x, tags: previousTags } : x)));
-    setTagMsg(`บันทึกแท็กไม่สำเร็จ: ${error.message || "ตรวจสอบฐานข้อมูลแล้วลองใหม่"}`);
-    return false;
+    if (error) {
+      setSelected((s) => (s && s.id === id ? { ...s, tags: previousTags } : s));
+      setList((l) => (l || []).map((x) => (x.id === id ? { ...x, tags: previousTags } : x)));
+      setTagMsg(`บันทึกแท็กไม่สำเร็จ: ${error.message || "ตรวจสอบฐานข้อมูลแล้วลองใหม่"}`);
+      return false;
+    }
+    mirrorTagsToMeta(id);
+    return true;
+  }
+
+  // ส่งแท็กในเว็บขึ้นไปเป็นป้ายกำกับของเพจใน Meta — ทำหลังบันทึกลงฐานข้อมูลสำเร็จแล้ว
+  // ฝั่ง server ทำแบบ "ปรับให้ตรงกัน" จึงส่งแค่ id พอ ไม่ต้องบอกว่าติดหรือถอดอะไร
+  // และเรียกซ้ำได้ ถ้ารอบไหนพลาด รอบถัดไปจะตามเก็บเอง
+  // ดึง "ชื่อป้ายที่เพจมีอยู่จริงใน Meta" มาทำเป็นตัวเลือกให้กด (ครั้งเดียวต่อเพจ)
+  // นี่คือทิศทาง Meta → เว็บ เท่าที่ Meta เปิดให้ทำได้ คืออ่านได้แค่ "รายชื่อป้าย"
+  // ไม่ได้บอกว่าลูกค้ารายไหนติดป้ายอะไร (ทุก endpoint ที่อ่านย้อนกลับถูกปิดหมด)
+  // ผลคือชื่อป้ายสองฝั่งเป็นชุดเดียวกัน แอดมินกดจากเว็บแล้วไปโผล่ใน Meta ตรงป้ายเดิม
+  useEffect(() => {
+    const pageId = selected?.page_id ? String(selected.page_id) : "";
+    if (!pageId || selected?.source === "line" || metaLabelPageRef.current === pageId) return;
+    metaLabelPageRef.current = pageId;
+    let alive = true;
+    (async () => {
+      const { data } = await supabase.functions.invoke("chat-labels", { body: { action: "list", page_id: pageId } });
+      if (alive && data?.ok) setMetaLabelNames((data.labels || []).map((l) => l.name).filter(Boolean));
+    })();
+    return () => { alive = false; };
+  }, [selected?.page_id, selected?.source]);
+
+  async function mirrorTagsToMeta(id) {
+    setMetaSync({ id, state: "saving", note: "" });
+    try {
+      const { data, error } = await supabase.functions.invoke("chat-labels", { body: { action: "mirror", id } });
+      if (error || !data?.ok) {
+        setMetaSync({ id, state: "error", note: data?.error || (await readFunctionErrorMessage(error)) || "ซิงก์ไม่สำเร็จ" });
+        return;
+      }
+      if (data.unsupported) {
+        setMetaSync({ id, state: "unsupported", note: data.note || "ช่องทางนี้ไม่มีป้ายกำกับของ Meta" });
+        return;
+      }
+      const failed = Array.isArray(data.failed) ? data.failed : [];
+      if (failed.length) {
+        setMetaSync({ id, state: "error", note: `${failed[0].name}: ${failed[0].error}` });
+        return;
+      }
+      setMetaSync({ id, state: "ok", note: "" });
+    } catch (e) {
+      setMetaSync({ id, state: "error", note: e instanceof Error ? e.message : String(e) });
+    }
   }
   async function addTag(raw) {
     const value = raw.trim();
@@ -1728,6 +1778,28 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
             </div>
           );
         })()}
+        {/* ป้ายที่เพจมีอยู่แล้วใน Meta — กดเพื่อใช้ชื่อเดียวกัน จะได้ไม่เกิดป้ายชื่อซ้ำคนละตัว */}
+        {(() => {
+          const current = selected.tags || [];
+          const suggestions = metaLabelNames.filter((n) => !current.includes(n)).slice(0, 12);
+          return suggestions.length > 0 && (
+            <div className="mb-1.5">
+              <div className="text-[10px] text-night-ink-3 mb-1">ป้ายที่มีอยู่ใน Meta</div>
+              <div className="flex flex-wrap gap-1.5">
+                {suggestions.map((n) => (
+                  <button
+                    key={n}
+                    onClick={() => addTag(n)}
+                    className="text-[11px] px-2 py-0.5 rounded-full border border-dashed border-night-border text-night-ink-3 hover:text-night-ink hover:border-night-accent/50"
+                    title={`ติดป้าย "${n}" (จะไปขึ้นใน Meta ด้วย)`}
+                  >
+                    + {n}
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
         <input
           value={tagDraft}
           onChange={(e) => setTagDraft(e.target.value)}
@@ -1736,6 +1808,24 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
           className="w-full rounded-lg border border-night-border px-2.5 py-1.5 text-xs"
         />
         {tagMsg && <div role="alert" className="mt-1 text-[11px] text-rose-400 break-words">{tagMsg}</div>}
+        {/* สถานะซิงก์ขึ้น Meta — บอกให้เห็นว่าป้ายไปถึงเพจแล้วหรือยัง ไม่ใช่เงียบแล้วเดาเอง */}
+        {metaSync?.id === selected.id && (
+          <div className={`mt-1 text-[11px] break-words ${
+            metaSync.state === "error" ? "text-rose-400"
+              : metaSync.state === "ok" ? "text-emerald-500"
+              : "text-night-ink-3"
+          }`}>
+            {metaSync.state === "saving" && "กำลังซิงก์ป้ายไป Meta..."}
+            {metaSync.state === "ok" && "✓ ป้ายขึ้นใน Meta แล้ว"}
+            {metaSync.state === "unsupported" && metaSync.note}
+            {metaSync.state === "error" && `ซิงก์ป้ายไป Meta ไม่สำเร็จ: ${metaSync.note}`}
+          </div>
+        )}
+        {/* ข้อจำกัดที่ผู้ใช้ต้องรู้ล่วงหน้า ไม่งั้นจะรอป้ายจาก Meta ที่ไม่มีวันมา */}
+        <div className="mt-1 text-[10px] text-night-ink-3 leading-relaxed">
+          ป้ายที่ติดในเว็บจะไปขึ้นใน Meta ให้อัตโนมัติ · แต่ถ้าไปติดป้ายในกล่องข้อความของ Meta เอง
+          จะไม่เด้งกลับมาที่นี่ เพราะ Meta ไม่เปิดให้อ่านย้อน — ให้ติดป้ายจากหน้านี้เป็นหลัก
+        </div>
       </div>
       <div className="pt-2 border-t border-night-border-subtle space-y-1.5">
         <div className="flex items-center justify-between">
