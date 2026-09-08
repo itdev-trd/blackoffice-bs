@@ -127,7 +127,21 @@ Dataset ที่ลอง: ${first[0]}
     // ระบุ ids มา = สั่งเฉพาะห้องนั้น (กดจากหน้าตอบแชทตอนเปลี่ยนสถานะ) ไม่ต้องจำกัดช่วงเวลาตรงนี้
     // เพราะต้องตอบให้ชัดว่าห้องนั้นส่งไม่ได้เพราะเก่าเกิน ไม่ใช่หายไปเงียบ ๆ
     if (ids) query = query.in("id", ids);
-    else query = query.gte("last_message_at", cutoffIso).order("last_message_at", { ascending: false }).limit(limit * 3);
+    else {
+      // กรอง "ยังไม่เคยส่ง / เคยล้มเหลว" ที่ฐานข้อมูลเลย
+      //
+      // เดิมดึงแถวใหม่สุด limit*3 มาแล้วค่อยกรองในโค้ด ซึ่งพอแถวชุดนั้นส่งครบ
+      // ตัวเลือกก็ได้แต่แถวที่ส่งแล้วทุกครั้ง ระบบจึงตอบว่า "เสร็จแล้ว" ทั้งที่ยังเหลืออีกเป็นร้อยห้อง
+      // (เจอจริงตอน backfill: ส่งได้ 120 ห้องแล้วหยุด ทั้งที่เข้าเงื่อนไข 210 ห้อง)
+      //
+      // เคส "ส่งสำเร็จแล้วแต่สถานะเปลี่ยนทีหลัง" ไม่ต้องพึ่งรอบยกชุดอีก
+      // เพราะตอนนี้หน้าจัดการลูกค้า/หน้าตอบแชท ยิงให้ทีละห้องทันทีที่เปลี่ยนสถานะ
+      query = query
+        .or("meta_push_status.is.null,meta_push_status.eq.failed")
+        .gte("last_message_at", cutoffIso)
+        .order("last_message_at", { ascending: false })
+        .limit(limit);
+    }
     const { data: candidates, error: qErr } = await query;
     if (qErr) throw qErr;
 
@@ -162,7 +176,21 @@ Dataset ที่ลอง: ${first[0]}
         skipped++;
         await admin.from("chat_customers").update({
           meta_push_status: "skipped", meta_push_stage: stage, meta_push_at: now,
-          meta_push_error: "ช่องทางนี้ไม่รองรับ — Conversions API ของ Meta รับเฉพาะแชท Messenger",
+          meta_push_error: "ช่องทางนี้ไม่รองรับ — Conversions API ของ Meta รับเฉพาะ Messenger และ Instagram",
+        }).eq("id", r.id);
+        continue;
+      }
+      // Instagram ใช้ชุดฟิลด์คนละแบบ: messaging_channel = instagram และ user_data ต้องเป็น
+      // { ig_sid, ig_account_id } ไม่ใช่ { page_id, page_scoped_user_id }
+      // (ยิงทดสอบกับ Graph v22.0 แล้ว: ใช้ page_scoped_user_id → subcode 2804075 "ไม่มีพารามิเตอร์ ig_sid",
+      //  ใส่ ig_sid เดี่ยว ๆ → subcode 2804079 "ขาด ID บัญชี IG", ใส่คู่กัน → events_received 1)
+      const isInstagram = r.source === "instagram";
+      const igAccountId = isInstagram ? (/^ig_(\d+)_/.exec(String(r.id))?.[1] || "") : "";
+      if (isInstagram && !igAccountId) {
+        skipped++;
+        await admin.from("chat_customers").update({
+          meta_push_status: "skipped", meta_push_stage: stage, meta_push_at: now,
+          meta_push_error: "หา ID บัญชี Instagram จากรหัสห้องไม่ได้ — ส่ง event ไม่ได้",
         }).eq("id", r.id);
         continue;
       }
@@ -208,8 +236,10 @@ Dataset ที่ลอง: ${first[0]}
           event_time: eventTime,
           event_id: `${r.id}:${stage}`, // dedup กันส่งซ้ำตอน retry/กดซ้ำ (สถานะเดิมส่งกี่ครั้ง Meta นับครั้งเดียว)
           action_source: "business_messaging",
-          messaging_channel: "messenger",
-          user_data: { page_id: r.page_id, page_scoped_user_id: r.psid },
+          messaging_channel: isInstagram ? "instagram" : "messenger",
+          user_data: isInstagram
+            ? { ig_sid: r.psid, ig_account_id: igAccountId }
+            : { page_id: r.page_id, page_scoped_user_id: r.psid },
         }],
         partner_agent: "ai-ads-automation",   // ตามที่เอกสาร Meta แนะนำให้ระบุผู้ส่ง
       };
