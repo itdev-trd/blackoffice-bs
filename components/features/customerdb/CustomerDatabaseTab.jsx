@@ -18,6 +18,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
+import { pushLeadStageToMeta } from "@/lib/utils/lead-stage";
 import { beToCe, bangkokDate } from "@/lib/utils/date";
 import { hasFullData } from "@/lib/constants/roles";
 import { COUNTRIES, normalizeCountry } from "@/lib/constants/countries";
@@ -743,6 +744,9 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, stage, stage_manual: stage } : r)));
     await supabase.from("chat_customers").update({ stage, stage_manual: stage, updated_at: new Date().toISOString() }).eq("id", id);
     await invalidateSharedReportCache();
+    // ส่งระยะขึ้น Meta ให้ Leads Center ตรงกับที่นี่ — ไม่ขัดจังหวะการทำงาน ถ้าพลาดจะขึ้นบอกในหน้าตอบแชท
+    const r = await pushLeadStageToMeta(id);
+    if (r.state !== "ok") setMsg({ ok: false, text: `ส่งระยะขึ้น Meta ไม่สำเร็จ: ${r.note}` });
   }
 
   const pages = pageOpts;
@@ -1248,6 +1252,8 @@ function CustomerDetailModal({ row, onClose, onSaved }) {
     setSaving(false);
     if (error) { alert("บันทึกไม่สำเร็จ: " + error.message); return; }
     setSaved(true); setTimeout(() => setSaved(false), 1500);
+    // ระยะข้อมูลลูกค้าเปลี่ยน → ส่งขึ้น Meta ด้วย (ไม่บล็อกการบันทึก)
+    if (form.stage !== row.stage_manual && form.stage !== row.stage) pushLeadStageToMeta(row.id);
     onSaved?.(row.id, patch);
   }
 

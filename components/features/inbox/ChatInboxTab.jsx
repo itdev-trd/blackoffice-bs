@@ -29,6 +29,7 @@ import { TradeIdChecker, CustomerDataForm } from "@/components/features/customer
 import MetaLabels from "@/components/features/inbox/MetaLabels";
 import { SearchInput, FilterPill } from "@/components/ui";
 import { CHAT_STAGES } from "@/lib/constants/settings";
+import { pushLeadStageToMeta } from "@/lib/utils/lead-stage";
 
 // ตัวเลือกอิโมจิชุดเต็มมีข้อมูลจำนวนมาก — โหลดเฉพาะตอนเปิดใช้ ไม่ถ่วงหน้าแชท/PWA ตอนเริ่มต้น
 const EmojiPicker = React.lazy(() => import("emoji-picker-react").then((module) => ({ default: module.default })));
@@ -55,6 +56,11 @@ const MSG_EMOJI_ENABLED = false;      // ซ่อนปุ่มอีโมจ
 // คอลัมน์ที่หน้าแชทใช้จริง — เลี่ยง select * ที่ลากคอลัมน์หนักอย่าง ads_context/hash มาด้วย
 // ประกาศไว้ระดับโมดูลเพราะทั้งตอนเปิดแชทและตอนโหลดล่วงหน้า (prefetch) ต้องใช้ชุดเดียวกันเป๊ะ
 // ไม่งั้นของในแคชจะขาดคอลัมน์แล้วหน้าแชทเรนเดอร์ไม่ครบ
+// เหตุผลที่ Meta ไม่รับบางสถานะ — บอกให้ตรงจุด ไม่ใช่ขึ้นว่า "ไม่สำเร็จ" ลอย ๆ
+const SKIP_NOTE = {
+  disqualified: "สถานะนี้ไม่ส่งขึ้น Meta โดยเจตนา — การส่งลีดที่ไม่มีคุณสมบัติจะสอนอัลกอริทึมผิดทาง",
+};
+
 const CHAT_OPEN_COLS = "id, page_id, page_name, psid, customer_name, source, stage, stage_manual, classified_by, needs_ai, needs_verify, manual_data, manual_data_by, manual_data_at, trade_id, username, phone, email, awaiting_reply, unread, read_at, cust_read_at, cust_lang, country, profile_pic, transcript, account_opened_at, entry_ad_id, entry_ad_name, last_user_text, last_reply_text, last_reply_by, last_reply_at, last_message_at, comment_ad_name, comment_ad_ids, comment_ad_names, comment_is_ad, comment_promoted_to_inbox, comment_permalink, blocked_at, synced_at, updated_at, notes, tags, ai_summary, ai_summary_at";
 
 export default function ChatInboxTab({ allowedPages = null, alertAllowed = true, alertMin = 3, alertPages = [], alertSound = true, alertNew = true, gotoChat = null, onGotoDone, active = true }) {
@@ -214,6 +220,8 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   const [metaSync, setMetaSync] = useState(null);
   // ชื่อป้ายที่มีอยู่จริงในเพจบน Meta — เอามาเป็นตัวเลือกให้กด เพื่อให้ป้ายสองฝั่งใช้ชื่อชุดเดียวกัน
   const [metaLabelNames, setMetaLabelNames] = useState([]);
+  // สถานะการส่ง "ระยะข้อมูลลูกค้า" ขึ้น Meta ของห้องที่เปิดอยู่
+  const [stageSync, setStageSync] = useState(null);
   const metaLabelPageRef = useRef("");
   const [overdueAlert, setOverdueAlert] = useState(null);   // { count, pages: [ชื่อเพจ] } → โชว์ popup
   // แจ้งเตือนระดับระบบปฏิบัติการ (เด้งทับแอปอื่น) — บังคับเปิดเสมอ ผู้ใช้ปิดเองไม่ได้
@@ -1501,6 +1509,16 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     setList((l) => (l || []).map((x) => x.id === id ? { ...x, ...patch } : x));
     await supabase.from("chat_customers").update(patch).eq("id", id);
     logActivity("set_stage", { id, stage, customer_name: selected?.id === id ? selected?.customer_name : undefined });
+    pushStageToMeta(id, stage);
+  }
+
+  // ส่งสถานะขึ้น Meta (Conversions API) ให้ "ระยะข้อมูลลูกค้า" ใน Leads Center ขยับตาม
+  // Meta ไม่มี API ให้ตั้งค่า dropdown นั้นตรง ๆ — ทางเดียวคือส่ง event เข้า dataset ของเพจ
+  // เงื่อนไขของ Meta: รับ event ย้อนหลังไม่เกิน 7 วันนับจากข้อความล่าสุด
+  async function pushStageToMeta(id, stage) {
+    setStageSync({ id, state: "saving", note: "" });
+    const r = await pushLeadStageToMeta(id);
+    setStageSync({ id, state: r.state, note: r.state === "skipped" ? (SKIP_NOTE[stage] || r.note) : r.note });
   }
   async function confirmInstagramAccountOpened() {
     if (!selected || selected.source !== "instagram") return;
@@ -1743,6 +1761,19 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
           className="w-full rounded-lg border border-night-border px-2.5 py-2 text-xs resize-y"
         />
       </div>
+      {/* สถานะการส่ง "ระยะข้อมูลลูกค้า" ขึ้น Meta — โชว์เฉพาะตอนมีการเปลี่ยนสถานะของห้องนี้ */}
+      {stageSync?.id === selected.id && (
+        <div className={`text-[11px] break-words ${
+          stageSync.state === "error" ? "text-rose-400"
+            : stageSync.state === "ok" ? "text-emerald-500"
+            : "text-night-ink-3"
+        }`}>
+          {stageSync.state === "saving" && "กำลังส่งระยะข้อมูลลูกค้าไป Meta..."}
+          {stageSync.state === "ok" && "✓ ส่งระยะข้อมูลลูกค้าไป Meta แล้ว"}
+          {stageSync.state === "skipped" && stageSync.note}
+          {stageSync.state === "error" && `ส่งระยะไป Meta ไม่สำเร็จ: ${stageSync.note}`}
+        </div>
+      )}
       <div>
         <div className="text-xs text-night-ink-3 mb-1">แท็ก</div>
         {/* แท็กลัด — เช็คสถานะเปิดบัญชีได้ในคลิกเดียว ไม่ต้องพิมพ์เอง */}

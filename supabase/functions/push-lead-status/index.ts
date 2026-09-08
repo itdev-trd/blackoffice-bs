@@ -19,17 +19,30 @@ const corsHeaders = {
 //   QualifiedLead, RatingProvided, ReviewProvided
 // ⚠️ "Lead" เฉยๆ ไม่อยู่ในรายชื่อ — ของเดิมส่ง "Lead" สำหรับ 3 สถานะ ซึ่ง Meta ไม่รับ
 const STAGE_EVENT: Record<string, string> = {
-  converted: "Purchase",        // ให้ข้อมูลติดต่อ/เปิดบัญชีแล้ว = คอนเวอร์ชั่นจริง
-  qualified: "QualifiedLead",   // คุยแล้วสนใจจริง แต่ยังไม่ให้ข้อมูล
+  // account_opened = ลูกค้าเปิดบัญชีเทรดแล้ว คือคอนเวอร์ชั่นจริงของธุรกิจนี้
+  // เดิมไม่มีในแผนที่ ทั้งที่เป็นสถานะที่แอดมินติดจริงมากที่สุด → ของที่มีค่าที่สุดไม่เคยถึง Meta
+  account_opened: "Purchase",
+  converted: "Purchase",        // สถานะเดิมของระบบเก่า เก็บไว้ให้ข้อมูลย้อนหลังยังส่งได้
+  qualified: "QualifiedLead",   // คุยแล้วสนใจจริง แต่ยังไม่เปิดบัญชี
   new: "LeadSubmitted",         // เพิ่งทักเข้ามา
   // disqualified: ไม่ส่ง — การส่ง event บวกให้ลีดขยะจะสอนอัลกอริทึมผิดทาง
   // ทำให้ Meta ไปหาคนแบบเดียวกันมาอีก (ยิ่งได้ลีดคุณภาพต่ำ)
 };
 
+// Meta รับ event ย้อนหลังไม่เกิน 7 วัน — เกินกว่านั้นส่งไปก็ถูกปฏิเสธหรือได้เวลาผิด
+// จึงไม่หยิบแถวที่เก่ากว่านี้มาส่งตั้งแต่ต้น ดีกว่าปล่อยให้ล้มแล้วมาร์ก failed ทั้งตาราง
+const MAX_EVENT_AGE_DAYS = 7;
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
-    const auth = await authorizeRequest(req, { admin: true, setting: "synccfg", allowService: true });
+    // ส่งทีละห้องจากหน้าตอบแชท (ระบุ ids) = งานประจำของแอดมิน ไม่ใช่การตั้งค่าระบบ
+    // ส่งยกชุด (ไม่ระบุ ids) ยังจำกัดที่คนดูแลการซิงก์เหมือนเดิม เพราะกระทบข้อมูลโฆษณาเป็นวงกว้าง
+    const preview = await req.clone().json().catch(() => ({}));
+    const singleTargets = Array.isArray(preview?.ids) && preview.ids.length > 0 && preview.ids.length <= 50;
+    const auth = await authorizeRequest(req, singleTargets
+      ? { tab: ["inbox", "chat"], allowService: true }
+      : { admin: true, setting: "synccfg", allowService: true });
     if (!auth.ok) return new Response(JSON.stringify({ ok: false, error: auth.error }), { status: auth.status, headers: { ...corsHeaders, "content-type": "application/json" } });
 
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
@@ -84,45 +97,56 @@ Dataset ที่ลอง: ${first[0]}
       }), { headers: { ...corsHeaders, "content-type": "application/json" } });
     }
 
-    // เลือกรายที่ตรวจซ้ำแล้ว + ยังไม่เคยส่งสำเร็จ (null หรือ failed)
-    const COLS = "id, page_id, psid, stage, classified_by, meta_push_status, meta_push_stage, last_message_at";
+    // ---- เลือกแถวที่ต้องส่ง ----
+    //
+    // เดิมกรองด้วย classified_by = 'ai-verify' ซึ่งในฐานข้อมูลจริงไม่มีแถวไหนเป็นค่านี้เลย
+    // (ทุกแถวเป็น 'manual' คือแอดมินติดเอง หรือ null) ผลคือฟีเจอร์นี้ไม่เคยส่งอะไรออกไปได้จริง
+    // เลิกกรองด้วยผู้จัดประเภท — แอดมินที่คุยกับลูกค้าเองน่าเชื่อถือกว่าโมเดลอยู่แล้ว
+    //
+    // สถานะที่ใช้ตัดสินคือ stage_manual ก่อน (ค่าที่คนกดเลือก) ไม่ใช่ stage ที่ระบบเดาไว้
+    const COLS = "id, page_id, psid, source, stage, stage_manual, meta_push_status, meta_push_stage, last_message_at";
+    const effStage = (r: any) => String(r?.stage_manual || r?.stage || "new");
+    // ต้องส่งเมื่อ: ยังไม่เคยส่ง / เคยล้มเหลว / เคยส่งแล้วแต่สถานะเปลี่ยนไปแล้ว
+    const needsPush = (r: any) => !!STAGE_EVENT[effStage(r)] &&
+      (r.meta_push_status !== "success" || String(r.meta_push_stage || "") !== effStage(r));
+
+    const cutoffIso = new Date(Date.now() - MAX_EVENT_AGE_DAYS * 86_400_000).toISOString();
     let query = admin.from("chat_customers")
       .select(COLS)
-      .eq("classified_by", "ai-verify")
       .not("psid", "is", null)
-      // ยังไม่เคยส่ง (NULL) หรือส่งแล้วล้มเหลว (failed) — ข้ามที่ success แล้ว
-      .or("meta_push_status.is.null,meta_push_status.eq.failed");
+      .neq("psid", "")
+      .is("blocked_at", null)
+      // CAPI for Business Messaging รับเฉพาะ PSID ของเพจ Facebook
+      // ห้อง LINE ใช้ user id ของ LINE และห้องคอมเมนต์ยังไม่มี PSID จริง — ส่งไปได้แต่เป็นข้อมูลผิด
+      // (ตัวกรองเดิม classified_by='ai-verify' บังเอิญกันไว้ พอถอดออกจึงต้องกันตรงนี้ให้ชัด)
+      //
+      // ต้องเขียนเป็น "source is null or source not in (...)" เพราะห้อง Messenger ส่วนใหญ่
+      // มี source = NULL และใน SQL การเทียบ NULL not in (...) ได้ผลเป็น NULL = ถูกตัดทิ้งทั้งหมด
+      .or("source.is.null,source.not.in.(line,comment)")
+      .not("id", "like", "fbc_%");
+    // ระบุ ids มา = สั่งเฉพาะห้องนั้น (กดจากหน้าตอบแชทตอนเปลี่ยนสถานะ) ไม่ต้องจำกัดช่วงเวลาตรงนี้
+    // เพราะต้องตอบให้ชัดว่าห้องนั้นส่งไม่ได้เพราะเก่าเกิน ไม่ใช่หายไปเงียบ ๆ
     if (ids) query = query.in("id", ids);
-    const { data: firstRows, error: qErr } = await query.limit(limit);
+    else query = query.gte("last_message_at", cutoffIso).order("last_message_at", { ascending: false }).limit(limit * 3);
+    const { data: candidates, error: qErr } = await query;
     if (qErr) throw qErr;
-    const rows: any[] = firstRows ?? [];
-    // เติมรายที่ "เคยส่งสำเร็จแล้วแต่สถานะเปลี่ยน" (เช่น qualified → converted หลัง verify รอบใหม่) — เดิมส่งครั้งเดียวจบ อัปเกรดสถานะไม่เคยถึง Meta
-    if (!ids && rows.length < limit) {
-      for (const s of ["converted", "qualified", "new", "disqualified"]) {
-        if (rows.length >= limit) break;
-        const { data: more } = await admin.from("chat_customers")
-          .select(COLS)
-          .eq("classified_by", "ai-verify").not("psid", "is", null)
-          .eq("meta_push_status", "success").eq("stage", s).neq("meta_push_stage", s)
-          .limit(limit - rows.length);
-        for (const m of more ?? []) if (!rows.some((x) => x.id === m.id)) rows.push(m);
-      }
-    }
+
+    const rows: any[] = (candidates ?? []).filter(needsPush).slice(0, limit);
+
     if (rows.length === 0) {
-      // debug: บอกว่าทำไมไม่มีรายการให้ส่ง — แยก "ส่งครบแล้ว" (ปกติ) ออกจาก "ติดปัญหา" ให้ชัด
       const cnt = async (b: (q: any) => any) => (await b(admin.from("chat_customers").select("id", { count: "exact", head: true }))).count ?? 0;
-      const verified = await cnt((q) => q.eq("classified_by", "ai-verify"));
-      const withPsid = await cnt((q) => q.eq("classified_by", "ai-verify").not("psid", "is", null));
-      const pushable = await cnt((q) => q.eq("classified_by", "ai-verify").not("psid", "is", null).or("meta_push_status.is.null,meta_push_status.eq.failed"));
+      const recent = await cnt((q) => q.not("psid", "is", null).is("blocked_at", null).gte("last_message_at", cutoffIso));
       const alreadyPushed = await cnt((q) => q.eq("meta_push_status", "success"));
       const lastFailed = await cnt((q) => q.eq("meta_push_status", "failed"));
-      // reason: บอกสาเหตุเป็นคำ ให้หน้าเว็บเอาไปแสดงตรงๆ ได้เลย
-      let reason = "all_sent";
-      if (verified === 0) reason = "no_verified";            // ยังไม่มีรายที่ AI ใหญ่ตรวจ
-      else if (withPsid === 0) reason = "no_psid";           // มีแต่ไม่มี psid (ซิงก์ไม่ครบ)
+      const tooOld = await cnt((q) => q.not("psid", "is", null).is("blocked_at", null).lt("last_message_at", cutoffIso));
+      // reason: บอกสาเหตุเป็นคำ ให้หน้าเว็บเอาไปแสดงตรง ๆ ได้เลย
+      const reason = ids
+        ? ((candidates ?? []).length === 0 ? "not_eligible" : "all_sent")
+        : ((candidates ?? []).length === 0 ? (recent === 0 ? "no_recent" : "no_psid") : "all_sent");
       return new Response(JSON.stringify({
         ok: true, eligible: 0, success: 0, failed: 0, done: true, reason,
-        debug: { verified, withPsid, pushable, alreadyPushed, lastFailed, dataset_set: Object.keys(dsByPage).length > 0 || !!fallbackDataset },
+        debug: { recent_within_window: recent, alreadyPushed, lastFailed, too_old_to_send: tooOld, window_days: MAX_EVENT_AGE_DAYS,
+                 dataset_set: Object.keys(dsByPage).length > 0 || !!fallbackDataset },
       }), { headers: { ...corsHeaders, "content-type": "application/json" } });
     }
 
@@ -132,12 +156,32 @@ Dataset ที่ลอง: ${first[0]}
     const nowSec = Math.floor(Date.now() / 1000);
 
     for (const r of rows) {
-      const eventName = STAGE_EVENT[r.stage];
+      const stage = effStage(r);
+      // สั่งด้วย ids ตรง ๆ ข้ามตัวกรองด้านบนได้ จึงกันช่องทางที่ Meta ไม่รองรับไว้อีกชั้น
+      if (r.source === "line" || r.source === "comment" || String(r.id).startsWith("fbc_")) {
+        skipped++;
+        await admin.from("chat_customers").update({
+          meta_push_status: "skipped", meta_push_stage: stage, meta_push_at: now,
+          meta_push_error: "ช่องทางนี้ไม่รองรับ — Conversions API ของ Meta รับเฉพาะแชท Messenger",
+        }).eq("id", r.id);
+        continue;
+      }
+      const eventName = STAGE_EVENT[stage];
       // ไม่มีใน map (disqualified) = ไม่ส่ง — มาร์กเป็น skipped กันวนกลับมาเลือกซ้ำทุกรอบ
       if (!eventName) {
         skipped++;
         await admin.from("chat_customers").update({
-          meta_push_status: "skipped", meta_push_stage: r.stage, meta_push_error: null, meta_push_at: now,
+          meta_push_status: "skipped", meta_push_stage: stage, meta_push_error: null, meta_push_at: now,
+        }).eq("id", r.id);
+        continue;
+      }
+      // Meta ไม่รับ event ที่เก่ากว่า 7 วัน — บอกเหตุผลไว้ในแถว ไม่ใช่มาร์ก failed ให้ดูเหมือนระบบพัง
+      const ageSec = r.last_message_at ? (nowSec - Math.floor(new Date(r.last_message_at).getTime() / 1000)) : 0;
+      if (ageSec > MAX_EVENT_AGE_DAYS * 86400) {
+        skipped++;
+        await admin.from("chat_customers").update({
+          meta_push_status: "skipped", meta_push_stage: stage, meta_push_at: now,
+          meta_push_error: `ข้อความล่าสุดเก่ากว่า ${MAX_EVENT_AGE_DAYS} วัน — Meta ไม่รับ event ย้อนหลังเกินเท่านี้`,
         }).eq("id", r.id);
         continue;
       }
@@ -150,7 +194,7 @@ Dataset ที่ลอง: ${first[0]}
           : `Dataset ของเพจนี้ใช้ไม่ได้: ${badDataset[ds]}`;
         if (errors.length < 3 && !errors.includes(why)) errors.push(why);
         await admin.from("chat_customers").update({
-          meta_push_status: "failed", meta_push_stage: r.stage, meta_push_error: why.slice(0, 300), meta_push_at: now,
+          meta_push_status: "failed", meta_push_stage: stage, meta_push_error: why.slice(0, 300), meta_push_at: now,
         }).eq("id", r.id);
         continue;
       }
@@ -162,7 +206,7 @@ Dataset ที่ลอง: ${first[0]}
         data: [{
           event_name: eventName,
           event_time: eventTime,
-          event_id: `${r.id}:${r.stage}`, // dedup กันส่งซ้ำตอน retry/กดซ้ำ (สถานะเดิมส่งกี่ครั้ง Meta นับครั้งเดียว)
+          event_id: `${r.id}:${stage}`, // dedup กันส่งซ้ำตอน retry/กดซ้ำ (สถานะเดิมส่งกี่ครั้ง Meta นับครั้งเดียว)
           action_source: "business_messaging",
           messaging_channel: "messenger",
           user_data: { page_id: r.page_id, page_scoped_user_id: r.psid },
@@ -182,7 +226,7 @@ Dataset ที่ลอง: ${first[0]}
       if (ok) success++; else { failed++; if (errMsg && errors.length < 3) errors.push(errMsg); }
       await admin.from("chat_customers").update({
         meta_push_status: ok ? "success" : "failed",
-        meta_push_stage: r.stage,
+        meta_push_stage: stage,
         meta_push_error: ok ? null : errMsg.slice(0, 300),
         meta_push_at: now,
       }).eq("id", r.id);
