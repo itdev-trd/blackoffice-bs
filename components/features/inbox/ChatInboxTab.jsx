@@ -1860,6 +1860,13 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
             );
           })}
         </div>
+        {/* บอกความจริงให้ครบ: ป้ายใน Meta เปลี่ยนตาม แต่ช่อง "ระยะข้อมูลลูกค้า" ใน Leads Center
+            เป็นช่องที่คนกรอกเอง Meta ไม่เปิด API ให้เขียน (ทุก endpoint = unknown path) */}
+        <div className="mt-1 text-[10px] text-night-ink-3 leading-relaxed">
+          เปลี่ยนแล้วจะไปติดเป็น<b>ป้ายกำกับ</b>ชื่อเดียวกันในกล่องข้อความของ Meta และส่งสัญญาณคอนเวอร์ชั่นให้ระบบโฆษณา
+          · แต่ช่อง “ระยะข้อมูลลูกค้า” ใน Leads Center จะไม่เปลี่ยนตาม เพราะ Meta ไม่เปิดให้เขียนช่องนั้นจากภายนอก
+          — ถ้าต้องให้ช่องนั้นตรงด้วย ต้องกดใน Meta เอง
+        </div>
       </div>
       )}
       {/* สถานะการส่ง "ระยะข้อมูลลูกค้า" ขึ้น Meta — โชว์เฉพาะตอนมีการเปลี่ยนสถานะของห้องนี้ */}
@@ -1869,9 +1876,9 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
             : stageSync.state === "ok" ? "text-emerald-500"
             : "text-night-ink-3"
         }`}>
-          {stageSync.state === "saving" && "กำลังส่งระยะข้อมูลลูกค้าไป Meta..."}
-          {stageSync.state === "ok" && "✓ ส่งระยะข้อมูลลูกค้าไป Meta แล้ว"}
-          {stageSync.state === "insync" && "ระยะนี้ตรงกับที่ส่งไป Meta อยู่แล้ว"}
+          {stageSync.state === "saving" && "กำลังส่งไป Meta..."}
+          {stageSync.state === "ok" && "✓ ส่งสัญญาณคอนเวอร์ชั่น + ติดป้ายระยะใน Meta แล้ว"}
+          {stageSync.state === "insync" && "ส่งระยะนี้ไป Meta แล้วก่อนหน้านี้"}
           {stageSync.state === "skipped" && stageSync.note}
           {stageSync.state === "error" && `ส่งระยะไป Meta ไม่สำเร็จ: ${stageSync.note}`}
         </div>
