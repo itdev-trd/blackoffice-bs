@@ -1656,15 +1656,48 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
       setTagMsg(`บันทึกแท็กไม่สำเร็จ: ${error.message || "ตรวจสอบฐานข้อมูลแล้วลองใหม่"}`);
       return false;
     }
-    // LINE/คอมเมนต์ ไม่มีป้ายกำกับฝั่ง Meta ให้ซิงก์ — ไม่ต้องยิงไปให้เสียเที่ยว
     const src = selected?.id === id ? selected?.source : null;
-    if (src !== "line" && src !== "comment" && !String(id).startsWith("fbc_")) mirrorTagsToMeta(id);
+    if (src === "line") {
+      // LINE: แท็กแชทไม่มี API — ซิงก์เป็น "กลุ่มผู้ชม" แทน
+      // ส่งไปเฉพาะแท็กที่เปลี่ยน (ทั้งที่เพิ่มและที่ถอด เพราะกลุ่มของแท็กที่ถอดต้องถูกปรับด้วย)
+      const before = new Set(previousTags || []);
+      const after = new Set(nextTags || []);
+      const changed = [...new Set([...before, ...after])].filter((t) => before.has(t) !== after.has(t));
+      syncLineAudiences(id, changed);
+    } else if (src !== "comment" && !String(id).startsWith("fbc_")) {
+      mirrorTagsToMeta(id);
+    }
     return true;
   }
 
   // ส่งแท็กในเว็บขึ้นไปเป็นป้ายกำกับของเพจใน Meta — ทำหลังบันทึกลงฐานข้อมูลสำเร็จแล้ว
   // ฝั่ง server ทำแบบ "ปรับให้ตรงกัน" จึงส่งแค่ id พอ ไม่ต้องบอกว่าติดหรือถอดอะไร
   // และเรียกซ้ำได้ ถ้ารอบไหนพลาด รอบถัดไปจะตามเก็บเอง
+  // LINE: ส่งแท็กที่เปลี่ยนไปปรับ "กลุ่มผู้ชม" ของ LINE OA
+  // แท็กแชทของ LINE ไม่มี API (ทุก endpoint ตอบ 404) กลุ่มผู้ชมคือทางเดียวที่ส่งเข้าได้
+  // ฝั่ง server ทำแบบปรับให้ตรงกัน: เพิ่มคนใช้กลุ่มเดิม ถ้ามีคนถูกถอดต้องสร้างกลุ่มใหม่
+  async function syncLineAudiences(id, changedTags) {
+    if (!changedTags?.length) return;
+    setMetaSync({ id, channel: "line", state: "saving", note: "" });
+    try {
+      const { data, error } = await supabase.functions.invoke("line-audiences", {
+        body: { action: "sync", tags: changedTags },
+      });
+      if (error || !data?.ok) {
+        setMetaSync({ id, channel: "line", state: "error", note: data?.error || (await readFunctionErrorMessage(error)) || "ซิงก์กลุ่มผู้ชมไม่สำเร็จ" });
+        return;
+      }
+      const bad = (data.results || []).find((r) => r.action === "failed");
+      if (bad) {
+        setMetaSync({ id, channel: "line", state: "error", note: `${bad.tag}: ${bad.error || "ไม่สำเร็จ"}` });
+        return;
+      }
+      setMetaSync({ id, channel: "line", state: "ok", note: "" });
+    } catch (e) {
+      setMetaSync({ id, channel: "line", state: "error", note: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
   // ดึง "ชื่อป้ายที่เพจมีอยู่จริงใน Meta" มาทำเป็นตัวเลือกให้กด (ครั้งเดียวต่อเพจ)
   // นี่คือทิศทาง Meta → เว็บ เท่าที่ Meta เปิดให้ทำได้ คืออ่านได้แค่ "รายชื่อป้าย"
   // ไม่ได้บอกว่าลูกค้ารายไหนติดป้ายอะไร (ทุก endpoint ที่อ่านย้อนกลับถูกปิดหมด)
@@ -1909,16 +1942,26 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
               : metaSync.state === "ok" ? "text-emerald-500"
               : "text-night-ink-3"
           }`}>
-            {metaSync.state === "saving" && "กำลังซิงก์ป้ายไป Meta..."}
-            {metaSync.state === "ok" && "✓ ป้ายขึ้นใน Meta แล้ว"}
-            {metaSync.state === "unsupported" && metaSync.note}
-            {metaSync.state === "error" && `ซิงก์ป้ายไป Meta ไม่สำเร็จ: ${metaSync.note}`}
+            {metaSync.channel === "line" ? (
+              <>
+                {metaSync.state === "saving" && "กำลังซิงก์กลุ่มผู้ชมใน LINE..."}
+                {metaSync.state === "ok" && "✓ อัปเดตกลุ่มผู้ชมใน LINE แล้ว"}
+                {metaSync.state === "error" && `ซิงก์กลุ่มผู้ชมไม่สำเร็จ: ${metaSync.note}`}
+              </>
+            ) : (
+              <>
+                {metaSync.state === "saving" && "กำลังซิงก์ป้ายไป Meta..."}
+                {metaSync.state === "ok" && "✓ ป้ายขึ้นใน Meta แล้ว"}
+                {metaSync.state === "unsupported" && metaSync.note}
+                {metaSync.state === "error" && `ซิงก์ป้ายไป Meta ไม่สำเร็จ: ${metaSync.note}`}
+              </>
+            )}
           </div>
         )}
         {/* ข้อจำกัดที่ผู้ใช้ต้องรู้ล่วงหน้า ไม่งั้นจะรอป้ายจาก Meta ที่ไม่มีวันมา */}
         <div className="mt-1 text-[10px] text-night-ink-3 leading-relaxed">
           {isLine
-            ? "แชท LINE ใช้แท็กของระบบนี้เท่านั้น — LINE ไม่เปิด API แท็กแชท จึงดึงแท็กจาก LINE OA Manager มาไม่ได้ และแท็กที่ติดที่นี่ก็ไม่ไปขึ้นใน LINE"
+            ? "แท็กนี้จะไปสร้างเป็น \"กลุ่มผู้ชม\" ชื่อเดียวกันใน LINE ให้อัตโนมัติ (ใช้ยิงบรอดแคสต์เจาะกลุ่มได้) · แต่จะไม่ขึ้นเป็นแท็กในหน้าจอแชทของ LINE เพราะ LINE ไม่เปิด API แท็กแชท และดึงแท็กที่ติดใน LINE OA Manager กลับมาไม่ได้"
             : "ป้ายที่ติดในเว็บจะไปขึ้นใน Meta ให้อัตโนมัติ · แต่ถ้าไปติดป้ายในกล่องข้อความของ Meta เอง จะไม่เด้งกลับมาที่นี่ เพราะ Meta ไม่เปิดให้อ่านย้อน — ให้ติดป้ายจากหน้านี้เป็นหลัก"}
         </div>
       </div>
