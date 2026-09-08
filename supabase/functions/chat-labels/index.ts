@@ -40,6 +40,16 @@ async function fetchJson(url: string, init?: RequestInit) {
 
 const labelName = (l: any) => l?.page_label_name || l?.name || "";
 
+// ป้ายที่ใช้แทน "ระยะข้อมูลลูกค้า" — ชื่อตรงกับ CHAT_STAGES ใน lib/constants/settings.js
+// และตรงกับป้ายที่เพจมีอยู่แล้วใน Meta ทั้งห้าตัว
+//
+// ทำไมต้องทำ: Meta ไม่มี API เขียนดรอปดาวน์ "ระยะข้อมูลลูกค้า" ใน Leads Center
+// (ตรวจแล้ว /lead_stages, /crm_lead_stages = unknown path) ดรอปดาวน์นั้นเป็นช่องที่คนกรอกเอง
+// event ที่ส่งผ่าน CAPI เป็นสัญญาณคอนเวอร์ชั่นให้ระบบโฆษณาเรียนรู้ ไม่ได้เขียนค่าในช่องนั้น
+// จึงติด "ป้าย" ชื่อเดียวกับระยะเพิ่มให้ด้วย เพราะป้ายเขียนได้และเห็นในกล่องข้อความของ Meta
+const STAGE_LABELS = ["มาใหม่", "มีคุณสมบัติ", "สร้างคอนเวอร์ชั่นแล้ว", "ลูกค้าเปิดบัญชีใหม่", "ไม่มีคุณสมบัติ"];
+const isStageLabel = (name: string) => STAGE_LABELS.some((l) => l.toLowerCase() === String(name || "").toLowerCase());
+
 // เพจที่ยิงแอดมานานจะมีป้ายเป็นร้อย ๆ อัน ซึ่งส่วนใหญ่ Meta สร้างเองจาก messenger_ads
 // (ad_id.120xxxxx, messenger_ads, เลขไอดีล้วน) — ไม่ใช่ป้ายที่คนตั้งใจใช้จัดกลุ่มลูกค้า
 // ถ้าโชว์ทั้งหมด ตัวเลือกจะยาวเป็นพันบรรทัดจนใช้งานไม่ได้ จึงแยก "ป้ายของคน" ออกมา
@@ -82,7 +92,7 @@ Deno.serve(async (req) => {
     let psid = "";
     let localLabels: any[] = [];   // ป้ายที่แอปนี้จดไว้ว่าเคยติดให้ลูกค้ารายนี้
     let webTags: string[] = [];
-    if (["of", "attach", "detach", "mirror"].includes(action)) {
+    if (["of", "attach", "detach", "mirror", "stage_label"].includes(action)) {
       const rowId = String(body?.id || "");
       if (!rowId) return json({ ok: false, error: "ต้องส่ง id ของบทสนทนา" }, 400);
       const { data: row } = await admin
@@ -213,7 +223,9 @@ Deno.serve(async (req) => {
       const haveKeys = new Set(localLabels.map((l: any) => String(l?.name || "").toLowerCase()).filter(Boolean));
 
       const toAttach = want.filter((t) => !haveKeys.has(t.toLowerCase()));
-      const toDetach = localLabels.filter((l: any) => !wantKeys.has(String(l?.name || "").toLowerCase()));
+      // ป้ายระยะไม่ได้มาจาก tags — ห้ามถอดตอนซิงก์แท็ก ไม่งั้นติดระยะแล้วโดนถอดทันทีที่แก้แท็ก
+      const toDetach = localLabels.filter((l: any) =>
+        !wantKeys.has(String(l?.name || "").toLowerCase()) && !isStageLabel(String(l?.name || "")));
 
       // กันลูปพัง: ครั้งละไม่เกิน 25 รายการ ที่เหลือรอบถัดไปตามเก็บ (mirror เรียกซ้ำได้)
       const CAP = 25;
@@ -275,6 +287,69 @@ Deno.serve(async (req) => {
         labels: next,
         remaining: Math.max(0, (toAttach.length - Math.min(toAttach.length, CAP)) + (toDetach.length - Math.min(toDetach.length, CAP))),
       });
+    }
+
+    // ---- ติดป้ายที่แทน "ระยะข้อมูลลูกค้า" (มีได้ทีละหนึ่ง) ----
+    if (action === "stage_label") {
+      const wanted = String(body?.stage_label || "").trim();
+      if (!isStageLabel(wanted)) return json({ ok: false, error: `ไม่รู้จักระยะ "${wanted}"` }, 400);
+
+      const cur = await fetchJson(`${GRAPH_BASE}/${pageId}/custom_labels?fields=name,page_label_name&limit=500&access_token=${pageTok}`);
+      if (cur?.error) return json({ ok: false, error: cur.error.error_user_msg || cur.error.message || "อ่านป้ายของเพจไม่สำเร็จ" }, 400);
+      const idByName = new Map<string, string>();
+      for (const l of cur?.data ?? []) {
+        const name = labelName(l);
+        if (name && !idByName.has(name.toLowerCase())) idByName.set(name.toLowerCase(), String(l.id));
+      }
+
+      let next = [...localLabels];
+      const detached: string[] = [];
+      // ถอดป้ายระยะอื่นออกก่อน ให้เหลือระยะเดียวเสมอ ไม่ให้ดูขัดกันใน Meta
+      for (const l of localLabels.filter((x: any) => isStageLabel(String(x?.name || "")) && String(x?.name || "").toLowerCase() !== wanted.toLowerCase())) {
+        const labelId = String(l?.id || "");
+        if (!labelId) continue;
+        const r = await fetchJson(`${GRAPH_BASE}/${labelId}/label?user=${encodeURIComponent(psid)}&access_token=${pageTok}`, { method: "DELETE" });
+        const gone = Number(r?.error?.error_subcode) === 33 || /does not exist/i.test(String(r?.error?.message || ""));
+        if (r?.success === true || gone) {
+          next = next.filter((x: any) => String(x?.id) !== labelId);
+          detached.push(String(l.name));
+        }
+      }
+
+      // ติดป้ายระยะที่ต้องการ (ถ้าติดอยู่แล้วไม่ต้องทำซ้ำ)
+      let attached = false;
+      const already = next.some((l: any) => String(l?.name || "").toLowerCase() === wanted.toLowerCase());
+      if (!already) {
+        let labelId = idByName.get(wanted.toLowerCase()) || "";
+        if (!labelId) {
+          for (const field of ["page_label_name", "name"]) {
+            const r = await fetchJson(`${GRAPH_BASE}/${pageId}/custom_labels?access_token=${pageTok}`, {
+              method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ [field]: wanted }),
+            });
+            if (r?.id) { labelId = String(r.id); break; }
+            if (!r?.error) break;
+          }
+        }
+        if (!labelId) return json({ ok: false, error: "สร้างป้ายระยะในเพจไม่สำเร็จ" }, 400);
+        let r = await fetchJson(`${GRAPH_BASE}/${labelId}/label?user=${encodeURIComponent(psid)}&access_token=${pageTok}`, { method: "POST" });
+        if (r?.success !== true) {
+          r = await fetchJson(`${GRAPH_BASE}/${labelId}/label?access_token=${pageTok}`, {
+            method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ user: psid }),
+          });
+        }
+        if (r?.success !== true) {
+          return json({ ok: false, error: r?.error?.error_user_msg || r?.error?.message || "ติดป้ายระยะไม่สำเร็จ" }, 400);
+        }
+        next = [...next.filter((l: any) => String(l?.id) !== labelId), { id: labelId, name: wanted }];
+        attached = true;
+      }
+
+      if (attached || detached.length) {
+        await admin.from("chat_customers")
+          .update({ meta_labels: next, updated_at: new Date().toISOString() })
+          .eq("id", String(body?.id || ""));
+      }
+      return json({ ok: true, stage_label: wanted, attached, detached, labels: next });
     }
 
     return json({ ok: false, error: `ไม่รู้จัก action "${action}"` }, 400);

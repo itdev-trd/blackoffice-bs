@@ -29,7 +29,7 @@ import { TradeIdChecker, CustomerDataForm } from "@/components/features/customer
 import MetaLabels from "@/components/features/inbox/MetaLabels";
 import { SearchInput, FilterPill } from "@/components/ui";
 import { CHAT_STAGES } from "@/lib/constants/settings";
-import { pushLeadStageToMeta } from "@/lib/utils/lead-stage";
+import { pushLeadStageToMeta, pushStageLabelToMeta } from "@/lib/utils/lead-stage";
 
 // ตัวเลือกอิโมจิชุดเต็มมีข้อมูลจำนวนมาก — โหลดเฉพาะตอนเปิดใช้ ไม่ถ่วงหน้าแชท/PWA ตอนเริ่มต้น
 const EmojiPicker = React.lazy(() => import("emoji-picker-react").then((module) => ({ default: module.default })));
@@ -1532,8 +1532,17 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   // เงื่อนไขของ Meta: รับ event ย้อนหลังไม่เกิน 7 วันนับจากข้อความล่าสุด
   async function pushStageToMeta(id, stage) {
     setStageSync({ id, state: "saving", note: "" });
-    const r = await pushLeadStageToMeta(id);
-    setStageSync({ id, state: r.state, note: r.state === "skipped" ? (SKIP_NOTE[stage] || r.note) : r.note });
+    // ส่งสองอย่าง: event ให้ระบบโฆษณาเรียนรู้ + ติดป้ายชื่อระยะให้เห็นในกล่องข้อความของ Meta
+    const [event, label] = await Promise.all([pushLeadStageToMeta(id), pushStageLabelToMeta(id, stage)]);
+    if (event.state === "error") {
+      setStageSync({ id, state: "error", note: event.note });
+      return;
+    }
+    if (label.state === "error") {
+      setStageSync({ id, state: "error", note: `ส่ง event สำเร็จ แต่ติดป้ายระยะไม่ได้: ${label.note}` });
+      return;
+    }
+    setStageSync({ id, state: event.state, note: event.state === "skipped" ? (SKIP_NOTE[stage] || event.note) : event.note });
   }
   async function confirmInstagramAccountOpened() {
     if (!selected || selected.source !== "instagram") return;

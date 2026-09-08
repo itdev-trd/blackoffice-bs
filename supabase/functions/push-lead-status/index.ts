@@ -33,6 +33,13 @@ const STAGE_EVENT: Record<string, string> = {
 // จึงไม่หยิบแถวที่เก่ากว่านี้มาส่งตั้งแต่ต้น ดีกว่าปล่อยให้ล้มแล้วมาร์ก failed ทั้งตาราง
 const MAX_EVENT_AGE_DAYS = 7;
 
+// event กลุ่มมูลค่าการซื้อ Meta บังคับให้มี custom_data.currency (และ value) ไม่งั้นปฏิเสธ
+// อาการที่เจอจริง: เลือกระยะ "สร้างคอนเวอร์ชั่นแล้ว" แล้วขึ้น
+// "เหตุการณ์การซื้อของคุณไม่มีพารามิเตอร์สกุลเงิน ป้อนพารามิเตอร์สกุลเงิน เช่น USD"
+const NEEDS_CURRENCY = new Set(["Purchase", "OrderCreated", "InitiateCheckout", "AddToCart"]);
+// สกุลเงินของบัญชีโฆษณาที่ใช้จริง — ตั้งทับได้ที่ settings.chat_sync_config.lead_event_currency
+const DEFAULT_CURRENCY = "THB";
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
@@ -51,6 +58,7 @@ Deno.serve(async (req) => {
 
     const { data: cfgRow } = await admin.from("settings").select("value").eq("key", "chat_sync_config").maybeSingle();
     const fallbackDataset = (cfgRow?.value as any)?.meta_dataset_id || null;   // ค่ากลางแบบเดิม (ใช้เป็นตัวสำรอง)
+    const currency = String((cfgRow?.value as any)?.lead_event_currency || DEFAULT_CURRENCY).toUpperCase().slice(0, 3);
 
     // ---- Dataset "รายเพจ" ----
     // เอกสาร Meta: 1 เพจผูกได้กับ 1 dataset เท่านั้น → ต้องส่ง event ของแต่ละเพจเข้า dataset ของเพจนั้น
@@ -237,6 +245,9 @@ Dataset ที่ลอง: ${first[0]}
           event_id: `${r.id}:${stage}`, // dedup กันส่งซ้ำตอน retry/กดซ้ำ (สถานะเดิมส่งกี่ครั้ง Meta นับครั้งเดียว)
           action_source: "business_messaging",
           messaging_channel: isInstagram ? "instagram" : "messenger",
+          // value 0 = เราไม่รู้ยอดจริงของลูกค้ารายนี้ แต่ Meta ต้องการฟิลด์คู่นี้ครบ
+          // ถ้าวันหลังเก็บยอดฝากได้ ให้ส่งยอดจริงแทน 0 จะช่วยให้ Meta หาลูกค้าคุณภาพได้แม่นขึ้น
+          ...(NEEDS_CURRENCY.has(eventName) ? { custom_data: { currency, value: 0 } } : {}),
           user_data: isInstagram
             ? { ig_sid: r.psid, ig_account_id: igAccountId }
             : { page_id: r.page_id, page_scoped_user_id: r.psid },

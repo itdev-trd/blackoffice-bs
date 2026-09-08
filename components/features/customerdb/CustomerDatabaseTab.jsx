@@ -18,7 +18,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
-import { pushLeadStageToMeta } from "@/lib/utils/lead-stage";
+import { pushLeadStageToMeta, pushStageLabelToMeta } from "@/lib/utils/lead-stage";
 import { beToCe, bangkokDate } from "@/lib/utils/date";
 import { hasFullData } from "@/lib/constants/roles";
 import { COUNTRIES, normalizeCountry } from "@/lib/constants/countries";
@@ -745,9 +745,10 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
     await supabase.from("chat_customers").update({ stage, stage_manual: stage, updated_at: new Date().toISOString() }).eq("id", id);
     await invalidateSharedReportCache();
     // ส่งระยะขึ้น Meta ให้ Leads Center ตรงกับที่นี่ — ไม่ขัดจังหวะการทำงาน ถ้าพลาดจะขึ้นบอกในหน้าตอบแชท
-    const r = await pushLeadStageToMeta(id);
+    const [r, labelRes] = await Promise.all([pushLeadStageToMeta(id), pushStageLabelToMeta(id, stage)]);
     // insync = ไม่มีอะไรต้องส่ง (ตรงกันอยู่แล้ว) ไม่ใช่ความผิดพลาด จึงไม่ต้องเตือน
     if (r.state === "error" || r.state === "skipped") setMsg({ ok: false, text: `ส่งระยะขึ้น Meta ไม่สำเร็จ: ${r.note}` });
+    else if (labelRes.state === "error") setMsg({ ok: false, text: `ส่ง event สำเร็จ แต่ติดป้ายระยะไม่ได้: ${labelRes.note}` });
   }
 
   const pages = pageOpts;
@@ -1254,7 +1255,10 @@ function CustomerDetailModal({ row, onClose, onSaved }) {
     if (error) { alert("บันทึกไม่สำเร็จ: " + error.message); return; }
     setSaved(true); setTimeout(() => setSaved(false), 1500);
     // ระยะข้อมูลลูกค้าเปลี่ยน → ส่งขึ้น Meta ด้วย (ไม่บล็อกการบันทึก)
-    if (form.stage !== row.stage_manual && form.stage !== row.stage) pushLeadStageToMeta(row.id);
+    if (form.stage !== row.stage_manual && form.stage !== row.stage) {
+      pushLeadStageToMeta(row.id);
+      pushStageLabelToMeta(row.id, form.stage);
+    }
     onSaved?.(row.id, patch);
   }
 
