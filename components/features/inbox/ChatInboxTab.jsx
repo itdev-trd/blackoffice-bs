@@ -2344,7 +2344,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
       {/* กลาง: หน้าต่างแชท — มือถือ: fixed เต็มจอแบบ Messenger (header ติดบน / ข้อความเลื่อนกลาง / ช่องพิมพ์ติดล่าง)
           เดสก์ท็อป: inline ในการ์ดปกติ */}
       <div className={`chat-conversation-panel min-w-0 flex-col ${selected
-        ? "flex fixed inset-0 z-40 bg-night-surface h-[100dvh] lg:static lg:z-auto lg:h-auto lg:inset-auto lg:flex-1"
+        ? "flex fixed inset-0 z-40 bg-night-surface app-screen lg:static lg:z-auto lg:h-auto lg:max-h-none lg:inset-auto lg:flex-1"
         : "hidden lg:flex lg:flex-1"}`}>
         {!selected ? (
           <div className="flex-1 flex items-center justify-center text-sm text-night-ink-3">เลือกลูกค้าเพื่อเริ่มตอบ</div>

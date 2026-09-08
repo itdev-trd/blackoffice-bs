@@ -1,14 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { forwardRef, useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
 
 // ช่องรหัสผ่านที่มีปุ่มดวงตา (กดสลับแสดง/ซ่อนรหัสที่พิมพ์) — ใช้ซ้ำได้ทุกที่
-export default function PasswordInput({ className = "", wrapperClass = "", ...props }) {
+// forwardRef เพื่อให้กล่องที่เปิดขึ้นมาโฟกัสช่องแรกให้เองได้ (เช่นหน้าต่างเปลี่ยนรหัสผ่าน)
+const PasswordInput = forwardRef(function PasswordInput({ className = "", wrapperClass = "", ...props }, ref) {
   const [show, setShow] = useState(false);
   return (
     <div className={`relative ${wrapperClass}`}>
-      <input {...props} type={show ? "text" : "password"} className={`${className} pr-10`} />
+      <input ref={ref} {...props} type={show ? "text" : "password"} className={`${className} pr-10`} />
       <button
         type="button"
         tabIndex={-1}
@@ -21,4 +22,6 @@ export default function PasswordInput({ className = "", wrapperClass = "", ...pr
       </button>
     </div>
   );
-}
+});
+
+export default PasswordInput;

@@ -582,6 +582,20 @@ html:not(.dark) .chat-bubble-me * { color: #FFFFFF; }
 :root { --update-banner-h: 0px; }
 body { padding-top: var(--update-banner-h); }
 
+/* ความสูงจริงที่มองเห็น — KeyboardViewport ตั้งค่าจาก window.visualViewport
+   ค่าเริ่มต้นเป็น 100dvh เพื่อให้หน้าเว็บถูกต้องตั้งแต่เฟรมแรกก่อน JS ทำงาน
+   ใช้ตัวนี้กับกล่องที่ต้องเต็มจอ แทน 100dvh เพราะ 100dvh ไม่ย่อตามคีย์บอร์ด */
+:root { --app-vh: 100dvh; }
+/* กล่องเต็มจอบนมือถือ (ห้องแชท) — ย่อตามพื้นที่ที่เหลือจริงเมื่อคีย์บอร์ดเปิด
+   ช่องพิมพ์ที่อยู่ท้ายกล่องจึงยังอยู่ในจอ ไม่หลุดไปใต้คีย์บอร์ด
+   จำกัดไว้เฉพาะจอเล็ก เดสก์ท็อปใช้เลย์เอาต์การ์ดปกติ ไม่ต้องพึ่งค่านี้
+   (และไม่ต้องแข่ง specificity กับ lg:h-auto ของ Tailwind) */
+@media (max-width: 1023px) {
+  .app-screen { height: var(--app-vh); max-height: var(--app-vh); }
+}
+/* คีย์บอร์ดเปิด = ห้ามให้ body เลื่อนได้ ไม่งั้น iOS ดันจอทั้งใบขึ้นแล้วของที่ fixed หลุดกรอบ */
+html.keyboard-open, html.keyboard-open body { overflow: hidden; overscroll-behavior: none; }
+
 .chat-shell { height: 82vh; }
 @media (min-width: 1024px) {
   .chat-shell { height: calc(100vh - var(--update-banner-h)); border-radius: 0 !important; border-width: 0 !important; }
@@ -589,7 +603,7 @@ body { padding-top: var(--update-banner-h); }
 @media (max-width: 1023px) {
   .chat-shell {
     height: calc(100vh - 60px - var(--update-banner-h) - env(safe-area-inset-bottom));
-    height: calc(100dvh - 60px - var(--update-banner-h) - env(safe-area-inset-bottom));
+    height: calc(var(--app-vh) - 60px - var(--update-banner-h) - env(safe-area-inset-bottom));
     padding-bottom: env(safe-area-inset-bottom);
   }
   .chat-fullbleed { margin-left: calc(-1 * env(safe-area-inset-left)); margin-right: calc(-1 * env(safe-area-inset-right)); }

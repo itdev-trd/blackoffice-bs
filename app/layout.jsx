@@ -1,6 +1,7 @@
 import "./globals.css";
 import { Noto_Sans_Thai, Roboto } from "next/font/google";
 import UpdateBanner from "@/components/shared/UpdateBanner";
+import KeyboardViewport from "@/components/shared/KeyboardViewport";
 import AuthListener from "@/components/shared/AuthListener";
 
 const notoSansThai = Noto_Sans_Thai({
@@ -35,6 +36,9 @@ export const viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
+  // คีย์บอร์ดเด้งขึ้นมาให้ย่อพื้นที่เนื้อหา ไม่ใช่เลื่อนจอทั้งใบขึ้น (Android Chrome)
+  // iOS ยังไม่รองรับค่านี้ จึงมี KeyboardViewport อ่าน visualViewport มาช่วยอีกชั้น
+  interactiveWidget: "resizes-content",
   themeColor: "#F4F7FB",
 };
 
@@ -54,6 +58,7 @@ export default function RootLayout({ children }) {
         <AuthListener />
         {children}
         <UpdateBanner />
+        <KeyboardViewport />
       </body>
     </html>
   );

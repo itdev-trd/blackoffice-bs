@@ -4,12 +4,13 @@ import { useState } from "react";
 import ThemeToggle from "@/components/shared/ThemeToggle";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { ExternalLink, LogOut, Menu, RefreshCw, X } from "lucide-react";
+import { ExternalLink, KeyRound, LogOut, Menu, RefreshCw, X } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { logActivity } from "@/lib/utils/activity";
 import { clearCustomerDatabaseCaches } from "@/lib/customerdb-cache";
 import { useDashboard, ROUTE_PATH } from "@/components/dashboard/DashboardContext";
 import BrandMark from "@/components/shared/BrandMark";
+import ChangePasswordDialog from "@/components/shared/ChangePasswordDialog";
 
 // แถบเมนูล่างมือถือ — เข้าถึง 5 หน้าที่ใช้บ่อยที่สุดได้ในแตะเดียว แบบแอปมือถือทั่วไป
 // (label ย่อกว่าเมนูเต็มด้านข้าง เพราะพื้นที่จำกัด)
@@ -26,6 +27,9 @@ export default function DashboardNav({ children }) {
   const pathname = usePathname();
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
+  // เปลี่ยนรหัสผ่านอยู่ตรงนี้ ไม่ใช่ในหน้าตั้งค่า เพราะทุกบทบาทต้องเข้าถึงได้
+  // (บทบาทแอดมิน/ยิงแอด เห็นการตั้งค่าแค่หัวข้อเดียว จะไปวางในนั้นไม่ได้)
+  const [pwOpen, setPwOpen] = useState(false);
   const isInboxRoute = pathname.startsWith(ROUTE_PATH.inbox);
   // หน้าตอบแชทมี 3 คอลัมน์ (ลิสต์ + ห้องแชท + พาเนลลูกค้า) จึงยุบเมนูเหลือไอคอนเพื่อสงวนพื้นที่แนวนอน
   // หน้าอื่นแสดงชื่อเมนูเต็ม เพราะไอคอนล้วนอ่านยากสำหรับคนที่ไม่ได้ใช้ทุกวัน
@@ -130,6 +134,17 @@ export default function DashboardNav({ children }) {
             <span className={navCollapsed ? "text-[10px] font-semibold leading-none" : "text-[13px] font-semibold"}>รีเฟรช</span>
           </button>
           <ThemeToggle collapsed={navCollapsed} />
+          <button
+            onClick={() => setPwOpen(true)}
+            className={`flex items-center rounded-lg border border-night-border bg-night-surface2 text-night-ink-2 transition-colors hover:border-night-accent/50 hover:text-night-ink ${
+              navCollapsed ? "h-11 w-16 flex-col justify-center gap-0.5" : "h-10 w-full gap-2.5 px-3"
+            }`}
+            title="เปลี่ยนรหัสผ่าน"
+            aria-label="เปลี่ยนรหัสผ่าน"
+          >
+            <KeyRound size={17} className="shrink-0" />
+            <span className={navCollapsed ? "text-[10px] font-semibold leading-none" : "text-[13px] font-semibold"}>รหัสผ่าน</span>
+          </button>
           <button
             onClick={handleLogout}
             className={`flex items-center rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-700 transition-colors hover:border-rose-500/70 hover:bg-rose-500/15 dark:border-rose-400/30 dark:bg-rose-400/10 dark:text-rose-300 dark:hover:border-rose-300/60 dark:hover:bg-rose-400/20 ${
@@ -270,6 +285,13 @@ export default function DashboardNav({ children }) {
               {/* ThemeToggle โหมดปกติสูง h-10 เท่ากับปุ่มรีเฟรชพอดี */}
               <ThemeToggle />
               <button
+                onClick={() => { setPwOpen(true); setMenuOpen(false); }}
+                className="col-span-2 flex h-10 items-center justify-center gap-2 rounded-lg border border-night-border bg-night-surface2 text-night-ink-2"
+              >
+                <KeyRound size={17} className="shrink-0" />
+                <span className="text-[13px] font-semibold">เปลี่ยนรหัสผ่าน</span>
+              </button>
+              <button
                 onClick={handleLogout}
                 className="col-span-2 flex h-10 items-center justify-center gap-2 rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-700 dark:border-rose-400/30 dark:bg-rose-400/10 dark:text-rose-300"
               >
@@ -288,6 +310,8 @@ export default function DashboardNav({ children }) {
           </div>
         </div>
       )}
+
+      <ChangePasswordDialog open={pwOpen} email={perm?.email} onClose={() => setPwOpen(false)} />
     </div>
   );
 }
