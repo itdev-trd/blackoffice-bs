@@ -1503,11 +1503,26 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
 
   async function setStage(id, stage) {
     const nowIso = new Date().toISOString();
-    const openedAt = stage === "account_opened" && selected?.id === id && !selected.account_opened_at ? nowIso : selected?.account_opened_at;
-    const patch = { stage, stage_manual: stage, classified_by: "manual", needs_ai: false, needs_verify: false, ...(stage === "account_opened" && openedAt ? { account_opened_at: openedAt } : {}), updated_at: nowIso };
+    // เขียนได้เฉพาะคอลัมน์ที่ฝั่งเว็บมีสิทธิ์จริง (stage, stage_manual, updated_at)
+    //
+    // ของเดิมส่ง classified_by / needs_ai / needs_verify / account_opened_at ไปด้วย ซึ่ง role
+    // authenticated ไม่มีสิทธิ์ UPDATE → Postgres ปฏิเสธทั้งคำสั่ง แล้วโค้ดก็ไม่เช็ค error
+    // ผลคือกดเปลี่ยนสถานะจากหน้าตอบแชทแล้วไม่มีอะไรเกิดขึ้นเลย แต่หน้าจอโชว์ว่าเปลี่ยนแล้ว
+    // (จนกระทั่ง poll รอบถัดไปดึงค่าเดิมจากฐานข้อมูลกลับมา)
+    //
+    // account_opened_at ให้ฝั่งเซิร์ฟเวอร์ตั้ง (push-lead-status) เพราะคอลัมน์นั้นกันไว้ไม่ให้ client แก้
+    const patch = { stage, stage_manual: stage, updated_at: nowIso };
+    const previous = { stage: selected?.stage, stage_manual: selected?.stage_manual };
     setSelected((s) => (s && s.id === id ? { ...s, ...patch } : s));
     setList((l) => (l || []).map((x) => x.id === id ? { ...x, ...patch } : x));
-    await supabase.from("chat_customers").update(patch).eq("id", id);
+    const { error } = await supabase.from("chat_customers").update(patch).eq("id", id);
+    if (error) {
+      // คืนค่าเดิมบนหน้าจอ ไม่ให้เห็นสถานะที่ไม่ได้บันทึกจริง
+      setSelected((s) => (s && s.id === id ? { ...s, ...previous } : s));
+      setList((l) => (l || []).map((x) => x.id === id ? { ...x, ...previous } : x));
+      setStageSync({ id, state: "error", note: `บันทึกระยะไม่สำเร็จ: ${error.message || "ไม่ทราบสาเหตุ"}` });
+      return;
+    }
     logActivity("set_stage", { id, stage, customer_name: selected?.id === id ? selected?.customer_name : undefined });
     pushStageToMeta(id, stage);
   }
@@ -1761,6 +1776,34 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
           className="w-full rounded-lg border border-night-border px-2.5 py-2 text-xs resize-y"
         />
       </div>
+      {/* ระยะข้อมูลลูกค้า — กดเปลี่ยนได้จากหน้าตอบแชทเลย ไม่ต้องข้ามไปหน้าจัดการลูกค้า
+          ชื่อทั้งห้าตรงกับชื่อระยะใน Leads Center ของ Meta ทุกตัว (มาใหม่ / มีคุณสมบัติ /
+          สร้างคอนเวอร์ชั่นแล้ว / ลูกค้าเปิดบัญชีใหม่ / ไม่มีคุณสมบัติ) จึงเทียบกันได้ตรง ๆ
+          Meta ไม่มี API ให้อ่านลิสต์ระยะ จึงยืนยันความตรงกันด้วยการใช้ชื่อชุดเดียวกัน */}
+      <div>
+        <div className="text-xs text-night-ink-3 mb-1">ระยะข้อมูลลูกค้า</div>
+        <div className="flex flex-wrap gap-1.5">
+          {CHAT_STAGES.map((st) => {
+            const current = selected.stage_manual || selected.stage || "new";
+            const active = current === st.key;
+            return (
+              <button
+                key={st.key}
+                onClick={() => { if (!active) setStage(selected.id, st.key); }}
+                disabled={active}
+                title={active ? `ระยะปัจจุบัน: ${st.label}` : `เปลี่ยนเป็น "${st.label}" แล้วส่งขึ้น Meta`}
+                className={`text-[11px] font-medium px-2.5 py-1 rounded-full border ${
+                  active
+                    ? "bg-night-accent border-night-accent text-white"
+                    : "bg-night-surface2 border-night-border text-night-ink-2 hover:text-night-ink hover:border-night-accent/50"
+                }`}
+              >
+                {st.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
       {/* สถานะการส่ง "ระยะข้อมูลลูกค้า" ขึ้น Meta — โชว์เฉพาะตอนมีการเปลี่ยนสถานะของห้องนี้ */}
       {stageSync?.id === selected.id && (
         <div className={`text-[11px] break-words ${
@@ -1770,6 +1813,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
         }`}>
           {stageSync.state === "saving" && "กำลังส่งระยะข้อมูลลูกค้าไป Meta..."}
           {stageSync.state === "ok" && "✓ ส่งระยะข้อมูลลูกค้าไป Meta แล้ว"}
+          {stageSync.state === "insync" && "ระยะนี้ตรงกับที่ส่งไป Meta อยู่แล้ว"}
           {stageSync.state === "skipped" && stageSync.note}
           {stageSync.state === "error" && `ส่งระยะไป Meta ไม่สำเร็จ: ${stageSync.note}`}
         </div>

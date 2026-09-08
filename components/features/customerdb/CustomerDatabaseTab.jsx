@@ -746,7 +746,8 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
     await invalidateSharedReportCache();
     // ส่งระยะขึ้น Meta ให้ Leads Center ตรงกับที่นี่ — ไม่ขัดจังหวะการทำงาน ถ้าพลาดจะขึ้นบอกในหน้าตอบแชท
     const r = await pushLeadStageToMeta(id);
-    if (r.state !== "ok") setMsg({ ok: false, text: `ส่งระยะขึ้น Meta ไม่สำเร็จ: ${r.note}` });
+    // insync = ไม่มีอะไรต้องส่ง (ตรงกันอยู่แล้ว) ไม่ใช่ความผิดพลาด จึงไม่ต้องเตือน
+    if (r.state === "error" || r.state === "skipped") setMsg({ ok: false, text: `ส่งระยะขึ้น Meta ไม่สำเร็จ: ${r.note}` });
   }
 
   const pages = pageOpts;

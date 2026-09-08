@@ -104,7 +104,7 @@ Dataset ที่ลอง: ${first[0]}
     // เลิกกรองด้วยผู้จัดประเภท — แอดมินที่คุยกับลูกค้าเองน่าเชื่อถือกว่าโมเดลอยู่แล้ว
     //
     // สถานะที่ใช้ตัดสินคือ stage_manual ก่อน (ค่าที่คนกดเลือก) ไม่ใช่ stage ที่ระบบเดาไว้
-    const COLS = "id, page_id, psid, source, stage, stage_manual, meta_push_status, meta_push_stage, last_message_at";
+    const COLS = "id, page_id, psid, source, stage, stage_manual, meta_push_status, meta_push_stage, last_message_at, account_opened_at";
     const effStage = (r: any) => String(r?.stage_manual || r?.stage || "new");
     // ต้องส่งเมื่อ: ยังไม่เคยส่ง / เคยล้มเหลว / เคยส่งแล้วแต่สถานะเปลี่ยนไปแล้ว
     const needsPush = (r: any) => !!STAGE_EVENT[effStage(r)] &&
@@ -255,6 +255,9 @@ Dataset ที่ลอง: ${first[0]}
 
       if (ok) success++; else { failed++; if (errMsg && errors.length < 3) errors.push(errMsg); }
       await admin.from("chat_customers").update({
+        // account_opened_at กันไม่ให้ client แก้ ฝั่งนี้จึงตั้งให้ตอนสถานะเป็น "เปิดบัญชีแล้ว"
+        // (ใช้กับรายงานว่าเปิดบัญชีวันไหน — เดิมหน้าตอบแชทตั้งเองแล้วถูกปฏิเสธทั้งคำสั่ง)
+        ...(stage === "account_opened" && !r.account_opened_at ? { account_opened_at: now } : {}),
         meta_push_status: ok ? "success" : "failed",
         meta_push_stage: stage,
         meta_push_error: ok ? null : errMsg.slice(0, 300),
