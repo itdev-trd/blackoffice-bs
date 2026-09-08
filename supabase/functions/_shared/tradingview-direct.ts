@@ -187,6 +187,29 @@ export async function tvGrant(username: string, pineId: string, expiration: stri
   return { ...r, already: st === "exist" || st === "exists" };
 }
 
+/**
+ * ต่ออายุสิทธิ์ที่มีอยู่แล้ว
+ *
+ * ทำไมต้องมีแยกจาก tvGrant: /pine_perm/add/ ของ TradingView จะไม่แก้อะไรเลยถ้าผู้ใช้
+ * มีสิทธิ์อยู่แล้ว (ตอบ status "exists") — วันหมดอายุเดิมค้างไว้เท่าเดิม
+ * ผลคือ "ต่ออายุ" ให้ลูกค้าที่หมดอายุแล้ว = ไม่มีอะไรเกิดขึ้น แต่ระบบเรารายงานว่าสำเร็จ
+ * (เจอจริง: ลูกค้า 62 รายของ Besight One STR หมดอายุ 3–7 ก.ย. ทั้งที่ระบบขึ้น active)
+ */
+export async function tvExtend(username: string, pineId: string, expiration: string | null, cookie: TvCookie): Promise<TvResult> {
+  const base = baseOf(cookie);
+  const form: Record<string, string> = { pine_id: pineId, username_recip: username };
+  if (expiration) form.expiration = expiration;
+  else form.noExpiration = "true";   // ตลอดชีพ
+  const r = await post(base, "/pine_perm/modify_user_expiration/", cookie, form);
+  if (!r.ok) return r;
+  const j = parse(r._full);
+  const st = String(j?.status || "").toLowerCase();
+  if (st && !["ok", "success", "updated", "modified"].includes(st)) {
+    return { ...r, ok: false, error: `TradingView ปฏิเสธการต่ออายุ: ${j?.status}` };
+  }
+  return r;
+}
+
 export async function tvRevoke(username: string, pineId: string, cookie: TvCookie): Promise<TvResult> {
   const base = baseOf(cookie);
   const r = await post(base, "/pine_perm/remove/", cookie, { pine_id: pineId, username_recip: username });

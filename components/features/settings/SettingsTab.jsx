@@ -663,10 +663,10 @@ function TvAdminSettingsPanel() {
                   ยังไม่มีประวัติ{logFail ? "ที่ล้มเหลว" : ""} — จะเริ่มบันทึกเมื่อระบบเรียก TradingView ครั้งต่อไป
                 </div>
               ) : (
-                <table className="w-full min-w-[860px] text-[12px]">
+                <table className="w-full min-w-[1100px] text-[12px]">
                   <thead className="sticky top-0 bg-slate-50 text-left text-slate-600">
                     <tr>
-                      {["เวลา", "ผล", "โหมด", "คำสั่ง", "username", "HTTP", "ใช้เวลา", "ใครกด"].map((h) => (
+                      {["เวลา", "ผล", "สคริปต์", "ผลจาก TV", "โหมด", "คำสั่ง", "username", "HTTP", "ใช้เวลา", "ใครกด"].map((h) => (
                         <th key={h} className="whitespace-nowrap px-3 py-2 font-medium">{h}</th>
                       ))}
                     </tr>
@@ -681,6 +681,20 @@ function TvAdminSettingsPanel() {
                           <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${r.ok ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"}`}>
                             {r.ok ? "สำเร็จ" : "ล้มเหลว"}
                           </span>
+                        </td>
+                        {/* สคริปต์ไหน — เดิมไม่มีคอลัมน์นี้ จึงรู้แค่ว่า "สำเร็จ" แต่ไม่รู้ว่าของตัวไหน */}
+                        <td className="px-3 py-2 text-slate-700">{r.script || "—"}</td>
+                        {/* exists = TradingView บอกว่ามีสิทธิ์อยู่แล้ว "ไม่ได้ต่ออายุให้" ซึ่งเดิมนับเป็นสำเร็จ */}
+                        <td className="px-3 py-2">
+                          {r.tv_outcome === "exists" ? (
+                            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700" title="TradingView บอกว่ามีสิทธิ์อยู่แล้ว จึงไม่ได้แก้วันหมดอายุให้">
+                              มีอยู่แล้ว · ไม่ต่ออายุ
+                            </span>
+                          ) : r.tv_outcome === "ok" ? (
+                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700">เพิ่มให้จริง</span>
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          )}
                         </td>
                         <td className="px-3 py-2 text-slate-600">{r.transport === "direct" ? "ยิงตรง" : "n8n"}</td>
                         <td className="px-3 py-2 font-medium text-slate-800">{r.action}</td>

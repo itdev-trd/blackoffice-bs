@@ -18,7 +18,9 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { hasFullData, authorizeRequest } from "../_shared/permissions.ts";
 import { readJsonBody } from "../_shared/security.ts";
-import { tvValidate, tvListUsers, tvCheckAccess, tvGrant, tvRevoke, tvPing } from "../_shared/tradingview-direct.ts";
+import { tvValidate, tvListUsers, tvCheckAccess, tvGrant, tvRevoke, tvPing,
+  tvExtend,
+} from "../_shared/tradingview-direct.ts";
 
 const URL_KEY = "n8n_tv_webhook_url";
 // สวิตช์เลือกทางคุยกับ TradingView: "direct" = ยิงตรงจากที่นี่ · "n8n" = ผ่าน webhook แบบเดิม
@@ -110,6 +112,7 @@ async function callTv(payload: Record<string, unknown>, cookie: BrandCookie = {}
       const exp = payload.expiration === undefined ? null : (payload.expiration as string | null);
       const r =
         action === "grant"        ? await tvGrant(username!, pine_id!, exp, cookie)
+      : action === "extend"       ? await tvExtend(username!, pine_id!, exp, cookie)
       : action === "revoke"       ? await tvRevoke(username!, pine_id!, cookie)
       : action === "validate"     ? await tvValidate(username!, cookie)
       : action === "check_access" ? await tvCheckAccess(username!, pine_id!, cookie)
@@ -214,6 +217,16 @@ async function verifyTvAccessRow(
   };
   const tvGrantedAt = normalizeTvExpiration(res.tv_granted_at);
   if (tvGrantedAt !== undefined) verifyPatch.tv_granted_at = tvGrantedAt;
+  // เก็บ "วันหมดอายุที่ TradingView มีจริง" แยกจากค่าที่เราตั้งใจให้
+  // ถ้าสองค่านี้ไม่ตรงกัน = ปลายทางไม่ได้เปลี่ยนตามที่สั่ง ต้องเห็นได้ ไม่ใช่ขึ้นว่าสำเร็จเฉย ๆ
+  const tvExpiration = normalizeTvExpiration(res.expiration);
+  if (tvExpiration !== undefined) {
+    verifyPatch.tv_expiration = tvExpiration;
+    if (tvExpiration && new Date(tvExpiration).getTime() <= Date.now()) {
+      verifyPatch.tv_access_verified = false;
+      verifyPatch.tv_verify_error = `TradingView ยังบันทึกว่าหมดอายุ ${new Date(tvExpiration).toLocaleDateString("th-TH")} — สิทธิ์นี้ใช้งานจริงไม่ได้`;
+    }
+  }
   await db.from("tv_access").update(verifyPatch).eq("id", row.id);
   return { ok: true, found, ...(error ? { error } : {}), ...(tvGrantedAt !== undefined ? { tv_granted_at: tvGrantedAt } : {}), verified_at: nowIso };
 }
@@ -363,7 +376,31 @@ Deno.serve(async (req) => {
       if (body?.username) q = q.eq("username", String(body.username));
       const { data, error } = await q;
       if (error) return json({ ok: false, error: error.message }, 500);
-      return json({ ok: true, rows: data ?? [] });
+
+      // แนบชื่อสคริปต์ให้ด้วย — log เก็บแต่ pine_id ซึ่งอ่านไม่รู้เรื่องว่าเป็นอินดี้ตัวไหน
+      // (เดิมหน้าจอบอกแค่ "สำเร็จ" จึงไม่รู้ว่าสำเร็จของตัวไหน)
+      const { data: scriptRows } = await admin().from("tv_scripts").select("pine_id, name");
+      const nameByPine = new Map((scriptRows ?? []).map((x: any) => [String(x.pine_id), String(x.name || "")]));
+
+      // ผลจริงจาก TradingView: "exists" = มีสิทธิ์อยู่แล้ว ไม่ได้แก้อะไร (ไม่ได้ต่ออายุ!)
+      //                        "ok"     = เพิ่ม/เปลี่ยนให้จริง
+      // ต้องแยกให้เห็น เพราะทั้งสองกรณี HTTP เป็น 2xx และเดิมขึ้นว่า "สำเร็จ" เหมือนกันหมด
+      const tvOutcome = (row: any) => {
+        if (row?.action !== "grant") return null;
+        const text = String(row?.response || "");
+        if (/"exists"/.test(text)) return "exists";
+        if (/"ok"/.test(text)) return "ok";
+        return null;
+      };
+
+      return json({
+        ok: true,
+        rows: (data ?? []).map((r: any) => ({
+          ...r,
+          script: r.pine_id ? (nameByPine.get(String(r.pine_id)) || String(r.pine_id).slice(0, 12) + "…") : null,
+          tv_outcome: tvOutcome(r),
+        })),
+      });
     }
 
     // ---- จัดการแบรนด์ TradingView (คุกกี้/เพจ/โชว์ในหน้าจัดการ) ----
@@ -617,6 +654,19 @@ Deno.serve(async (req) => {
           const res = await callTv({ action: "grant", username, pine_id, expiration }, cookie, { actor: auth.permission?.email ?? null, brand_id });
           if (!res?.ok) { results.push({ pine_id, ok: false, error: res?.error || `n8n ตอบ: ${JSON.stringify(res).slice(0, 250)}` }); continue; }
           realUser = res.username || username;
+
+          // TradingView ตอบ "exists" = มีสิทธิ์อยู่แล้ว และ /pine_perm/add/ จะไม่แก้วันหมดอายุให้
+          // ถ้าไม่ยิง extend ต่อ การ "ต่ออายุ" จะไม่มีผลอะไรเลย แต่ระบบเดิมรายงานว่าสำเร็จ
+          // (เจอจริง: Besight One STR 62 รายหมดอายุ 3–7 ก.ย. ทั้งที่ในระบบขึ้น active ถึง 8 ต.ค.)
+          let extended = false;
+          if (res?.already === true) {
+            const ext = await callTv({ action: "extend", username: realUser, pine_id, expiration }, cookie, { actor: auth.permission?.email ?? null, brand_id });
+            if (!ext?.ok) {
+              results.push({ pine_id, ok: false, already: true, error: `มีสิทธิ์อยู่แล้วแต่ต่ออายุไม่สำเร็จ: ${ext?.error || "ไม่ทราบสาเหตุ"}` });
+              continue;
+            }
+            extended = true;
+          }
           // มีแถวเดิมอยู่แล้วไหม → ถ้ามี = "แก้ไข" (ไม่ทับคนเพิ่ม/วันเพิ่มเดิม แต่บันทึกคนแก้+เวลาแก้)
           //                       ถ้าไม่มี = "เพิ่มใหม่" (บันทึกคนเพิ่ม/วันเพิ่ม)
           const { data: existing } = await db.from("tv_access").select("id").eq("username", realUser).eq("pine_id", pine_id).maybeSingle();
@@ -641,7 +691,7 @@ Deno.serve(async (req) => {
           if (savedRowError || !savedRow) throw new Error(savedRowError?.message || "บันทึกสมาชิกแล้วแต่หาแถวเพื่อตรวจสิทธิ์ไม่พบ");
           // ให้สิทธิ์/ต่ออายุสำเร็จแล้วเช็กกับ TradingView ทันที ไม่ต้องรอ cron รอบเที่ยงคืน
           const verification = await verifyTvAccessRow(db, savedRow, cookie);
-          results.push({ pine_id, ok: true, verification });
+          results.push({ pine_id, ok: true, extended, verification });
         } catch (e) {
           results.push({ pine_id, ok: false, error: String(e instanceof Error ? e.message : e) });
         }
