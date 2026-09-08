@@ -1656,7 +1656,9 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
       setTagMsg(`บันทึกแท็กไม่สำเร็จ: ${error.message || "ตรวจสอบฐานข้อมูลแล้วลองใหม่"}`);
       return false;
     }
-    mirrorTagsToMeta(id);
+    // LINE/คอมเมนต์ ไม่มีป้ายกำกับฝั่ง Meta ให้ซิงก์ — ไม่ต้องยิงไปให้เสียเที่ยว
+    const src = selected?.id === id ? selected?.source : null;
+    if (src !== "line" && src !== "comment" && !String(id).startsWith("fbc_")) mirrorTagsToMeta(id);
     return true;
   }
 
@@ -1669,7 +1671,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   // ผลคือชื่อป้ายสองฝั่งเป็นชุดเดียวกัน แอดมินกดจากเว็บแล้วไปโผล่ใน Meta ตรงป้ายเดิม
   useEffect(() => {
     const pageId = selected?.page_id ? String(selected.page_id) : "";
-    if (!pageId || selected?.source === "line" || metaLabelPageRef.current === pageId) return;
+    if (!pageId || selected?.source === "line" || selected?.source === "comment" || metaLabelPageRef.current === pageId) return;
     metaLabelPageRef.current = pageId;
     let alive = true;
     (async () => {
@@ -1760,7 +1762,19 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     }
   }
   // แผงโน้ต/แท็ก/สรุปบทสนทนา — ใช้ร่วมกันทั้งแผงมือถือและแผงข้อมูลเดสก์ท็อป
-  const ConversationInsights = () => !selected ? null : (
+  //
+  // แยกระบบตามช่องทาง: ฝั่ง Meta (Messenger/Instagram) ใช้ "ระยะข้อมูลลูกค้า" + "ป้ายกำกับ"
+  // ที่ซิงก์ขึ้นไปได้จริง ส่วน LINE ใช้แท็กของระบบเราเท่านั้น
+  //
+  // ทำไม LINE ไม่ซิงก์: LINE Messaging API ไม่มี endpoint แท็กแชทเลย ตรวจแล้วด้วย token จริง
+  //   /v2/bot/chat/tags, /v2/bot/tag/list, /v2/bot/chat/{userId}/tag, /v2/bot/user/{userId}/tags
+  //   ตอบ 404 ทุกตัว ขณะที่ /v2/bot/profile/{userId} ตอบ 200 = ไม่ใช่เรื่องสิทธิ์ แต่ไม่มี API
+  //   แท็กใน LINE OA Manager อยู่แค่ในหน้าจอของ LINE เอง ดึงหรือส่งจากภายนอกไม่ได้
+  const ConversationInsights = () => !selected ? null : (() => {
+  const isLine = selected.source === "line";
+  const isComment = selected.source === "comment" || String(selected.id).startsWith("fbc_");
+  const metaSyncable = !isLine && !isComment;   // Messenger + Instagram
+  return (
     <div className="chat-insights space-y-2.5">
       <div>
         <div className="flex items-center justify-between text-xs text-night-ink-3 mb-1">
@@ -1780,6 +1794,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
           ชื่อทั้งห้าตรงกับชื่อระยะใน Leads Center ของ Meta ทุกตัว (มาใหม่ / มีคุณสมบัติ /
           สร้างคอนเวอร์ชั่นแล้ว / ลูกค้าเปิดบัญชีใหม่ / ไม่มีคุณสมบัติ) จึงเทียบกันได้ตรง ๆ
           Meta ไม่มี API ให้อ่านลิสต์ระยะ จึงยืนยันความตรงกันด้วยการใช้ชื่อชุดเดียวกัน */}
+      {metaSyncable && (
       <div>
         <div className="text-xs text-night-ink-3 mb-1">ระยะข้อมูลลูกค้า</div>
         <div className="flex flex-wrap gap-1.5">
@@ -1804,6 +1819,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
           })}
         </div>
       </div>
+      )}
       {/* สถานะการส่ง "ระยะข้อมูลลูกค้า" ขึ้น Meta — โชว์เฉพาะตอนมีการเปลี่ยนสถานะของห้องนี้ */}
       {stageSync?.id === selected.id && (
         <div className={`text-[11px] break-words ${
@@ -1819,7 +1835,9 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
         </div>
       )}
       <div>
-        <div className="text-xs text-night-ink-3 mb-1">แท็ก</div>
+        <div className="text-xs text-night-ink-3 mb-1">
+          {isLine ? "แท็ก (เฉพาะในระบบนี้)" : "ป้ายกำกับ (ซิงก์กับ Meta)"}
+        </div>
         {/* แท็กลัด — เช็คสถานะเปิดบัญชีได้ในคลิกเดียว ไม่ต้องพิมพ์เอง */}
         <div className="flex flex-wrap gap-1.5 mb-1.5">
           {QUICK_TAGS.map(({ label, opposite }) => {
@@ -1855,6 +1873,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
         })()}
         {/* ป้ายที่เพจมีอยู่แล้วใน Meta — กดเพื่อใช้ชื่อเดียวกัน จะได้ไม่เกิดป้ายชื่อซ้ำคนละตัว */}
         {(() => {
+          if (!metaSyncable) return null;
           const current = selected.tags || [];
           const suggestions = metaLabelNames.filter((n) => !current.includes(n)).slice(0, 12);
           return suggestions.length > 0 && (
@@ -1898,8 +1917,9 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
         )}
         {/* ข้อจำกัดที่ผู้ใช้ต้องรู้ล่วงหน้า ไม่งั้นจะรอป้ายจาก Meta ที่ไม่มีวันมา */}
         <div className="mt-1 text-[10px] text-night-ink-3 leading-relaxed">
-          ป้ายที่ติดในเว็บจะไปขึ้นใน Meta ให้อัตโนมัติ · แต่ถ้าไปติดป้ายในกล่องข้อความของ Meta เอง
-          จะไม่เด้งกลับมาที่นี่ เพราะ Meta ไม่เปิดให้อ่านย้อน — ให้ติดป้ายจากหน้านี้เป็นหลัก
+          {isLine
+            ? "แชท LINE ใช้แท็กของระบบนี้เท่านั้น — LINE ไม่เปิด API แท็กแชท จึงดึงแท็กจาก LINE OA Manager มาไม่ได้ และแท็กที่ติดที่นี่ก็ไม่ไปขึ้นใน LINE"
+            : "ป้ายที่ติดในเว็บจะไปขึ้นใน Meta ให้อัตโนมัติ · แต่ถ้าไปติดป้ายในกล่องข้อความของ Meta เอง จะไม่เด้งกลับมาที่นี่ เพราะ Meta ไม่เปิดให้อ่านย้อน — ให้ติดป้ายจากหน้านี้เป็นหลัก"}
         </div>
       </div>
       <div className="pt-2 border-t border-night-border-subtle space-y-1.5">
@@ -1919,6 +1939,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
       </div>
     </div>
   );
+  })();
 
   function openMessageMenu(index, message, side) {
     const value = String(message?.t || "").trim() || (message?.img ? "[รูปภาพ]" : "");
