@@ -50,9 +50,16 @@
 
   <h2>Test account</h2>
   <div class="card">
-    <p>Sign in at <a href="https://blackoffice-bs.vercel.app">https://blackoffice-bs.vercel.app</a> with the
-      email and password provided in the App Review submission form. The account is limited to the inbox of a
-      single Page so that the reviewer sees exactly the flow being reviewed.</p>
+    <p>Sign in at <a href="https://blackoffice-bs.vercel.app">https://blackoffice-bs.vercel.app</a></p>
+    <table>
+      <tr><th scope="row">Email</th><td><code>metareview@traderidermedia.com</code></td></tr>
+      <tr><th scope="row">Password</th><td><code>BeSight-Review-2026</code></td></tr>
+    </table>
+    <p>This account is deliberately limited: it can open only <span class="th">ตอบแชท</span> (Inbox) and
+      <span class="th">ฟีด (คอมเมนต์)</span> (Feed), for one Page, and cannot reach settings or any other part
+      of the product. That is the smallest surface that still lets you test every permission we request.</p>
+    <p>There is no public sign-up — accounts are created by us for our own employees — so this reviewer
+      account is the only way in.</p>
   </div>
 
   <h2>Permission: pages_messaging</h2>
@@ -117,14 +124,17 @@
   </div>
 
   <div class="card note">
-    <h2 style="margin-top:0">One limitation the reviewer should know</h2>
-    <p>While the app only has <b>Standard Access</b> to <code>pages_messaging</code>, the Send API accepts our
-      replies <b>only</b> for recipients who have a role on the app. If you open a conversation from a member of
-      the public, the send will fail with the Meta error “This message is sent outside of allowed window” /
-      “app does not have permission”. That restriction is precisely why we are requesting Advanced Access.</p>
-    <p>To see a successful send during review, use the conversation belonging to an account that has a role on the
-      app — the screencast attached to this submission was recorded that way, and the reply is shown arriving in
-      Messenger on a phone.</p>
+    <h2 style="margin-top:0">You can complete the whole loop yourself</h2>
+    <p>No special setup is needed. From your own Facebook account, send a message to our Page
+      <b>BeSight</b>. Your message arrives in this console within a few seconds. Open it, type a reply,
+      press <span class="th">ส่ง</span> (Send) — the reply arrives in Messenger on your own device.</p>
+    <p>That single loop exercises <code>pages_messaging</code> end to end: the <code>messages</code> webhook
+      that delivers your message, the console our staff read it in, and the Send API call that answers it.
+      The same works for Instagram — message the Instagram professional account linked to the same Page,
+      then answer from the <span class="th">Instagram</span> tab.</p>
+    <p>Replies are sent with <code>messaging_type: RESPONSE</code> inside the standard 24-hour window.
+      If you come back to a conversation more than 24 hours later, the console will tell you the window
+      has closed instead of silently failing.</p>
   </div>
 
   <div class="card">
