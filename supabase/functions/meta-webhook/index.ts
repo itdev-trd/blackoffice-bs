@@ -752,12 +752,13 @@ Deno.serve(async (req) => {
           const adIds = ads.map((a) => a.ad_id);
           const adNames = ads.map((a) => a.ad_name).filter(Boolean);
           const primaryAd = ads[0] || null;
-          const { data: existing } = await admin.from("chat_customers").select("id, transcript").eq("id", rowId).maybeSingle();
+          const { data: existing } = await admin.from("chat_customers").select("id, transcript, comment_from_id").eq("id", rowId).maybeSingle();
           if (existing) {
             const tr = Array.isArray(existing.transcript) ? existing.transcript : [];
             const nextTr = v.verb === "edited" ? tr : [...tr, { w: "u", t: text, at: atIso }].slice(-80);
             await admin.from("chat_customers").update({
               source: "comment", comment_promoted_to_inbox: false,
+              comment_from_id: existing.comment_from_id || fromId,   // เผื่อแถวเก่าก่อนมีคอลัมน์นี้ยังไม่เคยเก็บไว้
               last_user_text: text, last_message_at: atIso, comment_permalink: permalink,
               comment_post_id: postId, entry_ad_id: primaryAd?.ad_id || null, comment_ad_name: primaryAd?.ad_name || null,
               comment_ad_ids: adIds, comment_ad_names: adNames, transcript: nextTr,
@@ -768,6 +769,7 @@ Deno.serve(async (req) => {
             await admin.from("chat_customers").insert({
               id: rowId, source: "comment", page_id: pageId, page_name: pageName,
               psid: null, customer_name: v.from?.name || "(ผู้คอมเมนต์)",   // ยังไม่มี PSID ส่ง Messenger จริง (ได้จาก private reply ตอนตอบ)
+              comment_from_id: fromId,   // ใช้แท็ก @[user_id] ตอนตอบใต้คอมเมนต์ ให้เหมือนตอบผ่านเพจเอง
               last_user_text: text, last_message_at: atIso,
               comment_post_id: postId, comment_permalink: permalink,
               entry_ad_id: primaryAd?.ad_id || null, comment_ad_name: primaryAd?.ad_name || null,

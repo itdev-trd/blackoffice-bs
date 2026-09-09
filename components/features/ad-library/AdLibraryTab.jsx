@@ -105,7 +105,7 @@ function adLibraryWebUrl(terms, country, status) {
 // Meta ตอบเรื่องสิทธิ์มาเป็นภาษาอังกฤษล้วน แปลให้เป็นสิ่งที่ผู้ใช้ลงมือทำต่อได้
 function explainError(message) {
   if (/permission|not authorized|OAuth/i.test(message)) {
-    return "แอป Meta ยังไม่ได้รับสิทธิ์ใช้ Ad Library API — ต้องเพิ่มโปรดักต์ “Ad Library API” ในแอป ขอสิทธิ์ ads_read และยืนยันตัวตน/ธุรกิจกับ Meta ก่อน ระหว่างนี้กดปุ่มด้านขวาเพื่อเปิดดูในเว็บ Ad Library ได้เลย";
+    return "ยังไม่มีสิทธิ์ค้น Ad Library — Meta ให้สิทธิ์นี้กับ “คนที่ยืนยันตัวตนแล้ว” ไม่ใช่กับแอปหรือธุรกิจ ให้ไปที่ ตั้งค่า → Meta แล้ววาง user token ของคนที่ยืนยันตัวตนที่ facebook.com/ID และลงทะเบียนที่ facebook.com/ads/library/api ไว้แล้ว ในช่อง “Token สำหรับดูโฆษณาคู่แข่ง” ระหว่างนี้กดปุ่มด้านขวาเพื่อเปิดดูในเว็บ Ad Library ได้เลย";
   }
   return message;
 }
@@ -267,14 +267,18 @@ export default function AdLibraryTab() {
         <div className="flex min-w-0 flex-col gap-2.5 rounded-2xl border border-amber-200 bg-amber-50/70 p-4 sm:flex-row sm:items-start">
           <Info size={16} className="mt-0.5 shrink-0 text-amber-600" />
           <div className="min-w-0 flex-1 text-[12.5px] leading-relaxed text-amber-900">
-            <div className="font-semibold">การค้นหาในระบบยังใช้ไม่ได้ — Meta ยังไม่อนุมัติสิทธิ์ Ad Library API</div>
+            <div className="font-semibold">การค้นหาในระบบยังใช้ไม่ได้ — ยังไม่มีสิทธิ์ค้น Ad Library</div>
             <div className="mt-1">
-              สิทธิ์นี้ Meta อนุมัติแยกจากสิทธิ์อื่นของแอป และเปิดเองในโค้ดไม่ได้ ต้องทำ 3 อย่างที่ฝั่ง Meta:
+              Meta ให้สิทธิ์นี้กับ <b>คนที่ยืนยันตัวตนแล้ว</b> ไม่ใช่กับแอปหรือธุรกิจ และเปิดเองในโค้ดไม่ได้ ต้องทำที่ฝั่ง Meta:
             </div>
             <ol className="ml-4 mt-1 list-decimal space-y-0.5">
               <li>ยืนยันตัวตน (ID verification) ที่ facebook.com/ID</li>
-              <li>ยืนยันธุรกิจใน Business Manager ให้ผ่าน</li>
-              <li>สมัครใช้ Ad Library API ที่ facebook.com/ads/library/api แล้วรอ Meta อนุมัติ</li>
+              <li>ลงทะเบียนใช้ Ad Library API ที่ facebook.com/ads/library/api</li>
+              <li>
+                เอา <b>user token</b> ของคนนั้น (สิทธิ์ ads_read) ไปวางที่ ตั้งค่า → Meta →
+                “Token สำหรับดูโฆษณาคู่แข่ง”
+                {apiStatus?.dedicated_token === false && " — ตอนนี้ยังใช้ token หลักซึ่งเป็น System User จึงถูกปฏิเสธ"}
+              </li>
             </ol>
             <div className="mt-1.5 text-[11.5px] text-amber-700">
               ตรวจครั้งล่าสุด {apiStatus.checked_at ? new Date(apiStatus.checked_at).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" }) : "—"}

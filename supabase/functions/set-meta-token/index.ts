@@ -2,12 +2,13 @@
 // ตั้ง/ต่ออายุ META access token จากหน้าเว็บแอป (ต้องล็อกอิน)
 //   action "save"   -> ตรวจสอบ token กับ Meta แล้วบันทึกลง app_secrets (ถ้าใช้ได้)
 //   action "status" -> เช็คสถานะ token ปัจจุบัน (ใช้ได้ไหม/หมดอายุเมื่อไหร่/ชื่อเจ้าของ) โดยไม่คืนค่า token ออกมา
+//   action "ad_library_status" / "save_ad_library" -> ดู/ตั้ง token แยกสำหรับค้น Ad Library (ดูโฆษณาคู่แข่ง)
 //   action "app_status" / "save_app" -> ดู/ตั้ง App ID + App Secret ของ Meta app (ใช้ตรวจลายเซ็น webhook
 //     และสร้าง app token สำหรับตั้ง callback URL) — ค่าที่บันทึกไม่เคยถูกส่งกลับหน้าเว็บ
 // token ถูกเก็บในตารางที่ฝั่ง client อ่านไม่ได้ (ดู migration app-secrets)
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { getMetaAppId, getMetaAppSecret, getMetaToken } from "../_shared/meta.ts";
+import { AD_LIBRARY_TOKEN_KEY, getMetaAppId, getMetaAppSecret, getMetaToken } from "../_shared/meta.ts";
 import { authorizeRequest } from "../_shared/permissions.ts";
 
 const GRAPH_VERSION = "v22.0"; // อัปจาก v19 (sunset ต้นปี 2026)
@@ -71,6 +72,46 @@ async function inspectMessagingToken(token: string) {
   };
 }
 
+// ตรวจ token ที่จะใช้ "ค้น Ad Library" — ต้องยิง /ads_archive จริงถึงจะรู้ว่าใช้ได้
+//
+// เช็คแค่ scopes ไม่พอ: ads_read ติ๊กมาครบก็ยังถูกปฏิเสธได้ เพราะ Meta ผูกสิทธิ์ตัวนี้กับ
+// "คนที่ยืนยันตัวตนแล้ว" (facebook.com/ID + ลงทะเบียนที่ facebook.com/ads/library/api)
+// ไม่ใช่กับแอปหรือธุรกิจ — และ System User token ไม่มีตัวตนให้ยืนยัน จึงผ่านไม่ได้เลย
+// ยิงคำค้นทดสอบ 1 ครั้ง (limit=1) แล้วบอกผลตรง ๆ ดีกว่าให้ผู้ใช้ไปเจอ error ที่หน้าค้นหา
+async function inspectAdLibraryToken(token: string) {
+  const me = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/me?fields=id,name&access_token=${token}`).then((r) => r.json());
+  if (me?.error) return { valid: false, error: me.error.message };
+  let app_id: string | null = null;
+  let app_name: string | null = null;
+  let token_type: string | null = null;
+  let expires_at: number | null = null;
+  let scopes: string[] = [];
+  try {
+    const dbg = await fetch(
+      `https://graph.facebook.com/${GRAPH_VERSION}/debug_token?input_token=${token}&access_token=${token}`
+    ).then((r) => r.json());
+    app_id = dbg?.data?.app_id ? String(dbg.data.app_id) : null;
+    app_name = dbg?.data?.application ? String(dbg.data.application) : null;
+    token_type = dbg?.data?.type ? String(dbg.data.type) : null;
+    expires_at = dbg?.data?.expires_at ?? null;
+    scopes = Array.isArray(dbg?.data?.scopes) ? dbg.data.scopes : [];
+  } catch (_e) { /* best-effort */ }
+  // คำค้นทดสอบ: ต้องเป็นคำที่มีโฆษณาจริงในไทยแน่ ๆ ไม่งั้นแยกไม่ออกว่า "ไม่มีสิทธิ์" หรือ "ไม่มีผลลัพธ์"
+  const probeUrl = `https://graph.facebook.com/${GRAPH_VERSION}/ads_archive`
+    + `?search_terms=${encodeURIComponent("insurance")}`
+    + `&ad_reached_countries=${encodeURIComponent('["TH"]')}`
+    + `&ad_active_status=ALL&fields=id,page_name&limit=1&access_token=${encodeURIComponent(token)}`;
+  const probe = await fetch(probeUrl).then((r) => r.json()).catch(() => ({ error: { message: "เรียก Meta ไม่สำเร็จ" } }));
+  const probeError: string | null = probe?.error ? String(probe.error.error_user_msg || probe.error.message) : null;
+  return {
+    valid: true, name: me?.name || null, id: me?.id || null, app_id, app_name, token_type, expires_at, scopes,
+    has_ads_read: scopes.length ? scopes.includes("ads_read") : null,
+    can_search: !probeError,
+    probe_error: probeError,
+    probe_count: Array.isArray(probe?.data) ? probe.data.length : 0,
+  };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
@@ -85,7 +126,7 @@ Deno.serve(async (req) => {
     // (บั๊กที่เจอจริง: messaging_status/save_messaging ไม่ได้อยู่ในลิสต์ → token ที่วางในช่อง
     //  "ตอบแชท" ถูกบันทึกทับ token หลักแทน และหน้าเว็บโชว์ "แอป: ไม่ทราบ · เห็น 0 เพจ"
     //  เพราะได้ผลลัพธ์ของ action save ที่ไม่มีฟิลด์เหล่านั้น)
-    const ACTIONS = ["status", "app_status", "save_app", "messaging_status", "save_messaging"];
+    const ACTIONS = ["status", "app_status", "save_app", "messaging_status", "save_messaging", "ad_library_status", "save_ad_library"];
     const action = ACTIONS.includes(String(body.action)) ? String(body.action) : "save";
 
     // ---------- App ID / App Secret ของ Meta app ----------
@@ -172,6 +213,41 @@ Deno.serve(async (req) => {
       if (!info.valid) throw new Error(`token ใช้ไม่ได้: ${info.error || "ไม่ทราบสาเหตุ"}`);
       if (!info.pages?.length) throw new Error("token นี้ไม่เห็นเพจใดเลย (ต้องมีสิทธิ์ pages_show_list + pages_messaging และเป็นแอดมินเพจ)");
       await admin.from("app_secrets").upsert({ key: "meta_messaging_token", value: tok, updated_at: new Date().toISOString() });
+      return new Response(JSON.stringify({ ok: true, saved: true, ...info }), { headers: { ...corsHeaders, "content-type": "application/json" } });
+    }
+
+    // ---- token สำหรับค้น Ad Library โดยเฉพาะ (แยกจาก token หลักที่เป็น System User) ----
+    if (action === "ad_library_status") {
+      const { data: row } = await admin.from("app_secrets").select("value, updated_at").eq("key", AD_LIBRARY_TOKEN_KEY).maybeSingle();
+      const tok = String(row?.value || "").trim();
+      if (!tok) return new Response(JSON.stringify({ ok: true, has_token: false }), { headers: { ...corsHeaders, "content-type": "application/json" } });
+      const info = await inspectAdLibraryToken(tok);
+      return new Response(JSON.stringify({ ok: true, has_token: true, updated_at: row?.updated_at ?? null, ...info }),
+        { headers: { ...corsHeaders, "content-type": "application/json" } });
+    }
+
+    if (action === "save_ad_library") {
+      const tok = String(body.token || "").trim();
+      // ส่งค่าว่างมา = เลิกใช้ token แยก กลับไปใช้ token หลัก
+      if (!tok) {
+        await admin.from("app_secrets").delete().eq("key", AD_LIBRARY_TOKEN_KEY);
+        return new Response(JSON.stringify({ ok: true, cleared: true }), { headers: { ...corsHeaders, "content-type": "application/json" } });
+      }
+      const info = await inspectAdLibraryToken(tok);
+      if (!info.valid) throw new Error(`token ใช้ไม่ได้: ${info.error || "ไม่ทราบสาเหตุ"}`);
+      // ค้นไม่ได้แต่ยังให้บันทึกได้ (force) เพราะบางทีสิทธิ์เพิ่งอนุมัติแล้วยังไม่มีผลทันที
+      if (!info.can_search && body.force !== true) {
+        return new Response(JSON.stringify({ ok: false, error: `token นี้ยังค้น Ad Library ไม่ได้: ${info.probe_error}`, can_force: true, ...info }),
+          { headers: { ...corsHeaders, "content-type": "application/json" } });
+      }
+      await admin.from("app_secrets").upsert({ key: AD_LIBRARY_TOKEN_KEY, value: tok, updated_at: new Date().toISOString() });
+      // ค้นได้แล้วให้ล้างแบนเนอร์เตือนที่หน้าดูโฆษณาคู่แข่งทันที ไม่ต้องรอค้นครั้งแรก
+      if (info.can_search) {
+        await admin.from("settings").upsert({
+          key: "ad_library_api",
+          value: { ok: true, error: null, checked_at: new Date().toISOString(), dedicated_token: true },
+        }, { onConflict: "key" });
+      }
       return new Response(JSON.stringify({ ok: true, saved: true, ...info }), { headers: { ...corsHeaders, "content-type": "application/json" } });
     }
 

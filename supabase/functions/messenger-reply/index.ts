@@ -350,7 +350,7 @@ Deno.serve(async (req) => {
     const cfg: any = cfgRow?.value || {};
     const model = (typeof cfg.ai_model_reply === "string" && cfg.ai_model_reply) || (typeof cfg.ai_model_verify === "string" && cfg.ai_model_verify) || "gpt-4.1";
 
-    const { data: row } = await admin.from("chat_customers").select("id, page_id, page_name, psid, transcript, cust_lang, country, customer_name, profile_pic, unread, source, last_user_text, last_message_at, comment_post_id, comment_permalink, entry_ad_id, comment_ad_name").eq("id", id).maybeSingle();
+    const { data: row } = await admin.from("chat_customers").select("id, page_id, page_name, psid, transcript, cust_lang, country, customer_name, profile_pic, unread, source, last_user_text, last_message_at, comment_post_id, comment_permalink, entry_ad_id, comment_ad_name, comment_from_id").eq("id", id).maybeSingle();
     if (!row) throw new Error("ไม่พบบทสนทนา");
     // สิทธิ์ตอบแชทไม่ผูกกับเพจ — ใครเข้าหน้าตอบแชทได้ ก็ตอบได้ทุกเพจและทุก LINE OA
     const transcript = Array.isArray(row.transcript) ? row.transcript : [];
@@ -481,7 +481,9 @@ Deno.serve(async (req) => {
         replyText = stripLegacyMediaReplyPrefix(approvedText);
         if (!replyText) throw new Error("ยังไม่มีข้อความจะส่ง");
         lang = body?.approved_lang ? String(body.approved_lang) : (targetLang || "Thai");
-      } else if (targetLang === "Thai" || (!targetLang && isMostlyThai(lastUserText))) {
+      } else if (row.source === "line" || targetLang === "Thai" || (!targetLang && isMostlyThai(lastUserText))) {
+        // LINE OA ลูกค้าเกือบทั้งหมดเป็นคนไทย ไม่ต้องแปล — ห้ามใช้ heuristic ตรวจสัดส่วนอักษรของข้อความล่าสุด
+        // เพราะข้อความลูกค้าที่มีเลข/อีเมล/คำอังกฤษปนจะหลุด isMostlyThai แล้วโดนแปลเป็นภาษาอื่นทั้งที่เป็นแชทไทย
         // ภาษาที่บันทึกไว้เป็นไทย (หรือยังไม่มีค่าและข้อความล่าสุดเป็นไทย) → ส่งไทยตรง ๆ
         replyText = textTh; lang = "Thai";
       } else {
@@ -544,10 +546,12 @@ Deno.serve(async (req) => {
         send = { message_id: cr?.id || null };
       } else if (isComment && commentReplyMode === "public") {
         // ตอบใต้คอมเมนต์โดยตรงเหมือน Facebook Page (ต้องมี pages_manage_engagement)
+        // แท็ก @[user_id] นำหน้าเพื่อให้ขึ้นชื่อผู้คอมเมนต์เป็น mention สีน้ำเงิน เหมือนตอบผ่านเพจเองโดยตรง
         const commentId = id.replace(/^fbc_/, "");
+        const tagged = row.comment_from_id ? `@[${row.comment_from_id}] ${outText}` : outText;
         const cr = await fetchJson(`${GRAPH_BASE}/${commentId}/comments?access_token=${pageTok}`, {
           method: "POST", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ message: outText }),
+          body: JSON.stringify({ message: tagged }),
         });
         if (cr?.error) throw new Error(cr.error.error_user_msg || cr.error.message || "ตอบใต้คอมเมนต์ไม่สำเร็จ (ตรวจสิทธิ์ pages_manage_engagement)");
         send = { message_id: cr?.id || null };

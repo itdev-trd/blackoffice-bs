@@ -83,6 +83,34 @@ export async function getMetaMessagingToken(): Promise<string> {
   return (await getMetaMessagingContext()).token;
 }
 
+// ---------- token สำหรับ "ดูโฆษณาคู่แข่ง" (Ad Library API) แยกจาก token หลัก ----------
+//
+// ทำไมต้องแยก: /ads_archive ผูกสิทธิ์กับ "คนที่ยืนยันตัวตนกับ Meta แล้ว"
+// (ID verification + ลงทะเบียนที่ facebook.com/ads/library/api) ไม่ใช่กับแอปหรือธุรกิจ
+// token หลักของระบบเป็น System User ซึ่งไม่มีตัวตนให้ยืนยัน จึงถูกปฏิเสธตลอด
+// วาง user token ของคนที่ยืนยันตัวตนแล้วไว้ที่นี่ = ค้น Ad Library ได้ โดยงานโฆษณายังใช้ token หลักเดิม
+//
+// ไม่ได้ตั้ง = ใช้ token หลักเหมือนเดิม (พฤติกรรมเดิมไม่เปลี่ยน)
+export const AD_LIBRARY_TOKEN_KEY = "meta_ad_library_token";
+let cachedLibToken = "";
+let cachedLibTokenAt = 0;
+
+export async function getAdLibraryContext(): Promise<{ token: string; dedicated: boolean }> {
+  const now = Date.now();
+  if (cachedLibToken && now - cachedLibTokenAt < TOKEN_CACHE_MS) {
+    return { token: cachedLibToken, dedicated: true };
+  }
+  const fromDb = await readSecretRow(AD_LIBRARY_TOKEN_KEY);
+  if (fromDb.trim()) {
+    cachedLibToken = fromDb.trim();
+    cachedLibTokenAt = now;
+    return { token: cachedLibToken, dedicated: true };
+  }
+  cachedLibToken = "";
+  cachedLibTokenAt = now;
+  return { token: await getMetaToken(), dedicated: false };
+}
+
 // ---------- ข้อมูลของ "Meta app" (App ID / App Secret) ----------
 // ใช้ตรวจลายเซ็น webhook (x-hub-signature-256) และสร้าง app access token (`{app_id}|{app_secret}`)
 // สำหรับตั้ง callback URL ของ webhook — ตั้งจากหน้าเว็บได้เหมือน token เพื่อไม่ต้องเข้าไปแก้ env

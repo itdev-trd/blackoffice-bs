@@ -585,13 +585,17 @@ body { padding-top: var(--update-banner-h); }
 /* ความสูงจริงที่มองเห็น — KeyboardViewport ตั้งค่าจาก window.visualViewport
    ค่าเริ่มต้นเป็น 100dvh เพื่อให้หน้าเว็บถูกต้องตั้งแต่เฟรมแรกก่อน JS ทำงาน
    ใช้ตัวนี้กับกล่องที่ต้องเต็มจอ แทน 100dvh เพราะ 100dvh ไม่ย่อตามคีย์บอร์ด */
-:root { --app-vh: 100dvh; }
+:root { --app-vh: 100dvh; --app-vv-top: 0px; }
 /* กล่องเต็มจอบนมือถือ (ห้องแชท) — ย่อตามพื้นที่ที่เหลือจริงเมื่อคีย์บอร์ดเปิด
    ช่องพิมพ์ที่อยู่ท้ายกล่องจึงยังอยู่ในจอ ไม่หลุดไปใต้คีย์บอร์ด
    จำกัดไว้เฉพาะจอเล็ก เดสก์ท็อปใช้เลย์เอาต์การ์ดปกติ ไม่ต้องพึ่งค่านี้
-   (และไม่ต้องแข่ง specificity กับ lg:h-auto ของ Tailwind) */
+   (และไม่ต้องแข่ง specificity กับ lg:h-auto ของ Tailwind)
+
+   top: --app-vv-top = ระยะที่ iOS ดันพื้นที่มองเห็นลงมา (visualViewport.offsetTop)
+   position: fixed เกาะ layout viewport ซึ่ง iOS เลื่อนขึ้นเองตอนโฟกัสช่องพิมพ์
+   ถ้าไม่หักระยะนี้ กล่องทั้งใบจะลอยขึ้นไปเหนือจอ เห็นแต่ท่อนล่าง (ช่องพิมพ์) ค้างอยู่บนสุด */
 @media (max-width: 1023px) {
-  .app-screen { height: var(--app-vh); max-height: var(--app-vh); }
+  .app-screen { top: var(--app-vv-top); height: var(--app-vh); max-height: var(--app-vh); }
 }
 /* คีย์บอร์ดเปิด = ห้ามให้ body เลื่อนได้ ไม่งั้น iOS ดันจอทั้งใบขึ้นแล้วของที่ fixed หลุดกรอบ */
 html.keyboard-open, html.keyboard-open body { overflow: hidden; overscroll-behavior: none; }

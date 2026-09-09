@@ -34,10 +34,14 @@ export default function KeyboardViewport() {
       root.style.setProperty("--app-vh", `${Math.floor(vv.height)}px`);
       // เกิน 80px ถือว่าคีย์บอร์ดเปิด (แถบ URL ที่ยืดหดปกติไม่ถึงเท่านี้)
       const keyboardOpen = window.innerHeight - vv.height > 80;
-      root.classList.toggle("keyboard-open", keyboardOpen);
       // iOS เลื่อน layout viewport ขึ้นเพื่อโชว์ช่องพิมพ์ — ของที่ fixed จึงหลุดกรอบ
-      // ดึงกลับที่เดิม เพราะกล่องแชทย่อตาม --app-vh ให้ช่องพิมพ์อยู่ในจอแล้ว
-      if (keyboardOpen && (vv.offsetTop > 0 || window.scrollY > 0)) window.scrollTo(0, 0);
+      // ต้องดึงกลับ "ก่อน" ใส่คลาส keyboard-open เพราะ overflow:hidden ล็อกตำแหน่ง scroll ไว้
+      // แล้ว scrollTo หลังจากนั้นจะไม่มีผลบน iOS
+      if (keyboardOpen && window.scrollY > 0) window.scrollTo(0, 0);
+      // ระยะที่ iOS ดันพื้นที่มองเห็นลงมาจากขอบ layout viewport
+      // กล่องเต็มจอ (fixed) ต้องเกาะค่านี้ ไม่งั้นทั้งกล่องหลุดขึ้นไปเหนือจอตอนคีย์บอร์ดเปิด
+      root.style.setProperty("--app-vv-top", `${Math.round(vv.offsetTop)}px`);
+      root.classList.toggle("keyboard-open", keyboardOpen);
     };
 
     const schedule = () => {
@@ -54,6 +58,7 @@ export default function KeyboardViewport() {
       vv.removeEventListener("scroll", schedule);
       window.removeEventListener("orientationchange", schedule);
       root.style.removeProperty("--app-vh");
+      root.style.removeProperty("--app-vv-top");
       root.classList.remove("keyboard-open");
     };
   }, []);

@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { getMetaToken } from "../_shared/meta.ts";
+import { getAdLibraryContext } from "../_shared/meta.ts";
 import { authorizeRequest } from "../_shared/permissions.ts";
 import { RequestError, errorResponse, readJsonBody } from "../_shared/security.ts";
 
@@ -37,12 +37,14 @@ async function pageAll(url: string, token: string) {
 // จำไว้ว่า Meta ให้ใช้ Ad Library API แล้วหรือยัง เพื่อให้หน้าเว็บบอกผู้ใช้ได้ตั้งแต่ก่อนกดค้นหา
 // (สิทธิ์ตัวนี้ Meta ต้องอนุมัติแยก ไม่ใช่ของที่แก้ได้ในโค้ด — ถ้าไม่บอกไว้ก่อน
 //  คนใช้จะพิมพ์คำค้นแล้วไปเจอ error ทุกครั้งโดยไม่รู้ว่าต้องไปทำอะไรที่ไหน)
-async function noteApiStatus(ok: boolean, error?: string) {
+async function noteApiStatus(ok: boolean, error?: string, dedicatedToken?: boolean) {
   try {
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     await admin.from("settings").upsert({
       key: "ad_library_api",
-      value: { ok, error: error || null, checked_at: new Date().toISOString() },
+      // dedicated_token = ใช้ token แยกของคนที่ยืนยันตัวตนแล้วหรือยัง
+      // ถ้ายัง แล้วโดนปฏิเสธสิทธิ์ หน้าเว็บจะได้บอกว่าให้ไปวาง token ก่อน ไม่ใช่ให้ไปรอ Meta อนุมัติ
+      value: { ok, error: error || null, checked_at: new Date().toISOString(), dedicated_token: dedicatedToken ?? null },
     }, { onConflict: "key" });
   } catch { /* บันทึกสถานะไม่สำเร็จไม่ควรทำให้การค้นหาล้ม */ }
 }
@@ -57,7 +59,7 @@ Deno.serve(async (req) => {
     const countries = csv(body?.ad_reached_countries || "TH").map((v) => v.toUpperCase());
     if (!terms.length) throw new RequestError(400, "กรุณาใส่คีย์เวิร์ดหรือชื่อเพจอย่างน้อย 1 คำ", "missing_terms");
     if (!countries.length) throw new RequestError(400, "กรุณาเลือกประเทศอย่างน้อย 1 ประเทศ", "missing_country");
-    const token = await getMetaToken();
+    const { token, dedicated } = await getAdLibraryContext();
     if (!token) throw new RequestError(400, "ยังไม่ได้ตั้งค่า Meta access token ในหน้าตั้งค่า", "missing_token");
     const fields = [
       "id", "page_id", "page_name", "ad_creation_time", "ad_delivery_start_time", "ad_delivery_stop_time",
@@ -73,10 +75,10 @@ Deno.serve(async (req) => {
     });
     const result = await pageAll(`${GRAPH_BASE}/ads_archive?${params}`, token).catch(async (err) => {
       const message = err instanceof Error ? err.message : String(err);
-      if (/permission|not authorized|OAuth/i.test(message)) await noteApiStatus(false, message);
+      if (/permission|not authorized|OAuth/i.test(message)) await noteApiStatus(false, message, dedicated);
       throw err;
     });
-    await noteApiStatus(true);
+    await noteApiStatus(true, undefined, dedicated);
     const ads = result.rows.map((ad) => ({
       ...ad,
       reached_countries: countries,

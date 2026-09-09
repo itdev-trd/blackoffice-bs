@@ -627,6 +627,125 @@ export function MetaMessagingTokenPanel() {
   );
 }
 
+// token แยกสำหรับ "ดูโฆษณาคู่แข่ง" (Ad Library API)
+//
+// /ads_archive ผูกสิทธิ์กับ "คนที่ยืนยันตัวตนกับ Meta แล้ว" ไม่ใช่กับแอปหรือธุรกิจ
+// token หลักของระบบเป็น System User ซึ่งไม่มีตัวตนให้ยืนยัน จึงถูกปฏิเสธตลอดไม่ว่าจะติ๊ก ads_read ครบแค่ไหน
+// ระบบตรวจด้วยการยิงคำค้นทดสอบจริงก่อนบันทึก จะได้รู้ผลที่นี่ ไม่ใช่ไปเจอ error ที่หน้าค้นหา
+export function MetaAdLibraryTokenPanel() {
+  const [status, setStatus] = useState(null);
+  const [token, setToken] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
+  const [canForce, setCanForce] = useState(false);
+
+  async function loadStatus() {
+    const { data } = await supabase.functions.invoke("set-meta-token", { body: { action: "ad_library_status" } });
+    if (data?.ok) setStatus(data);
+  }
+  useEffect(() => { loadStatus(); }, []);
+
+  async function save({ clear = false, force = false } = {}) {
+    setBusy(true); setErr(""); setMsg(""); setCanForce(false);
+    const { data, error } = await supabase.functions.invoke("set-meta-token", {
+      body: { action: "save_ad_library", token: clear ? "" : token, force },
+    });
+    setBusy(false);
+    if (error) { setErr(await readFunctionErrorMessage(error)); return; }
+    if (!data?.ok) { setErr(data?.error || "บันทึกไม่สำเร็จ"); setCanForce(!!data?.can_force); return; }
+    setMsg(clear
+      ? "เลิกใช้ token แยกแล้ว — กลับไปใช้ token หลัก"
+      : data.can_search
+        ? `บันทึกแล้ว ✓ ค้น Ad Library ได้จริง · เจ้าของ ${data.name || "—"}`
+        : "บันทึกแล้ว (แต่ยังค้นไม่ได้ — รอสิทธิ์จาก Meta)");
+    setToken("");
+    loadStatus();
+  }
+
+  const exp = status?.expires_at ? new Date(status.expires_at * 1000).toLocaleDateString("th-TH") : null;
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-3">
+      <div>
+        <h3 className="font-semibold text-slate-800">Token สำหรับดูโฆษณาคู่แข่ง (Ad Library)</h3>
+        <p className="mt-1 text-xs text-slate-500">
+          Meta ให้สิทธิ์ค้น Ad Library กับ <b>คนที่ยืนยันตัวตนแล้ว</b> ไม่ใช่กับแอปหรือธุรกิจ —
+          token หลักของระบบเป็น System User จึงค้นไม่ได้ตลอด วาง <b>user token</b> ของคนที่ยืนยันตัวตนแล้วที่นี่
+          · งานโฆษณา/รายงานยังใช้ token หลักเดิม ไม่กระทบ
+        </p>
+      </div>
+
+      {status && (
+        <div className="text-xs">
+          {status.has_token ? (
+            <div className="space-y-1">
+              <div className={status.valid && status.can_search ? "text-emerald-700" : "text-rose-600"}>
+                ● {!status.valid
+                  ? `token มีปัญหา: ${status.error || "ใช้ไม่ได้"}`
+                  : status.can_search ? "ใช้ token แยกอยู่ · ค้นได้จริง" : "ตั้งไว้แล้วแต่ยังค้นไม่ได้"}
+              </div>
+              {status.valid && (
+                <div className="rounded-lg bg-slate-50 px-2 py-1.5 text-slate-600">
+                  เจ้าของ token: <b>{status.name || "—"}</b>
+                  {status.token_type ? ` · ชนิด ${status.token_type}` : ""}
+                  {exp ? ` · หมดอายุ ${exp}` : " · ไม่มีวันหมดอายุ"}
+                  <br />
+                  แอปที่ออก token: {status.app_name || "—"}
+                  {status.app_id ? <span className="font-mono"> ({status.app_id})</span> : null}
+                  {status.has_ads_read === false && (
+                    <div className="mt-1 text-amber-700">⚠ token นี้ไม่มีสิทธิ์ ads_read</div>
+                  )}
+                  {status.probe_error && (
+                    <div className="mt-1 text-rose-600">Meta ตอบ: {status.probe_error}</div>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : (
+            <span className="text-slate-500">● ยังไม่ได้ตั้ง — การค้นใช้ token หลักอยู่ (System User มักถูกปฏิเสธ)</span>
+          )}
+        </div>
+      )}
+
+      <PasswordInput
+        placeholder="วาง user token ของคนที่ยืนยันตัวตนกับ Meta แล้ว..."
+        value={token}
+        onChange={(e) => setToken(e.target.value)}
+        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+        autoComplete="off"
+      />
+      <div className="flex flex-wrap items-center gap-2">
+        <button onClick={() => save()} disabled={busy || !token.trim()}
+          className="flex items-center gap-2 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-60">
+          {busy ? <Loader2 className="animate-spin" size={16} /> : null} บันทึกและทดลองค้น
+        </button>
+        {/* สิทธิ์ที่ Meta เพิ่งอนุมัติบางทียังไม่มีผลทันที — ให้บันทึกค้างไว้ก่อนได้ */}
+        {canForce && (
+          <button onClick={() => save({ force: true })} disabled={busy}
+            className="rounded-lg border border-amber-400 px-3 py-2 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:opacity-60">
+            บันทึกทั้งที่ค้นยังไม่ได้
+          </button>
+        )}
+        {status?.has_token && (
+          <button onClick={() => save({ clear: true })} disabled={busy}
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-60">
+            เลิกใช้ (กลับไป token หลัก)
+          </button>
+        )}
+        {msg && <span className="text-sm text-emerald-700">{msg}</span>}
+      </div>
+      {err && <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-600">{err}</div>}
+      <p className="text-[11px] text-slate-400">
+        วิธีเอา token: developers.facebook.com/tools/explorer → เลือกแอป → <b>โทเค็นการเข้าถึงของผู้ใช้</b>
+        (ไม่ใช่ System User) → ติ๊ก <span className="font-mono">ads_read</span> → Generate Access Token ·
+        เจ้าตัวต้องยืนยันตัวตนที่ facebook.com/ID และลงทะเบียนที่ facebook.com/ads/library/api ให้ผ่านก่อน ·
+        token จาก Explorer อายุ ~1–2 ชม. ถ้าจะใช้ยาวให้แลกเป็น long-lived token (~60 วัน) ก่อนวาง
+      </p>
+    </div>
+  );
+}
+
 // App ID + App Secret ของ Meta app — ใช้ 2 อย่าง: ตรวจลายเซ็น webhook (x-hub-signature-256)
 // และสร้าง app access token สำหรับตั้ง callback URL ของ webhook
 // เดิมอยู่ใน env ของ edge function อย่างเดียว ทำให้ย้ายไปใช้ Meta app ตัวอื่นต้องเข้า Supabase ไปแก้เอง
