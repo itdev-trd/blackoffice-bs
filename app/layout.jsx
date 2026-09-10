@@ -3,6 +3,7 @@ import { Noto_Sans_Thai, Roboto } from "next/font/google";
 import UpdateBanner from "@/components/shared/UpdateBanner";
 import KeyboardViewport from "@/components/shared/KeyboardViewport";
 import AuthListener from "@/components/shared/AuthListener";
+import ServiceWorkerRegistrar from "@/components/shared/ServiceWorkerRegistrar";
 
 const notoSansThai = Noto_Sans_Thai({
   variable: "--font-noto-sans-thai",
@@ -56,6 +57,7 @@ export default function RootLayout({ children }) {
       </head>
       <body>
         <AuthListener />
+        <ServiceWorkerRegistrar />
         {children}
         <UpdateBanner />
         <KeyboardViewport />

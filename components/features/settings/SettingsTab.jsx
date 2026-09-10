@@ -29,6 +29,7 @@ import {
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from "@/lib/supabase/client";
 import { getDeviceId } from "@/lib/utils/activity";
 import { readFunctionErrorMessage } from "@/lib/utils/errors";
+import { serviceWorkerReady } from "@/lib/utils/service-worker";
 import Spinner from "@/components/shared/Spinner";
 import NumInput from "@/components/shared/NumInput";
 import { normalizeBrandConfig } from "@/components/features/generate/GenerateTab";
@@ -410,7 +411,8 @@ function PushNotificationPanel() {
   async function subscribeDevice() {
     if (location.protocol !== "https:") throw new Error("ต้องเปิดผ่าน https");
     if (!("serviceWorker" in navigator) || !("PushManager" in window)) throw new Error("เบราว์เซอร์นี้ไม่รองรับ Push (iPhone ต้องเพิ่มเป็นแอปหน้าจอโฮมก่อน)");
-    const reg = await navigator.serviceWorker.ready;
+    // ดู lib/utils/service-worker.js — navigator.serviceWorker.ready ค้างรอเงียบ ๆ ถ้า SW ไม่ติดตั้ง
+    const reg = await serviceWorkerReady();
     const { data: vk } = await supabase.functions.invoke("send-push", { body: { action: "vapid_public" } });
     if (!vk?.ok || !vk.key) throw new Error("backend ยังไม่มี VAPID key (ตั้ง secret + deploy send-push แล้วหรือยัง)");
     const b64 = vk.key.replace(/-/g, "+").replace(/_/g, "/").padEnd(vk.key.length + (4 - (vk.key.length % 4)) % 4, "=");

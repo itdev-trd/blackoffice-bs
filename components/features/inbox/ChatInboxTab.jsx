@@ -24,6 +24,7 @@ import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from "@/lib/supabase/client
 import { lsGet, lsSet } from "@/lib/utils/storage";
 import { logActivity, getDeviceId } from "@/lib/utils/activity";
 import { readFunctionErrorMessage } from "@/lib/utils/errors";
+import { serviceWorkerReady } from "@/lib/utils/service-worker";
 import Spinner from "@/components/shared/Spinner";
 import { TradeIdChecker, CustomerDataForm } from "@/components/features/customerdb/CustomerDatabaseTab";
 import MetaLabels from "@/components/features/inbox/MetaLabels";
@@ -310,7 +311,9 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
       if (location.protocol !== "https:") throw new Error("ต้องเปิดผ่าน https (Web Push ใช้บน http/localhost ไม่ได้)");
       if (!("serviceWorker" in navigator)) throw new Error("เบราว์เซอร์นี้ไม่รองรับ Service Worker");
       if (!("PushManager" in window)) throw new Error("เบราว์เซอร์นี้ไม่รองรับ Push (iOS ต้องเพิ่มเป็นแอปหน้าจอโฮมก่อน)");
-      const reg = await navigator.serviceWorker.ready;
+      // ผ่าน serviceWorkerReady ไม่ใช่ navigator.serviceWorker.ready ตรง ๆ — ตัวนั้นค้างรอตลอดกาล
+      // ถ้า SW ยังไม่ติดตั้ง ทำให้ปุ่มหมุนเงียบ ๆ โดยไม่บอกสาเหตุ
+      const reg = await serviceWorkerReady();
       const { data: vk } = await supabase.functions.invoke("send-push", { body: { action: "vapid_public" } });
       if (!vk?.ok || !vk.key) throw new Error("backend ยังไม่มี VAPID public key (ตั้ง secret + deploy send-push แล้วหรือยัง)");
       // แปลง base64url → Uint8Array
