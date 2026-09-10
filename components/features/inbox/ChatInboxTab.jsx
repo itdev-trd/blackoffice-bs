@@ -2991,7 +2991,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                 )}
                 <div className="relative">
                   <div className="flex items-end gap-2 rounded-lg border border-night-border bg-night-surface2 overflow-hidden pr-1.5 py-1.5">
-                    <textarea value={reply} onChange={(e) => { setReply(e.target.value); setSendPreview(null); notifyTyping(!e.target.value.trim()); }} onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) prepareSendPreview(); }} rows={2} placeholder="พิมพ์คำตอบเป็นไทย..." className="flex-1 bg-transparent border-0 px-3 py-1 text-sm resize-none focus:outline-none" />
+                    <textarea value={reply} onChange={(e) => { setReply(e.target.value); setSendPreview(null); notifyTyping(!e.target.value.trim()); }} onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) prepareSendPreview(); }} rows={2} placeholder="พิมพ์คำตอบเป็นไทย..." className="flex-1 bg-transparent border-0 px-3 py-1 text-sm leading-relaxed resize-none focus:outline-none" />
                     <button onClick={prepareSendPreview} disabled={sending || (!reply.trim() && pendingFiles.length === 0)} className="bg-night-accent text-white rounded-md px-3.5 py-2 text-sm font-semibold disabled:opacity-50 flex items-center gap-1.5 shrink-0 self-end">
                       {sending ? <Loader2 className="animate-spin" size={15} /> : (!reply.trim() && pendingFiles.length > 0) ? <ArrowUpCircle size={15} /> : <Send size={15} />} {(!reply.trim() && pendingFiles.length > 0) ? "ส่งรูป" : "ส่ง"}
                     </button>

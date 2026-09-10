@@ -737,7 +737,9 @@ html.keyboard-open, html.keyboard-open body { overflow: hidden; overscroll-behav
    ===================================================================== */
 @media (display-mode: standalone), (display-mode: fullscreen) {
   .app-header { padding-top: env(safe-area-inset-top); }
-  .chat-shell { padding-top: env(safe-area-inset-top); }
+  /* ไม่ใส่ .chat-shell ที่นี่ — มันเรนเดอร์อยู่ใต้ .app-header เสมอ (ดู ChatInboxTab)
+     .app-header กันชนแถบสถานะ/ติ่งจอไปแล้วชั้นหนึ่ง ถ้าใส่ซ้ำที่นี่อีกจะกลายเป็นเว้นสองชั้น
+     เกิดช่องว่างใหญ่เหนือหัวรายชื่อแชทตอนเพิ่มแอปลงหน้าจอโฮม (standalone) */
   .safe-top { padding-top: env(safe-area-inset-top); }
   .safe-x { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
 }
