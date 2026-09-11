@@ -2160,7 +2160,7 @@ async function exportTrackerExcel(campaignName, rows) {
   const HEADERS = ["Campaign", "ชุดโฆษณา", "โฆษณา", "ภาพ ADS", "จำนวนทักทั้งหมด", "การมีส่วนร่วม", "เฉลี่ยต่อทัก", "ค่าใช้จ่าย", "การเข้าถึง", "วันที่เปิด ADS", "วันที่ปิด ADS", "ลูกค้าที่สนใจ", "ลูกค้าที่เปิดบัญชี", "เฉลี่ยราคาต่อคน"];
   const lastCol = HEADERS.length; // 14 = N
 
-  report.columns = [18, 22, 26, 12, 14, 14, 13, 14, 12, 13, 13, 13, 15, 15].map((width) => ({ width }));
+  report.columns = [20, 24, 28, 20, 16, 16, 15, 16, 14, 15, 15, 15, 17, 17].map((width) => ({ width }));
   report.mergeCells(1, 1, 2, lastCol);
   report.getCell(1, 1).value = `สรุปงบยิงโฆษณา — ${campaignName}`;
   report.getCell(1, 1).font = { name: "Sarabun", size: 18, bold: true, color: { argb: white } };
@@ -2200,7 +2200,7 @@ async function exportTrackerExcel(campaignName, rows) {
     const rowNo = firstDataRow + idx;
     const row = report.getRow(rowNo);
     row.values = [campaignName, r.adset, r.ad, "", r.conversations, r.engagement, r.avgPerConvo, r.spend, r.reach, r.start, r.stopDate, r.leadsTotal, r.leadsOpened, r.avgPerOpened];
-    row.height = 58;
+    row.height = 82;
     const openedHere = r.leadsOpened > 0;
     row.eachCell({ includeEmpty: true }, (cell, col) => {
       cell.font = { name: "Sarabun", size: 9, color: { argb: navy } };
@@ -2339,7 +2339,7 @@ async function exportTrackerExcel(campaignName, rows) {
       if (!img) return;
       const rowNo = firstDataRow + idx + off;
       const imageId = wb.addImage(img);
-      report.addImage(imageId, { tl: { col: 3.12, row: rowNo - 0.9 }, ext: { width: 70, height: 70 }, editAs: "oneCell" });
+      report.addImage(imageId, { tl: { col: 3.15, row: rowNo - 0.92 }, ext: { width: 100, height: 100 }, editAs: "oneCell" });
     });
   }
 
