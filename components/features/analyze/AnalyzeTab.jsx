@@ -1987,7 +1987,10 @@ function trackerFileName(campaignName, ext) { return `งบยิงแอด-$
 const naturalNameCompare = (a, b) => String(a || "").localeCompare(String(b || ""), undefined, { numeric: true, sensitivity: "base" });
 
 async function fetchCampaignTree(ad, data, range) {
-  const preset = range ? rangeToBody(range) : { date_preset: "maximum" };
+  // refresh: true เสมอ — ฟังก์ชันนี้ใช้ตอน export เท่านั้น (ไม่ได้ใช้แสดงผลบนจอ) และ thumbnail_url
+  // ของ Meta เป็น URL เซ็นชื่อหมดอายุไว (นาทีถึงชั่วโมง) ถ้าใช้ค่าจาก cache ของ list-children
+  // (ปกติ 15 นาที) ตอนถึงเวลาฝังรูปจริงอาจหมดอายุไปแล้ว ดึงสดทุกครั้งจึงตัดปัญหานี้ที่ต้นตอ
+  const preset = range ? { ...rangeToBody(range), refresh: true } : { date_preset: "maximum", refresh: true };
   const campaignName = ad.level === "campaign" ? (ad.headline || ad.name || "") : (ad.campaign_name || ad.headline || ad.name || "");
   const rows = [];
   const mkRow = (adsetName, n) => {
