@@ -7,12 +7,15 @@ const cors = {
 };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...cors, "content-type": "application/json" } });
 
+// thumbnail_url ของ Meta ไม่ได้มาจาก fbcdn.net เสมอไป (โฆษณาบางรูปแบบ เช่น Reels/Stories
+// เสิร์ฟจากโฮสต์อื่นในเครือ Meta) — เผื่อโฮสต์ที่พบได้เพิ่มเพื่อไม่ให้รูปหายไปเงียบๆ ที่ฝั่งเรียกใช้
+const ALLOWED_IMAGE_HOSTS = ["facebook.com", "fbcdn.net", "fbsbx.com", "cdninstagram.com", "instagram.com"];
 function allowedImageUrl(value: string): URL | null {
   try {
     const url = new URL(value);
     const host = url.hostname.toLowerCase();
     if (url.protocol !== "https:") return null;
-    if (!(host === "facebook.com" || host.endsWith(".facebook.com") || host === "fbcdn.net" || host.endsWith(".fbcdn.net"))) return null;
+    if (!ALLOWED_IMAGE_HOSTS.some((h) => host === h || host.endsWith(`.${h}`))) return null;
     return url;
   } catch { return null; }
 }

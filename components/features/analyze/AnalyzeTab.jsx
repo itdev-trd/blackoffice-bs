@@ -2336,8 +2336,16 @@ async function exportTrackerExcel(campaignName, rows) {
     const batch = enriched.slice(idx, idx + 4);
     const images = await Promise.all(batch.map((r) => imageDataForWorkbook(r.thumb)));
     images.forEach((img, off) => {
-      if (!img) return;
       const rowNo = firstDataRow + idx + off;
+      if (!img) {
+        // โหลดรูปไม่สำเร็จ (URL หมดอายุ/โฮสต์ไม่อยู่ใน allowlist) หรือแอดนี้ไม่มีรูปเลย — บอกสาเหตุ
+        // ในเซลล์แทนปล่อยว่างเงียบๆ เพื่อให้แยกออกว่าควรไปเช็คแอดนั้นใน Meta หรือปล่อยผ่านได้
+        const cell = report.getCell(rowNo, 4);
+        cell.value = batch[off].thumb ? "โหลดรูปไม่สำเร็จ" : "ไม่มีรูป ADS";
+        cell.font = { name: "Sarabun", size: 8, italic: true, color: { argb: "94A3B8" } };
+        cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+        return;
+      }
       const imageId = wb.addImage(img);
       report.addImage(imageId, { tl: { col: 3.15, row: rowNo - 0.92 }, ext: { width: 100, height: 100 }, editAs: "oneCell" });
     });
