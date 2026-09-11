@@ -920,8 +920,10 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
       let all = [], from = 0;
       for (let guard = 0; guard < 200; guard++) {
         let query = supabase.from("chat_customers").select(EXPORT_DB_COLS.join(","));
+        // ชีต Excel ต้องเรียงวันที่จากน้อยไปมากเสมอ ไม่ผูกกับทิศทางที่ผู้ใช้ตั้งไว้บนตารางหน้าจอ
+        const exportAscending = exportFormat === "sheet" ? true : sortDir === "asc";
         query = applyFilters(query, { pageId: pageFilter, dateFilter: exportDateFilter, dateFrom: exportDateFrom, dateTo: exportDateTo })
-          .order(SORT_COL[sortKey] || "first_customer_message_at", { ascending: sortDir === "asc", nullsFirst: false }).range(from, from + B - 1);
+          .order(SORT_COL[sortKey] || "first_customer_message_at", { ascending: exportAscending, nullsFirst: false }).range(from, from + B - 1);
         const { data, error: e } = await query;
         if (e) { setError("Export ล้มเหลว: " + e.message); return; }
         all = all.concat(data || []);
