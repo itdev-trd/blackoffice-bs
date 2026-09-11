@@ -1982,6 +1982,10 @@ const money2 = (n) => Number(n).toLocaleString("en-US", { minimumFractionDigits:
 function trackerFileName(campaignName, ext) { return `งบยิงแอด-${String(campaignName || "campaign").replace(/[^\w ก-๙-]+/g, "_").slice(0, 40)}.${ext}`; }
 
 // ดึงทั้งทรีของแคมเปญ (ชุดโฆษณา→โฆษณา) ผ่าน list-children · ค่าใช้จ่าย = ตามช่วงเวลาที่เลือกในแดชบอร์ด
+// เรียงชื่อแบบ "เข้าใจตัวเลข" (Ad 2 มาก่อน Ad 10) — Meta คืนโฆษณามาตามลำดับที่สร้าง/แก้ไข
+// ล่าสุด ไม่ใช่ตามชื่อ ทำให้แต่ละชุดโฆษณาโชว์แอด 1/2/3 สลับมั่วเวลาส่งออก
+const naturalNameCompare = (a, b) => String(a || "").localeCompare(String(b || ""), undefined, { numeric: true, sensitivity: "base" });
+
 async function fetchCampaignTree(ad, data, range) {
   const preset = range ? rangeToBody(range) : { date_preset: "maximum" };
   const campaignName = ad.level === "campaign" ? (ad.headline || ad.name || "") : (ad.campaign_name || ad.headline || ad.name || "");
@@ -2003,11 +2007,13 @@ async function fetchCampaignTree(ad, data, range) {
       const { data: aset } = await supabase.functions.invoke("list-children", { body: { parent_id: ad.ad_id, level: "adsets", ...preset } });
       for (const adset of (aset?.nodes || [])) {
         const { data: adsRes } = await supabase.functions.invoke("list-children", { body: { parent_id: adset.id, level: "ads", ...preset } });
-        for (const a of (adsRes?.nodes || [])) rows.push(mkRow(adset.name, a));
+        const sorted = [...(adsRes?.nodes || [])].sort((a, b) => naturalNameCompare(a.name, b.name));
+        for (const a of sorted) rows.push(mkRow(adset.name, a));
       }
     } else if (ad.level === "adset" || ad.level === "adsets") {
       const { data: adsRes } = await supabase.functions.invoke("list-children", { body: { parent_id: ad.ad_id, level: "ads", ...preset } });
-      for (const a of (adsRes?.nodes || [])) rows.push(mkRow(ad.adset_name || ad.headline || "", a));
+      const sorted = [...(adsRes?.nodes || [])].sort((a, b) => naturalNameCompare(a.name, b.name));
+      for (const a of sorted) rows.push(mkRow(ad.adset_name || ad.headline || "", a));
     } else {
       // ระดับแอดเดี่ยว (เปิดแดชบอร์ดจากแอดตรงๆ) — ไม่ได้ผ่าน list-children จึงไม่มี conversations/engagement
       // ให้จาก buildMetrics แบบเดียวกัน มีแค่ spend/reach จาก ad-insights (ยอมรับว่าตัวเลขส่วนนี้จะเป็น 0)
@@ -2166,10 +2172,12 @@ async function exportTrackerExcel(campaignName, rows) {
   report.getCell(3, 1).font = { name: "Sarabun", size: 10, italic: true, color: { argb: slate } };
 
   const totalSpend = enriched.reduce((s, r) => s + r.spend, 0);
+  // ExcelJS เขียนสตริงนี้ลง XML <f> ตรงๆ — ต้อง "ไม่มี" เครื่องหมาย = นำหน้า (เดิมใส่ =A5+F5
+  // ไว้ผิด กลายเป็นสูตรที่ขึ้นต้นด้วย = ซ้อนกัน เปิดใน Excel/Sheets แล้วขึ้น #ERROR! ทุกครั้ง)
   const cards = [
     ["A4:D4", "A5:D6", "BG คงเหลือเดือนที่แล้ว", 0],
     ["F4:I4", "F5:I6", "BG เดือนนี้", 0],
-    ["K4:N4", "K5:N6", "ยอดรวม", { formula: "=A5+F5", result: 0 }],
+    ["K4:N4", "K5:N6", "ยอดรวม", { formula: "A5+F5", result: 0 }],
   ];
   for (const [labelRange, valueRange, label, value] of cards) {
     report.mergeCells(labelRange); report.mergeCells(valueRange);
@@ -2227,7 +2235,7 @@ async function exportTrackerExcel(campaignName, rows) {
   // และไปต่อกับบล็อกสรุปด้านล่าง/ซ้ายที่เหลือ (ไม่ต้องวน enriched ซ้ำหลายรอบ)
   const COL_FIELD = { E: "conversations", F: "engagement", H: "spend", I: "reach", L: "leadsTotal", M: "leadsOpened" };
   const sumCol = (col) => enriched.length
-    ? { formula: `=SUM(${col}${firstDataRow}:${col}${lastDataRow})`, result: enriched.reduce((s, r) => s + (r[COL_FIELD[col]] || 0), 0) }
+    ? { formula: `SUM(${col}${firstDataRow}:${col}${lastDataRow})`, result: enriched.reduce((s, r) => s + (r[COL_FIELD[col]] || 0), 0) }
     : 0;
   report.getCell(`E${totalRow}`).value = sumCol("E");
   report.getCell(`F${totalRow}`).value = sumCol("F");
@@ -2279,7 +2287,7 @@ async function exportTrackerExcel(campaignName, rows) {
   const remainRow = leftRow + leftRows.length;
   report.getCell(remainRow, 1).value = "คงเหลือ"; report.getCell(remainRow, 1).font = { name: "Sarabun", size: 10, bold: true }; report.getCell(remainRow, 1).border = thinBorder;
   const remainCell = report.getCell(remainRow, 2);
-  remainCell.value = { formula: `=B${leftRow}-B${leftRow + 5}` }; remainCell.numFmt = '#,##0.00" ฿"'; remainCell.font = { name: "Sarabun", size: 10, bold: true, color: { argb: green } }; remainCell.alignment = { horizontal: "right" }; remainCell.border = thinBorder;
+  remainCell.value = { formula: `B${leftRow}-B${leftRow + 5}`, result: null }; remainCell.numFmt = '#,##0.00" ฿"'; remainCell.font = { name: "Sarabun", size: 10, bold: true, color: { argb: green } }; remainCell.alignment = { horizontal: "right" }; remainCell.border = thinBorder;
   report.getCell(remainRow, 1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: paleGreen } }; remainCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: paleGreen } };
 
   // "บัตรจริง" = ยอดที่โดนตัดจริงจากใบแจ้งหนี้บัตร — กรอกเองเทียบกับ "รวม Vat." ที่คำนวณไว้ (ปกติควรใกล้เคียงกัน)
@@ -2293,7 +2301,7 @@ async function exportTrackerExcel(campaignName, rows) {
   const cardRemainRow = cardRow + 1;
   report.getCell(cardRemainRow, 1).value = "คงเหลือ"; report.getCell(cardRemainRow, 1).font = { name: "Sarabun", size: 10, bold: true }; report.getCell(cardRemainRow, 1).border = thinBorder;
   const cardRemainCell = report.getCell(cardRemainRow, 2);
-  cardRemainCell.value = { formula: `=B${leftRow}-B${cardRow}` }; cardRemainCell.numFmt = '#,##0.00" ฿"'; cardRemainCell.font = { name: "Sarabun", size: 10, bold: true, color: { argb: green } }; cardRemainCell.alignment = { horizontal: "right" }; cardRemainCell.border = thinBorder;
+  cardRemainCell.value = { formula: `B${leftRow}-B${cardRow}`, result: null }; cardRemainCell.numFmt = '#,##0.00" ฿"'; cardRemainCell.font = { name: "Sarabun", size: 10, bold: true, color: { argb: green } }; cardRemainCell.alignment = { horizontal: "right" }; cardRemainCell.border = thinBorder;
 
   // ---------- บล็อกขวา: ถอดบทเรียน ADS/ADMIN/CONTENT — เป็นแบบฟอร์มเปล่าให้ทีมกรอกเอง ระบบนี้ไม่มีข้อมูลนี้ให้เดา ----------
   const retroCol = 5; // เริ่มคอลัมน์ E ให้เว้นระยะจากบล็อกซ้าย
