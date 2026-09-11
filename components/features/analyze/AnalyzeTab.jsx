@@ -1993,6 +1993,9 @@ async function fetchCampaignTree(ad, data, range) {
     return {
       adset: adsetName || "", ad: n.name || "", thumb: n.thumbnail || "", ad_id: n.id || "", status: st,
       spend, start: gregDate(n.created_time), stopDate: stopped ? gregDate(n.updated_time) : "", stopped,
+      // reach/conversations/engagement มาจาก buildMetrics (_shared/ad-metrics.ts) ที่ list-children
+      // คำนวณมาให้อยู่แล้วต่อโหนด — ไม่ต้องยิง Meta เพิ่มสำหรับตัวเลขพวกนี้ตอน export
+      metrics: n.metrics || {},
     };
   };
   try {
@@ -2006,7 +2009,9 @@ async function fetchCampaignTree(ad, data, range) {
       const { data: adsRes } = await supabase.functions.invoke("list-children", { body: { parent_id: ad.ad_id, level: "ads", ...preset } });
       for (const a of (adsRes?.nodes || [])) rows.push(mkRow(ad.adset_name || ad.headline || "", a));
     } else {
-      rows.push(mkRow(ad.adset_name || "", { id: ad.ad_id, name: ad.name || ad.headline, metrics: { spend: data?.overall?.spend } }));
+      // ระดับแอดเดี่ยว (เปิดแดชบอร์ดจากแอดตรงๆ) — ไม่ได้ผ่าน list-children จึงไม่มี conversations/engagement
+      // ให้จาก buildMetrics แบบเดียวกัน มีแค่ spend/reach จาก ad-insights (ยอมรับว่าตัวเลขส่วนนี้จะเป็น 0)
+      rows.push(mkRow(ad.adset_name || "", { id: ad.ad_id, name: ad.name || ad.headline, metrics: { spend: data?.overall?.spend, reach: data?.overall?.reach } }));
     }
   } catch (_e) { /* ใช้ rows เท่าที่ดึงได้ */ }
   return { campaignName, rows };
@@ -2072,35 +2077,100 @@ async function imageDataForWorkbook(url) {
   }
 }
 
+// "d/m/yyyy" (gregDate) -> "yyyy-mm-dd" ใช้คิวรีช่วงวันจากวันที่ของแอดเอง เพราะบาง date_preset
+// (เดือนนี้/เดือนที่แล้ว) ไม่มี since/until ตรงๆ ให้แปลง — วันของแอดในรายงานนี้ตรงที่สุดอยู่แล้ว
+const dmyToIso = (s) => { const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(String(s || "")); return m ? `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}` : null; };
+// สถานะที่ถือว่า "เปิดบัญชีแล้ว" — ชุดเดียวกับ SHEET_STATUS ในหน้าจัดการลูกค้า (CustomerDatabaseTab)
+const TRACKER_OPENED_STAGES = new Set(["converted", "account_opened"]);
+const isOpenedStage = (row) => TRACKER_OPENED_STAGES.has(row.stage_manual || row.stage);
+
+// ดึงยอดลูกค้าที่ผูกกับแต่ละแอด (entry_ad_id) + ยอดรวม "ทั้งหมดแอดมิน" (ทุกช่องทาง ไม่ใช่แค่จากแอด)
+// ในช่วงเวลาเดียวกับที่แอดในรายงานนี้เปิดอยู่ — ใช้ต่อกับตัวเลขฝั่ง Meta (reach/conversations/engagement
+// ที่ list-children ดึงมาให้อยู่แล้วผ่าน buildMetrics ใน _shared/ad-metrics.ts ไม่ต้องยิง Meta เพิ่ม)
+async function fetchTrackerLeadStats(rows) {
+  const adIds = [...new Set(rows.map((r) => r.ad_id).filter(Boolean))];
+  const byAd = new Map(); // ad_id -> { total, opened }
+  if (adIds.length) {
+    const { data } = await supabase.from("chat_customers").select("entry_ad_id, stage, stage_manual").in("entry_ad_id", adIds);
+    for (const l of data || []) {
+      const bucket = byAd.get(l.entry_ad_id) || { total: 0, opened: 0 };
+      bucket.total += 1;
+      if (isOpenedStage(l)) bucket.opened += 1;
+      byAd.set(l.entry_ad_id, bucket);
+    }
+  }
+
+  const dates = rows.flatMap((r) => [dmyToIso(r.start), dmyToIso(r.stopDate)]).filter(Boolean).sort();
+  let adminTotal = 0, adminOpened = 0;
+  if (dates.length) {
+    const since = `${dates[0]}T00:00:00+07:00`;
+    const until = `${dates[dates.length - 1]}T23:59:59+07:00`;
+    const B = 1000;
+    for (let from = 0, guard = 0; guard < 50; guard++, from += B) {
+      const { data } = await supabase.from("chat_customers").select("stage, stage_manual")
+        .gte("first_customer_message_at", since).lte("first_customer_message_at", until)
+        .range(from, from + B - 1);
+      for (const l of data || []) { adminTotal += 1; if (isOpenedStage(l)) adminOpened += 1; }
+      if (!data || data.length < B) break;
+    }
+  }
+  return { byAd, adminTotal, adminOpened };
+}
+
 async function exportTrackerExcel(campaignName, rows) {
   // โหลด ExcelJS เฉพาะตอนกด Export เพื่อไม่เพิ่มภาระให้หน้า Analyze ตอนเปิดใช้งานปกติ
-  const { default: ExcelJS } = await import("exceljs");
+  const [{ default: ExcelJS }, { byAd, adminTotal, adminOpened }] = await Promise.all([import("exceljs"), fetchTrackerLeadStats(rows)]);
   const wb = new ExcelJS.Workbook();
   wb.creator = "Besight";
   wb.created = new Date();
   wb.calcProperties.fullCalcOnLoad = true;
 
-  const report = wb.addWorksheet("รายงานงบ Ads", {
+  // ต่อเลขฝั่ง Meta (จำนวนทักทั้งหมด/การมีส่วนร่วม/การเข้าถึง มาจาก buildMetrics ใน list-children อยู่แล้ว)
+  // เข้ากับเลขฝั่งเรา (ลูกค้าที่สนใจ/เปิดบัญชี จาก chat_customers.entry_ad_id) ต่อแอดหนึ่งตัว
+  // "จำนวนทักทั้งหมด" (Meta) กับ "ลูกค้าที่สนใจ" (DB) มักไม่เท่ากันเป๊ะโดยตั้งใจ — Meta นับ
+  // "บทสนทนาเริ่มต้น" ส่วน DB เก็บทุกคนที่เคยทักจริงตามที่ระบบผูก entry_ad_id ไว้ คนละตัวชี้วัดที่คู่กัน
+  const enriched = rows.map((r) => {
+    const conversations = Number(r.metrics?.conversations) || 0;
+    const engagement = Number(r.metrics?.engagement) || 0;
+    const reach = Number(r.metrics?.reach) || 0;
+    const spend = r.spend == null ? 0 : Number(r.spend);
+    const leads = byAd.get(r.ad_id) || { total: 0, opened: 0 };
+    return {
+      ...r, conversations, engagement, reach, spend,
+      leadsTotal: leads.total, leadsOpened: leads.opened,
+      avgPerConvo: conversations > 0 ? spend / conversations : 0,
+      avgPerOpened: leads.opened > 0 ? spend / leads.opened : 0,
+    };
+  });
+
+  const report = wb.addWorksheet("รายงานผล Ads", {
     views: [{ state: "frozen", ySplit: 8, showGridLines: false }],
     pageSetup: { orientation: "landscape", paperSize: 9, fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.25, right: 0.25, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2 } },
   });
   const raw = wb.addWorksheet("ข้อมูลดิบ", { views: [{ state: "frozen", ySplit: 1, showGridLines: false }] });
-  const navy = "172033", green = "256D5A", paleGold = "FFF2B8", paleGreen = "E6F4EE", white = "FFFFFF", slate = "475569", border = "CBD5E1";
+  const navy = "172033", green = "256D5A", paleGold = "FFF2B8", paleGreen = "E6F4EE", openedGreen = "E2F0D9", white = "FFFFFF", slate = "475569", border = "CBD5E1";
   const thinBorder = { top: { style: "thin", color: { argb: border } }, left: { style: "thin", color: { argb: border } }, bottom: { style: "thin", color: { argb: border } }, right: { style: "thin", color: { argb: border } } };
 
-  report.columns = [18, 24, 30, 13, 20, 20, 18, 18, 15, 15, 15, 28].map((width) => ({ width }));
-  report.mergeCells("A1:L2");
-  report.getCell("A1").value = `สรุปงบยิงโฆษณา — ${campaignName}`;
-  report.getCell("A1").font = { name: "Sarabun", size: 18, bold: true, color: { argb: white } };
-  report.getCell("A1").fill = { type: "pattern", pattern: "solid", fgColor: { argb: navy } };
-  report.getCell("A1").alignment = { vertical: "middle", horizontal: "left" };
-  report.getRow(1).height = 28; report.getRow(2).height = 18;
-  report.mergeCells("A3:L3");
-  report.getCell("A3").value = "กรอกเฉพาะช่องสีเหลือง · ช่องสีเขียวคำนวณอัตโนมัติ · ข้อมูลจาก Meta อยู่ในชีตข้อมูลดิบ";
-  report.getCell("A3").font = { name: "Sarabun", size: 10, italic: true, color: { argb: slate } };
+  const HEADERS = ["Campaign", "ชุดโฆษณา", "โฆษณา", "ภาพ ADS", "จำนวนทักทั้งหมด", "การมีส่วนร่วม", "เฉลี่ยต่อทัก", "ค่าใช้จ่าย", "การเข้าถึง", "วันที่เปิด ADS", "วันที่ปิด ADS", "ลูกค้าที่สนใจ", "ลูกค้าที่เปิดบัญชี", "เฉลี่ยราคาต่อคน"];
+  const lastCol = HEADERS.length; // 14 = N
 
-  const spendFormula = rows.length ? `=SUM(G9:G${8 + rows.length})` : "=0";
-  const cards = [["A4:B4", "A5:B6", "BG คงเหลือเดือนที่แล้ว", 0], ["D4:E4", "D5:E6", "BG เดือนนี้", 0], ["G4:H4", "G5:H6", "ยอดรวม", { formula: "=A5+D5", result: 0 }], ["J4:K4", "J5:K6", "ใช้จริงรวม", { formula: spendFormula, result: rows.reduce((s, r) => s + (Number(r.spend) || 0), 0) }]];
+  report.columns = [18, 22, 26, 12, 14, 14, 13, 14, 12, 13, 13, 13, 15, 15].map((width) => ({ width }));
+  report.mergeCells(1, 1, 2, lastCol);
+  report.getCell(1, 1).value = `สรุปงบยิงโฆษณา — ${campaignName}`;
+  report.getCell(1, 1).font = { name: "Sarabun", size: 18, bold: true, color: { argb: white } };
+  report.getCell(1, 1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: navy } };
+  report.getCell(1, 1).alignment = { vertical: "middle", horizontal: "left" };
+  report.getRow(1).height = 28; report.getRow(2).height = 18;
+  report.mergeCells(3, 1, 3, lastCol);
+  report.getCell(3, 1).value = "กรอกเฉพาะช่องสีเหลือง (BG/บัตรจริง) · ช่องอื่นดึง/คำนวณอัตโนมัติ · แถวสีเขียวอ่อน = แอดที่มีลูกค้าเปิดบัญชีแล้ว";
+  report.getCell(3, 1).font = { name: "Sarabun", size: 10, italic: true, color: { argb: slate } };
+
+  const totalSpend = enriched.reduce((s, r) => s + r.spend, 0);
+  const cards = [
+    ["A4:D4", "A5:D6", "BG คงเหลือเดือนที่แล้ว", 0],
+    ["F4:I4", "F5:I6", "BG เดือนนี้", 0],
+    ["K4:N4", "K5:N6", "ยอดรวม", { formula: "=A5+F5", result: 0 }],
+  ];
   for (const [labelRange, valueRange, label, value] of cards) {
     report.mergeCells(labelRange); report.mergeCells(valueRange);
     const lc = report.getCell(labelRange.split(":")[0]), vc = report.getCell(valueRange.split(":")[0]);
@@ -2109,49 +2179,153 @@ async function exportTrackerExcel(campaignName, rows) {
     vc.fill = { type: "pattern", pattern: "solid", fgColor: { argb: typeof value === "number" ? paleGold : paleGreen } };
   }
   report.getCell("A5").note = "กรอกงบคงเหลือที่ยกมาจากเดือนก่อน";
-  report.getCell("D5").note = "กรอกงบรวม VAT ของเดือนนี้";
-  for (const cell of ["A5", "D5"]) report.getCell(cell).dataValidation = { type: "decimal", operator: "greaterThanOrEqual", formulae: [0], allowBlank: true, showErrorMessage: true, errorTitle: "กรอกตัวเลขเท่านั้น", error: "กรุณากรอกจำนวนตั้งแต่ 0 ขึ้นไป" };
+  report.getCell("F5").note = "กรอกงบรวม VAT ที่เติมเข้ามาของเดือนนี้";
+  for (const cell of ["A5", "F5"]) report.getCell(cell).dataValidation = { type: "decimal", operator: "greaterThanOrEqual", formulae: [0], allowBlank: true, showErrorMessage: true, errorTitle: "กรอกตัวเลขเท่านั้น", error: "กรุณากรอกจำนวนตั้งแต่ 0 ขึ้นไป" };
 
-  const headerRow = 8, firstDataRow = 9, lastDataRow = 8 + rows.length, totalRow = Math.max(firstDataRow, lastDataRow + 1);
-  report.getRow(headerRow).values = TRACKER_HEADERS;
+  const headerRow = 8, firstDataRow = 9, lastDataRow = 8 + enriched.length, totalRow = Math.max(firstDataRow, lastDataRow + 1);
+  report.getRow(headerRow).values = HEADERS;
   report.getRow(headerRow).height = 42;
   report.getRow(headerRow).eachCell((cell) => { cell.font = { name: "Sarabun", size: 9, bold: true, color: { argb: white } }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: green } }; cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true }; cell.border = thinBorder; });
-  report.autoFilter = { from: { row: headerRow, column: 1 }, to: { row: Math.max(headerRow, lastDataRow), column: 12 } };
+  report.autoFilter = { from: { row: headerRow, column: 1 }, to: { row: Math.max(headerRow, lastDataRow), column: lastCol } };
 
-  rows.forEach((r, idx) => {
+  enriched.forEach((r, idx) => {
     const rowNo = firstDataRow + idx;
     const row = report.getRow(rowNo);
-    row.values = [campaignName, r.adset, r.ad, "", String(r.ad_id || ""), "", r.spend == null ? "" : Number(r.spend), "", r.start, r.stopDate, "", ""];
+    row.values = [campaignName, r.adset, r.ad, "", r.conversations, r.engagement, r.avgPerConvo, r.spend, r.reach, r.start, r.stopDate, r.leadsTotal, r.leadsOpened, r.avgPerOpened];
     row.height = 58;
-    row.eachCell({ includeEmpty: true }, (cell, col) => { cell.font = { name: "Sarabun", size: 9, color: { argb: navy } }; cell.alignment = { vertical: "middle", horizontal: [1, 2, 3, 12].includes(col) ? "left" : "center", wrapText: true }; cell.border = thinBorder; });
-    for (const col of [6, 11, 12]) row.getCell(col).fill = { type: "pattern", pattern: "solid", fgColor: { argb: paleGold } };
-    row.getCell(8).value = { formula: `=IF(F${rowNo}="","",F${rowNo}-G${rowNo})`, result: null };
-    row.getCell(8).fill = { type: "pattern", pattern: "solid", fgColor: { argb: paleGreen } };
-    for (const col of [6, 7, 8, 11]) row.getCell(col).numFmt = '#,##0.00" ฿"';
-    for (const col of [6, 11]) row.getCell(col).dataValidation = { type: "decimal", operator: "greaterThanOrEqual", formulae: [0], allowBlank: true, showErrorMessage: true, errorTitle: "กรอกตัวเลขเท่านั้น", error: "กรุณากรอกจำนวนตั้งแต่ 0 ขึ้นไป" };
-    if (r.stopDate) row.getCell(10).font = { name: "Sarabun", size: 9, bold: true, color: { argb: "DC2626" } };
+    const openedHere = r.leadsOpened > 0;
+    row.eachCell({ includeEmpty: true }, (cell, col) => {
+      cell.font = { name: "Sarabun", size: 9, color: { argb: navy } };
+      cell.alignment = { vertical: "middle", horizontal: [1, 2, 3].includes(col) ? "left" : "center", wrapText: true };
+      cell.border = thinBorder;
+      if (openedHere) cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: openedGreen } };
+    });
+    for (const col of [7, 8, 14]) row.getCell(col).numFmt = '#,##0.00" ฿"';
+    if (r.stopDate) row.getCell(11).font = { name: "Sarabun", size: 9, bold: true, color: { argb: "DC2626" } };
+  });
+  // แอดที่เพิ่งเปิดยังไม่มีแถวเลย (เช่น campaign ว่าง) กันตารางว่างล้วนดูแปลก
+  if (!enriched.length) { report.mergeCells(firstDataRow, 1, firstDataRow, lastCol); report.getCell(firstDataRow, 1).value = "ยังไม่พบโฆษณาในแคมเปญนี้"; }
+
+  // รวมเซลล์ Campaign (คอลัมน์เดียวทั้งตาราง — รายงานนี้มีแคมเปญเดียว) และ ชุดโฆษณา (ต่อกลุ่มที่ติดกัน)
+  if (enriched.length) {
+    report.mergeCells(firstDataRow, 1, lastDataRow, 1);
+    report.getCell(firstDataRow, 1).alignment = { vertical: "middle", horizontal: "center" };
+    let groupStart = firstDataRow;
+    for (let i = 1; i <= enriched.length; i++) {
+      const changed = i === enriched.length || enriched[i].adset !== enriched[i - 1].adset;
+      if (changed) {
+        const groupEnd = firstDataRow + i - 1;
+        if (groupEnd > groupStart) { report.mergeCells(groupStart, 2, groupEnd, 2); report.getCell(groupStart, 2).alignment = { vertical: "middle", horizontal: "center" }; }
+        groupStart = groupEnd + 1;
+      }
+    }
+  }
+
+  report.mergeCells(totalRow, 1, totalRow, 3);
+  report.getCell(totalRow, 1).value = "ผลรวม";
+  // คอลัมน์ตัวเลข -> ชื่อฟิลด์ใน enriched ที่ตรงกัน ใช้ผลรวมนี้ทั้งเป็น "result" ของสูตร Excel
+  // และไปต่อกับบล็อกสรุปด้านล่าง/ซ้ายที่เหลือ (ไม่ต้องวน enriched ซ้ำหลายรอบ)
+  const COL_FIELD = { E: "conversations", F: "engagement", H: "spend", I: "reach", L: "leadsTotal", M: "leadsOpened" };
+  const sumCol = (col) => enriched.length
+    ? { formula: `=SUM(${col}${firstDataRow}:${col}${lastDataRow})`, result: enriched.reduce((s, r) => s + (r[COL_FIELD[col]] || 0), 0) }
+    : 0;
+  report.getCell(`E${totalRow}`).value = sumCol("E");
+  report.getCell(`F${totalRow}`).value = sumCol("F");
+  const totalConversations = enriched.reduce((s, r) => s + r.conversations, 0);
+  const totalOpened = enriched.reduce((s, r) => s + r.leadsOpened, 0);
+  report.getCell(`G${totalRow}`).value = totalConversations > 0 ? totalSpend / totalConversations : 0; // เฉลี่ยต่อทัก = คำนวณจากยอดรวม ไม่ใช่ผลรวมของคอลัมน์เฉลี่ยรายแอด
+  report.getCell(`H${totalRow}`).value = sumCol("H");
+  report.getCell(`I${totalRow}`).value = sumCol("I");
+  report.getCell(`L${totalRow}`).value = sumCol("L");
+  report.getCell(`M${totalRow}`).value = sumCol("M");
+  report.getCell(`N${totalRow}`).value = totalOpened > 0 ? totalSpend / totalOpened : 0; // เฉลี่ยราคาต่อคน = เช่นกัน
+  report.getRow(totalRow).eachCell({ includeEmpty: true }, (cell) => { cell.font = { name: "Sarabun", size: 10, bold: true, color: { argb: navy } }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: paleGreen } }; cell.border = thinBorder; cell.alignment = { vertical: "middle", horizontal: "center" }; });
+  for (const col of ["G", "H", "N"]) report.getCell(`${col}${totalRow}`).numFmt = '#,##0.00" ฿"';
+
+  // ---------- บล็อกสรุปด้านล่างตาราง — ยอดจากแอด vs "ทั้งหมดแอดมิน" (ทุกช่องทาง ไม่ใช่แค่จากแอด) ----------
+  const belowRow1 = totalRow + 2, belowRow2 = belowRow1 + 1;
+  const belowCell = (row, col, label, value, opts = {}) => {
+    const lc = report.getCell(row, col), vc = report.getCell(row, col + 1);
+    lc.value = label; lc.font = { name: "Sarabun", size: 10, bold: true }; lc.alignment = { horizontal: "center", vertical: "middle" }; lc.border = thinBorder; lc.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "F1F5F9" } };
+    vc.value = value; vc.font = { name: "Sarabun", size: 10, bold: true, color: { argb: navy } }; vc.alignment = { horizontal: "center", vertical: "middle" }; vc.border = thinBorder;
+    if (opts.money) vc.numFmt = '#,##0.00" ฿"';
+  };
+  belowCell(belowRow1, 1, "ทักทั้งหมด", totalConversations);
+  belowCell(belowRow1, 3, "เฉลี่ยต่อทัก", totalConversations > 0 ? totalSpend / totalConversations : 0, { money: true });
+  belowCell(belowRow2, 1, "ทักทั้งหมดแอดมิน", adminTotal);
+  belowCell(belowRow2, 3, "รวม Vat.", totalSpend * 1.07, { money: true });
+  belowCell(belowRow2, 5, "เปิดบัญชี ทั้งหมดแอดมิน", adminOpened);
+  belowCell(belowRow2, 7, "เฉลี่ยราคาต่อคน (แอดมิน)", adminOpened > 0 ? (totalSpend * 1.07) / adminOpened : 0, { money: true });
+  // "ทักทั้งหมดแอดมิน"/"เปิดบัญชีทั้งหมดแอดมิน" นับทุกคนที่ทักเข้ามาในช่วงวันเดียวกับที่แอดในรายงานนี้เปิดอยู่
+  // ไม่ว่าจะมาจากแอดตัวไหนหรือไม่ได้มาจากแอดเลย — ต่างจากคอลัมน์ในตารางที่นับเฉพาะคนที่ผูกกับแอดนั้นๆ
+
+  // ---------- บล็อกซ้าย: กระทบยอดงบ (BG ยิงแอด vs ใช้จริง) ----------
+  const leftRow = belowRow2 + 3;
+  const bgTotalRef = "K5"; // อ้างค่า "ยอดรวม" การ์ดบนสุด แก้ที่การ์ดแล้วบล็อกนี้ขยับตาม
+  const leftRows = [
+    ["BG ยิงแอด", { formula: `=${bgTotalRef}` }],
+    ["จำนวนทักทั้งหมด", totalConversations],
+    ["การมีส่วนร่วมทั้งหมด", enriched.reduce((s, r) => s + r.engagement, 0)],
+    ["การเข้าถึงทั้งหมด", enriched.reduce((s, r) => s + r.reach, 0)],
+    ["ค่าใช้จ่ายทั้งหมด ไม่รวม Vat.", totalSpend],
+    ["ค่าใช้จ่ายทั้งหมด รวม Vat.", totalSpend * 1.07],
+  ];
+  leftRows.forEach(([label, value], i) => {
+    const r = leftRow + i;
+    report.getCell(r, 1).value = label; report.getCell(r, 1).font = { name: "Sarabun", size: 10 }; report.getCell(r, 1).border = thinBorder;
+    const vc = report.getCell(r, 2); vc.value = value; vc.font = { name: "Sarabun", size: 10, bold: true }; vc.alignment = { horizontal: "right" }; vc.border = thinBorder;
+    if (label.includes("รวม Vat.") || label === "BG ยิงแอด" || label.includes("ค่าใช้จ่าย")) vc.numFmt = '#,##0.00" ฿"';
+  });
+  const remainRow = leftRow + leftRows.length;
+  report.getCell(remainRow, 1).value = "คงเหลือ"; report.getCell(remainRow, 1).font = { name: "Sarabun", size: 10, bold: true }; report.getCell(remainRow, 1).border = thinBorder;
+  const remainCell = report.getCell(remainRow, 2);
+  remainCell.value = { formula: `=B${leftRow}-B${leftRow + 5}` }; remainCell.numFmt = '#,##0.00" ฿"'; remainCell.font = { name: "Sarabun", size: 10, bold: true, color: { argb: green } }; remainCell.alignment = { horizontal: "right" }; remainCell.border = thinBorder;
+  report.getCell(remainRow, 1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: paleGreen } }; remainCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: paleGreen } };
+
+  // "บัตรจริง" = ยอดที่โดนตัดจริงจากใบแจ้งหนี้บัตร — กรอกเองเทียบกับ "รวม Vat." ที่คำนวณไว้ (ปกติควรใกล้เคียงกัน)
+  const cardRow = remainRow + 2;
+  report.getCell(cardRow, 1).value = "บัตรจริง"; report.getCell(cardRow, 1).font = { name: "Sarabun", size: 10, bold: true }; report.getCell(cardRow, 1).border = thinBorder;
+  const cardCell = report.getCell(cardRow, 2);
+  cardCell.value = Math.round(totalSpend * 1.07 * 100) / 100; cardCell.numFmt = '#,##0.00" ฿"'; cardCell.font = { name: "Sarabun", size: 10, bold: true }; cardCell.alignment = { horizontal: "right" }; cardCell.border = thinBorder;
+  cardCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: paleGold } };
+  cardCell.note = "กรอกยอดจริงจากใบแจ้งหนี้บัตร ถ้าต่างจากที่คำนวณไว้ (เช่นค่าธรรมเนียมแลกเปลี่ยน)";
+  cardCell.dataValidation = { type: "decimal", operator: "greaterThanOrEqual", formulae: [0], allowBlank: true, showErrorMessage: true, errorTitle: "กรอกตัวเลขเท่านั้น", error: "กรุณากรอกจำนวนตั้งแต่ 0 ขึ้นไป" };
+  const cardRemainRow = cardRow + 1;
+  report.getCell(cardRemainRow, 1).value = "คงเหลือ"; report.getCell(cardRemainRow, 1).font = { name: "Sarabun", size: 10, bold: true }; report.getCell(cardRemainRow, 1).border = thinBorder;
+  const cardRemainCell = report.getCell(cardRemainRow, 2);
+  cardRemainCell.value = { formula: `=B${leftRow}-B${cardRow}` }; cardRemainCell.numFmt = '#,##0.00" ฿"'; cardRemainCell.font = { name: "Sarabun", size: 10, bold: true, color: { argb: green } }; cardRemainCell.alignment = { horizontal: "right" }; cardRemainCell.border = thinBorder;
+
+  // ---------- บล็อกขวา: ถอดบทเรียน ADS/ADMIN/CONTENT — เป็นแบบฟอร์มเปล่าให้ทีมกรอกเอง ระบบนี้ไม่มีข้อมูลนี้ให้เดา ----------
+  const retroCol = 5; // เริ่มคอลัมน์ E ให้เว้นระยะจากบล็อกซ้าย
+  const retroHeaderRow = leftRow;
+  report.mergeCells(retroHeaderRow, retroCol, retroHeaderRow, retroCol + 3);
+  report.getCell(retroHeaderRow, retroCol).value = "ถอดบทเรียนประจำเดือน (กรอกเอง)";
+  report.getCell(retroHeaderRow, retroCol).font = { name: "Sarabun", size: 11, bold: true, color: { argb: white } };
+  report.getCell(retroHeaderRow, retroCol).fill = { type: "pattern", pattern: "solid", fgColor: { argb: navy } };
+  report.getCell(retroHeaderRow, retroCol).alignment = { horizontal: "center", vertical: "middle" };
+  ["ADS", "ADMIN", "CONTENT"].forEach((team, i) => {
+    const r0 = retroHeaderRow + 1 + i * 2;
+    report.mergeCells(r0, retroCol, r0 + 1, retroCol);
+    report.getCell(r0, retroCol).value = team; report.getCell(r0, retroCol).font = { name: "Sarabun", size: 10, bold: true }; report.getCell(r0, retroCol).alignment = { horizontal: "center", vertical: "middle" }; report.getCell(r0, retroCol).border = thinBorder;
+    [["ความคิดเห็น", r0], ["แก้ปัญหา", r0 + 1]].forEach(([label, r]) => {
+      report.getCell(r, retroCol + 1).value = label; report.getCell(r, retroCol + 1).font = { name: "Sarabun", size: 9, bold: true }; report.getCell(r, retroCol + 1).alignment = { vertical: "middle" }; report.getCell(r, retroCol + 1).border = thinBorder;
+      report.mergeCells(r, retroCol + 2, r, retroCol + 3);
+      const cell = report.getCell(r, retroCol + 2);
+      cell.alignment = { vertical: "middle", wrapText: true }; cell.border = thinBorder;
+    });
   });
 
-  report.mergeCells(`A${totalRow}:F${totalRow}`);
-  report.getCell(`A${totalRow}`).value = "ผลรวม";
-  report.getCell(`G${totalRow}`).value = { formula: rows.length ? `=SUM(G${firstDataRow}:G${lastDataRow})` : "=0", result: rows.reduce((s, r) => s + (Number(r.spend) || 0), 0) };
-  report.getCell(`H${totalRow}`).value = { formula: rows.length ? `=SUM(H${firstDataRow}:H${lastDataRow})` : "=0", result: 0 };
-  report.getCell(`K${totalRow}`).value = { formula: rows.length ? `=SUM(K${firstDataRow}:K${lastDataRow})` : "=0", result: 0 };
-  report.getRow(totalRow).eachCell({ includeEmpty: true }, (cell) => { cell.font = { name: "Sarabun", size: 10, bold: true, color: { argb: navy } }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: paleGreen } }; cell.border = thinBorder; cell.alignment = { vertical: "middle", horizontal: "center" }; });
-  for (const col of [7, 8, 11]) report.getRow(totalRow).getCell(col).numFmt = '#,##0.00" ฿"';
-  if (rows.length) report.addConditionalFormatting({ ref: `H${firstDataRow}:H${lastDataRow}`, rules: [{ type: "cellIs", operator: "lessThan", formulae: [0], style: { font: { color: { argb: "DC2626" }, bold: true }, fill: { type: "pattern", pattern: "solid", bgColor: { argb: "FEE2E2" }, fgColor: { argb: "FEE2E2" } } } }] });
-
-  raw.columns = [22, 26, 34, 58, 20, 16, 16, 16, 16].map((width) => ({ width }));
-  raw.addRow(["Campaign", "ชุดโฆษณา", "โฆษณา", "URL รูป", "ID โฆษณา", "สถานะ", "ค่าใช้จ่าย", "วันที่เปิด", "วันที่ปิด"]);
-  rows.forEach((r) => raw.addRow([campaignName, r.adset, r.ad, r.thumb || "", String(r.ad_id || ""), r.status || "", r.spend == null ? "" : Number(r.spend), r.start, r.stopDate]));
+  raw.columns = [22, 26, 34, 58, 20, 16, 14, 14, 12, 12, 12, 14, 14, 14, 16].map((width) => ({ width }));
+  raw.addRow(["Campaign", "ชุดโฆษณา", "โฆษณา", "URL รูป", "ID โฆษณา", "สถานะ", "จำนวนทักทั้งหมด (Meta)", "การมีส่วนร่วม", "ค่าใช้จ่าย", "การเข้าถึง", "วันที่เปิด", "วันที่ปิด", "ลูกค้าที่สนใจ (DB)", "ลูกค้าที่เปิดบัญชี (DB)"]);
+  enriched.forEach((r) => raw.addRow([campaignName, r.adset, r.ad, r.thumb || "", String(r.ad_id || ""), r.status || "", r.conversations, r.engagement, r.spend, r.reach, r.start, r.stopDate, r.leadsTotal, r.leadsOpened]));
   raw.getRow(1).eachCell((cell) => { cell.font = { name: "Sarabun", size: 10, bold: true, color: { argb: white } }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: green } }; cell.alignment = { horizontal: "center", vertical: "middle" }; cell.border = thinBorder; });
-  raw.autoFilter = `A1:I${Math.max(1, rows.length + 1)}`;
-  raw.getColumn(7).numFmt = '#,##0.00" ฿"';
+  raw.autoFilter = `A1:N${Math.max(1, enriched.length + 1)}`;
+  raw.getColumn(9).numFmt = '#,##0.00" ฿"';
   raw.eachRow((row, rowNumber) => { if (rowNumber > 1) row.eachCell({ includeEmpty: true }, (cell) => { cell.font = { name: "Sarabun", size: 9 }; cell.border = thinBorder; cell.alignment = { vertical: "middle", wrapText: false }; }); });
 
   // ฝังรูปทีละภาพแบบจำกัด concurrency เพื่อลดโอกาสเบราว์เซอร์ค้างเมื่อแคมเปญมีโฆษณาจำนวนมาก
-  for (let idx = 0; idx < rows.length; idx += 4) {
-    const batch = rows.slice(idx, idx + 4);
+  for (let idx = 0; idx < enriched.length; idx += 4) {
+    const batch = enriched.slice(idx, idx + 4);
     const images = await Promise.all(batch.map((r) => imageDataForWorkbook(r.thumb)));
     images.forEach((img, off) => {
       if (!img) return;
