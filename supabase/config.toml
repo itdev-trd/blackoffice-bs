@@ -16,3 +16,7 @@ verify_jwt = false
 # ตอบแชท/คอมเมนต์ — ตรวจสิทธิ์เองผ่าน authorizeRequest (รับทั้ง user token และ service key)
 [functions.messenger-reply]
 verify_jwt = false
+
+# API ให้โปรเจกต์อื่นดึงข้อมูลลูกค้า — ตรวจ API key เองในโค้ด (ผู้เรียกเป็นเซิร์ฟเวอร์ ไม่มี JWT ของคน)
+[functions.crm-customers]
+verify_jwt = false
