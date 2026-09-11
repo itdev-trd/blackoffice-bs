@@ -105,24 +105,30 @@ Authorization: Bearer <api key>
 
 ---
 
-## ออกคีย์ใหม่ (ทำผ่าน SQL Editor ของ Supabase)
+## ออกคีย์ใหม่ — กดจากหน้าเว็บได้เลย
 
+**ตั้งค่า → การเชื่อมต่อและ API → API สำหรับแชร์ข้อมูล** (เห็นเมนูนี้เฉพาะ owner)
+
+1. ตั้งชื่อผู้เรียก (เช่น `besight-crm`)
+2. ติ๊กสิทธิ์ที่จะให้ — เลือกได้มากกว่า 1 อย่าง
+3. กด "สร้างคีย์" — คีย์ตัวจริงโชว์ในกล่องสีเขียว **ครั้งนี้ครั้งเดียว** กดคัดลอกแล้วเอาไปส่งให้ผู้รับทันที ปิดหน้าไปแล้วดูย้อนไม่ได้อีก (DB เก็บแค่ sha256 hash — ฐานข้อมูลรั่วก็ยังใช้คีย์ต่อไม่ได้)
+4. ถอนสิทธิ์ได้จากปุ่ม "ถอนสิทธิ์" ข้างชื่อคีย์ในลิสต์ — มีผลทันทีกับคำขอถัดไป
+
+ฝั่งหลังบ้านเป็น edge function [`manage-api-clients`](supabase/functions/manage-api-clients/index.ts) (`authorizeRequest({ owner: true })` — เฉพาะ owner เรียกได้) เรียกผ่าน `supabase.functions.invoke`
+
+**ทำผ่าน SQL Editor แทนก็ได้** ถ้าไม่อยากผ่านหน้าเว็บ:
 ```sql
--- 1) คิดคีย์ขึ้นมาเอง (ตัวอย่างรูปแบบ) แล้ว sha256 มันในเครื่องตัวเอง — เก็บแค่ hash ลง DB
---    เช่น: python3 -c "import secrets,hashlib; k='crm_'+secrets.token_urlsafe(32); print(k); print(hashlib.sha256(k.encode()).hexdigest())"
+-- คิดคีย์ขึ้นมาเอง (ตัวอย่างรูปแบบ) แล้ว sha256 มันในเครื่องตัวเอง — เก็บแค่ hash ลง DB
+--   python3 -c "import secrets,hashlib; k='crm_'+secrets.token_urlsafe(32); print(k); print(hashlib.sha256(k.encode()).hexdigest())"
 
 insert into public.api_clients (name, key_hash, scopes)
 values ('<ชื่อผู้เรียก>', '<sha256 hex ของคีย์>', '{tradingview:read}');
-```
 
-คีย์ตัวจริงไม่ถูกเก็บลง DB เลย — เห็นได้ครั้งเดียวตอนสร้าง ฐานข้อมูลรั่วก็ยังใช้คีย์ต่อไม่ได้
-
-**ถอนสิทธิ์:**
-```sql
+-- ถอนสิทธิ์
 update public.api_clients set revoked_at = now() where name = '<ชื่อผู้เรียก>';
 ```
 
-**คีย์ที่มีอยู่ตอนนี้** (ดูใน `api_clients`, ไม่มีคีย์ตัวจริงเก็บไว้ที่ไหนเลย ต้องไปหาในที่ที่เคยส่งให้ผู้รับ):
+**คีย์ที่มีอยู่ตอนนี้** (ดูใน `api_clients` หรือในหน้าเว็บ, ไม่มีคีย์ตัวจริงเก็บไว้ที่ไหนเลย ต้องไปหาในที่ที่เคยส่งให้ผู้รับ):
 - `besight-crm` — scopes ว่าง `{}` (เรียกอะไรไม่ได้จนกว่าจะเติม scope ให้)
 - `tradingview-share` — `{tradingview:read}` (สร้างไว้ให้ทดสอบ/แชร์ TradingView โดยเฉพาะ)
 

@@ -55,6 +55,7 @@ import {
   AiPromptsPanel,
   ChatSyncConfigPanel,
   PageLeadConfigPanel,
+  ApiClientsPanel,
   ScheduledJobsPanel,
   ReplyStatsPanel,
 } from "@/components/features/settings/SettingsPanelsB";
@@ -914,10 +915,11 @@ function TvAdminSettingsPanel() {
 
 function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages = null, onOpenChat }) {
   // allowedSettings = null → เห็นทุกหัวข้อ (admin) ; array → เห็นเฉพาะหัวข้อที่ได้รับสิทธิ์
-  // permissions/tv_settings/openai_key สงวนให้แอดมินสูงสุดเสมอ ต่อให้ติ๊กสิทธิ์ให้ก็ยังมองไม่เห็น
-  // (openai_key เป็นคีย์เดียวที่ทั้งระบบใช้ร่วมกัน ไม่ควรให้ผู้ใช้อื่นแก้ได้)
+  // permissions/tv_settings/openai_key/crm_api สงวนให้แอดมินสูงสุดเสมอ ต่อให้ติ๊กสิทธิ์ให้ก็ยังมองไม่เห็น
+  // (openai_key เป็นคีย์เดียวที่ทั้งระบบใช้ร่วมกัน ไม่ควรให้ผู้ใช้อื่นแก้ได้ · crm_api ออกคีย์ให้ระบบ
+  // ภายนอกดึงข้อมูลลูกค้าออกไปได้ ความเสี่ยงเทียบเท่า permissions — backend ก็ล็อกไว้ owner เท่านั้นอยู่แล้ว)
   const visibleSections = allowedSettings
-    ? SETTINGS_SECTIONS.filter((s) => s.key !== "permissions" && s.key !== "tv_settings" && s.key !== "openai_key" && allowedSettings.includes(s.key))
+    ? SETTINGS_SECTIONS.filter((s) => s.key !== "permissions" && s.key !== "tv_settings" && s.key !== "openai_key" && s.key !== "crm_api" && allowedSettings.includes(s.key))
     : SETTINGS_SECTIONS;
   const [section, setSection] = useState(() => visibleSections[0]?.key || "general");
   const [sectionQuery, setSectionQuery] = useState("");
@@ -1047,7 +1049,7 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
   const cur = visibleSections.find((s) => s.key === section) || visibleSections[0];
   const filteredSections = visibleSections.filter((s) => s.label.toLowerCase().includes(sectionQuery.trim().toLowerCase()));
   const settingsGroups = [
-    { label: "การเชื่อมต่อและ API", keys: ["meta", "openai_key", "line"] },
+    { label: "การเชื่อมต่อและ API", keys: ["meta", "openai_key", "line", "crm_api"] },
     { label: "แชทและการตอบกลับ", keys: ["leadfields", "synccfg", "ghost", "savedreplies", "chatmenu", "knowledge"] },
     { label: "AI และคอนเทนต์", keys: ["general", "ai_models", "ai_prompts", "brand"] },
     { label: "แคมเปญและการวิเคราะห์", keys: ["campaign", "decision", "prefetch", "replystats"] },
@@ -1177,6 +1179,7 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
       {section === "meta" && <MetaMessagingTokenPanel />}
       {section === "meta" && <MetaAdLibraryTokenPanel />}
       {section === "meta" && <MetaAppPanel />}
+      {section === "crm_api" && <ApiClientsPanel />}
       {section === "openai_key" && <OpenAIKeyPanel />}
       {section === "line" && <LineOAPanel />}
       {section === "permissions" && <PermissionsPanel />}

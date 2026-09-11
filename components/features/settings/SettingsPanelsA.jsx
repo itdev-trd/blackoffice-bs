@@ -949,7 +949,9 @@ export function PermissionsPanel() {
   const togglePage = (id) => setEditing((e) => ({ ...e, pages: e.pages.includes(id) ? e.pages.filter((x) => x !== id) : [...e.pages, id] }));
   const toggleSetting = (k) => setEditing((e) => ({ ...e, settings: e.settings.includes(k) ? e.settings.filter((x) => x !== k) : [...e.settings, k] }));
   // หัวข้อย่อยในตั้งค่าที่มอบสิทธิ์ได้ — ตัด "สิทธิ์ผู้ใช้" ออก (กันการมอบสิทธิ์ให้คนอื่นตั้งสิทธิ์เองซึ่งเป็นช่องยกระดับสิทธิ์)
-  const grantableSettings = SETTINGS_SECTIONS.filter((s) => s.key !== "permissions" && s.key !== "tv_settings");
+  // crm_api ออกคีย์ให้ระบบภายนอกดึงข้อมูลลูกค้า/TradingView ออกไปได้ — ระดับความเสี่ยงเดียวกับ
+  // permissions/tv_settings จึงกันไว้เหมือนกัน (มอบให้ได้เฉพาะ owner ผ่าน role ไม่ใช่ผ่านการติ๊ก)
+  const grantableSettings = SETTINGS_SECTIONS.filter((s) => s.key !== "permissions" && s.key !== "tv_settings" && s.key !== "crm_api");
 
   async function save() {
     if (!editing?.email) { setError("กรอกอีเมลก่อน"); return; }

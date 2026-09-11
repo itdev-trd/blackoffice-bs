@@ -562,6 +562,166 @@ export function PageLeadConfigPanel() {
   );
 }
 
+// สิทธิ์ที่คีย์ API ภายนอก (crm-customers) เลือกได้ — ต้องตรงกับ scope ที่ฟังก์ชันนั้นเช็คจริง
+// (supabase/functions/crm-customers/index.ts) เพิ่ม/ลบต้องแก้คู่กันทั้งสองฝั่ง
+const API_CLIENT_SCOPES = [
+  { key: "tradingview:read", label: "ข้อมูลลูกค้า TradingView", hint: "สิทธิ์อินดี้ trade id lot วันหมดอายุ — ไม่มีข้อมูลแชท" },
+  { key: "customers:read", label: "ข้อมูลลูกค้าจากแชท", hint: "ชื่อ เบอร์ อีเมล ระยะ ที่มาจากแอด" },
+  { key: "customers:transcript", label: "บทสนทนาเต็ม", hint: "ต้องเลือกคู่กับ \"ข้อมูลลูกค้าจากแชท\" — ให้เฉพาะเมื่อจำเป็นจริง" },
+];
+
+// ออก/ถอนคีย์ API ให้ระบบภายนอกดึงข้อมูลไป (CRM ของทีมอื่น ฯลฯ) — เฉพาะ owner เห็นเมนูนี้
+// เดิมต้องรันคำสั่ง SQL เองใน Supabase (สุ่มคีย์ + sha256 + insert มือ) ย้ายมาไว้ในเว็บแทน
+export function ApiClientsPanel() {
+  const [rows, setRows] = useState(null);
+  const [err, setErr] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newScopes, setNewScopes] = useState([]);
+  const [mintedKey, setMintedKey] = useState(null);   // { key, client } — โชว์ได้ครั้งเดียวตอนสร้างเสร็จ
+  const [copied, setCopied] = useState(false);
+  const [revokingId, setRevokingId] = useState(null);
+
+  async function load() {
+    setErr("");
+    const { data, error } = await supabase.functions.invoke("manage-api-clients", { body: { action: "list" } });
+    if (error || !data?.ok) { setErr(data?.error || (error ? await readFunctionErrorMessage(error) : "โหลดไม่สำเร็จ")); setRows([]); return; }
+    setRows(data.rows || []);
+  }
+  useEffect(() => { load(); }, []);
+
+  const toggleScope = (key) => setNewScopes((s) => (s.includes(key) ? s.filter((x) => x !== key) : [...s, key]));
+
+  async function create() {
+    setErr(""); setMintedKey(null);
+    const name = newName.trim();
+    if (!name) { setErr("ตั้งชื่อผู้เรียกก่อน (เช่น besight-crm)"); return; }
+    if (!newScopes.length) { setErr("เลือกสิทธิ์อย่างน้อย 1 อย่าง"); return; }
+    setCreating(true);
+    const { data, error } = await supabase.functions.invoke("manage-api-clients", { body: { action: "create", name, scopes: newScopes } });
+    setCreating(false);
+    if (error || !data?.ok) { setErr(data?.error || (error ? await readFunctionErrorMessage(error) : "สร้างคีย์ไม่สำเร็จ")); return; }
+    setMintedKey({ key: data.key, client: data.client });
+    setNewName(""); setNewScopes([]);
+    load();
+  }
+
+  async function revoke(row) {
+    if (!window.confirm(`ถอนสิทธิ์คีย์ "${row.name}"? คำขอที่ใช้คีย์นี้จะถูกปฏิเสธทันที`)) return;
+    setRevokingId(row.id); setErr("");
+    const { data, error } = await supabase.functions.invoke("manage-api-clients", { body: { action: "revoke", id: row.id } });
+    setRevokingId(null);
+    if (error || !data?.ok) { setErr(data?.error || (error ? await readFunctionErrorMessage(error) : "ถอนสิทธิ์ไม่สำเร็จ")); return; }
+    load();
+  }
+
+  async function copyKey() {
+    try { await navigator.clipboard.writeText(mintedKey.key); setCopied(true); setTimeout(() => setCopied(false), 2000); }
+    catch { /* บาง browser ต้อง HTTPS/permission — ให้ก็อปมือจากกล่องแทน */ }
+  }
+
+  const fmtT = (t) => { try { return t ? new Date(t).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" }) : "—"; } catch { return "—"; } };
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
+        <div>
+          <h3 className="font-semibold text-slate-800">API สำหรับแชร์ข้อมูลให้ระบบภายนอก</h3>
+          <p className="text-xs text-slate-500 mt-0.5">
+            ออกคีย์ให้ระบบอื่น (เช่น CRM ของทีมอื่น) ดึงข้อมูลไปทาง <code className="font-mono text-[11px]">crm-customers</code> —
+            เลือกได้ว่าคีย์นั้นเห็นเฉพาะส่วนไหน คีย์อยู่ในหน้าเว็บ/แอปมือถือไม่ได้ ใช้ได้เฉพาะระบบเซิร์ฟเวอร์ต่อเซิร์ฟเวอร์เท่านั้น
+          </p>
+        </div>
+
+        {err && <div className="text-sm text-rose-600 bg-rose-50 rounded-lg px-3 py-2">{err}</div>}
+
+        {/* คีย์ที่เพิ่งสร้าง — โชว์ได้ครั้งนี้ครั้งเดียว หลังจากนี้ระบบไม่มีทางดึงมาดูซ้ำได้อีก */}
+        {mintedKey && (
+          <div className="rounded-xl border-2 border-emerald-300 bg-emerald-50/60 p-4 space-y-2">
+            <div className="text-sm font-semibold text-emerald-800">
+              สร้างคีย์ "{mintedKey.client?.name}" แล้ว — คัดลอกเก็บไว้ตอนนี้เลย
+            </div>
+            <p className="text-xs text-emerald-700">
+              เห็นได้ครั้งนี้ครั้งเดียว ปิดหน้านี้ไปแล้วดูย้อนไม่ได้อีก (ฐานข้อมูลเก็บแค่ hash) ถ้าทำหาย ต้องสร้างคีย์ใหม่แล้วถอนคีย์นี้ทิ้ง
+            </p>
+            <div className="flex items-center gap-2">
+              <code className="flex-1 min-w-0 truncate rounded-lg border border-emerald-300 bg-white px-3 py-2 text-xs font-mono text-slate-800">{mintedKey.key}</code>
+              <button onClick={copyKey} className="shrink-0 rounded-lg bg-emerald-600 text-white px-3 py-2 text-xs font-medium hover:bg-emerald-700">
+                {copied ? "คัดลอกแล้ว ✓" : "คัดลอก"}
+              </button>
+            </div>
+            <button onClick={() => setMintedKey(null)} className="text-xs text-emerald-700 hover:underline">ปิดกล่องนี้ (คัดลอกไว้แล้ว)</button>
+          </div>
+        )}
+
+        {/* ฟอร์มสร้างคีย์ใหม่ */}
+        <div className="rounded-xl border border-slate-200 p-4 space-y-3">
+          <div className="text-sm font-medium text-slate-700">สร้างคีย์ใหม่</div>
+          <input
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            placeholder="ชื่อผู้เรียก เช่น besight-crm"
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          />
+          <div className="space-y-2">
+            {API_CLIENT_SCOPES.map((s) => (
+              <label key={s.key} className="flex items-start gap-2.5 rounded-lg border border-slate-200 px-3 py-2 cursor-pointer hover:bg-slate-50">
+                <input type="checkbox" checked={newScopes.includes(s.key)} onChange={() => toggleScope(s.key)} className="mt-0.5" />
+                <div className="min-w-0">
+                  <div className="text-sm text-slate-800">{s.label}</div>
+                  <div className="text-[11px] text-slate-500">{s.hint}</div>
+                </div>
+              </label>
+            ))}
+          </div>
+          <button onClick={create} disabled={creating} className="bg-brand-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-brand-700 disabled:opacity-60 flex items-center gap-2">
+            {creating ? <Loader2 className="animate-spin" size={15} /> : null} สร้างคีย์
+          </button>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-3">
+        <h3 className="font-semibold text-slate-800">คีย์ที่ออกไว้แล้ว</h3>
+        {rows === null ? (
+          <Spinner label="กำลังโหลด..." />
+        ) : rows.length === 0 ? (
+          <div className="text-sm text-slate-400 py-4 text-center">ยังไม่มีคีย์ที่ออก</div>
+        ) : (
+          <div className="border border-slate-200 rounded-lg divide-y divide-slate-100">
+            {rows.map((r) => (
+              <div key={r.id} className="flex items-center justify-between gap-3 px-3 py-2.5 flex-wrap">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-slate-800 flex items-center gap-2 flex-wrap">
+                    {r.name}
+                    {r.revoked_at
+                      ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-100 text-rose-700">ถูกถอนสิทธิ์แล้ว</span>
+                      : <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">ใช้งานอยู่</span>}
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-0.5">
+                    {(r.scopes || []).length ? r.scopes.join(", ") : "ไม่มีสิทธิ์เลย (เรียกอะไรไม่ได้)"}
+                  </div>
+                  <div className="text-[11px] text-slate-400 mt-0.5">
+                    สร้างเมื่อ {fmtT(r.created_at)} · ใช้ล่าสุด {fmtT(r.last_used_at)}
+                  </div>
+                </div>
+                {!r.revoked_at && (
+                  <button
+                    onClick={() => revoke(r)}
+                    disabled={revokingId === r.id}
+                    className="shrink-0 text-xs text-rose-600 hover:underline disabled:opacity-50"
+                  >
+                    {revokingId === r.id ? "กำลังถอน..." : "ถอนสิทธิ์"}
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // จัดการงานอัตโนมัติ (cron) ผ่านแอป — เปิด/ปิด + ตั้งความถี่ + ดูรันล่าสุด
 const CRON_FREQ = [
   { v: "*/15 * * * *", l: "ทุก 15 นาที" },
