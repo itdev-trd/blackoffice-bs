@@ -461,6 +461,136 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
 // ---------------------------------------------------------------
 const SOURCE_LABELS = { ad: "โฆษณา", organic: "ออร์แกนิก", unknown: "ไม่ทราบ" };
 
+const THAI_MONTHS = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
+// "YYYY-MM-DD" -> "d/m/yyyy" ให้ตรงรูปแบบวันที่อื่นในชีต (sheetDate ในคอมโพเนนต์ใช้แบบเดียวกัน)
+const dmyOfKey = (key) => { const [y, m, d] = key.split("-").map(Number); return `${d}/${m}/${y}`; };
+// ไล่ทุกวันระหว่าง from..to (รวมปลายทาง) — ใส่ 0 ให้วันที่ไม่มีลูกค้าทักเข้ามาเลย จะได้เห็นเป็นช่วงต่อเนื่อง
+function dayRangeKeys(fromKey, toKey) {
+  const keys = [];
+  const [fy, fm, fd] = fromKey.split("-").map(Number);
+  const [ty, tm, td] = toKey.split("-").map(Number);
+  const cur = new Date(Date.UTC(fy, fm - 1, fd));
+  const end = new Date(Date.UTC(ty, tm - 1, td));
+  while (cur <= end) {
+    keys.push(cur.toISOString().slice(0, 10));
+    cur.setUTCDate(cur.getUTCDate() + 1);
+  }
+  return keys;
+}
+
+// เขียนไฟล์ Excel รูปแบบ "Ads <เพจ> — <เดือน>" — ตารางหลัก (พร้อมสีสถานะ) + แดชบอร์ดสรุปด้านขวา
+// (Dashboard สรุปรวม, รายวัน, เปิดบัญชีจาก ADS) เหมือนชีตที่ทีมใช้อยู่ประจำ — CSV ทำสีและตารางคู่กันแบบนี้ไม่ได้
+// ไม่รวม "รอดำเนินการ" ในสรุป เพราะระบบนี้ไม่มีสถานะดังกล่าว (มีแค่ สนใจ/เปิดบัญชีแล้ว/ไม่สนใจ)
+async function downloadSheetXlsx({ pageName, dateLabel, headers, sheetRows, statusIdx, addIndyIdx, summary, daily, adsBreakdown }) {
+  const { default: ExcelJS } = await import("exceljs");
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "Besight";
+  wb.created = new Date();
+
+  const navy = "1F2B4C", headBlue = "2F5597", white = "FFFFFF", border = "D9D9D9";
+  const green = "1B7A43", paleGreen = "C6EFCE", paleRed = "FFC7CE", darkRed = "9C0006", darkGreen = "006100";
+  const thin = { top: { style: "thin", color: { argb: border } }, left: { style: "thin", color: { argb: border } }, bottom: { style: "thin", color: { argb: border } }, right: { style: "thin", color: { argb: border } } };
+  const ws = wb.addWorksheet("รายชื่อลูกค้า", { views: [{ state: "frozen", ySplit: 2, showGridLines: false }] });
+
+  // ---------- ตารางหลัก (A:I) ----------
+  ws.columns = [
+    { width: 6 }, { width: 22 }, { width: 16 }, { width: 16 }, { width: 12 },
+    { width: 14 }, { width: 20 }, { width: 12 }, { width: 26 },
+  ];
+  const lastCol = headers.length; // 9
+  ws.mergeCells(1, 1, 1, lastCol);
+  ws.getCell(1, 1).value = `Ads ${pageName} — ${dateLabel}`;
+  ws.getCell(1, 1).font = { name: "Sarabun", size: 14, bold: true, color: { argb: white } };
+  ws.getCell(1, 1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: navy } };
+  ws.getCell(1, 1).alignment = { vertical: "middle", horizontal: "center" };
+  ws.getRow(1).height = 26;
+
+  const headerRow = ws.getRow(2);
+  headerRow.values = headers;
+  headerRow.height = 20;
+  headerRow.eachCell((cell) => { cell.font = { name: "Sarabun", size: 10, bold: true, color: { argb: white } }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: headBlue } }; cell.alignment = { horizontal: "center", vertical: "middle" }; cell.border = thin; });
+  ws.autoFilter = { from: { row: 2, column: 1 }, to: { row: 2, column: lastCol } };
+
+  sheetRows.forEach((values, i) => {
+    const row = ws.getRow(3 + i);
+    row.values = values;
+    row.eachCell({ includeEmpty: true }, (cell, col) => {
+      cell.font = { name: "Sarabun", size: 10, color: { argb: "1F2937" } };
+      cell.alignment = { vertical: "middle", horizontal: [1, 8].includes(col) ? "center" : "left", wrapText: col === lastCol };
+      cell.border = thin;
+    });
+    const statusCell = row.getCell(statusIdx + 1);
+    const status = values[statusIdx];
+    if (status === "เปิดบัญชีแล้ว") { statusCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: green } }; statusCell.font = { name: "Sarabun", size: 10, bold: true, color: { argb: white } }; statusCell.alignment = { horizontal: "center", vertical: "middle" }; }
+    else if (status === "ไม่สนใจ") { statusCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: paleRed } }; statusCell.font = { name: "Sarabun", size: 10, bold: true, color: { argb: darkRed } }; statusCell.alignment = { horizontal: "center", vertical: "middle" }; }
+    else if (status === "สนใจ") { statusCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: paleGreen } }; statusCell.font = { name: "Sarabun", size: 10, bold: true, color: { argb: darkGreen } }; statusCell.alignment = { horizontal: "center", vertical: "middle" }; }
+    const addIndyCell = row.getCell(addIndyIdx + 1);
+    if (values[addIndyIdx]) { addIndyCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: green } }; addIndyCell.font = { name: "Sarabun", size: 10, bold: true, color: { argb: white } }; addIndyCell.alignment = { horizontal: "center", vertical: "middle" }; }
+  });
+
+  // ---------- แดชบอร์ดสรุปรวม (K:L) ----------
+  // K = คอลัมน์ 11, L = คอลัมน์ 12 — ตารางสรุปทั้งสองชุด (Dashboard สรุปรวม / เปิดบัญชีจาก ADS) วางที่นี่
+  const dashHeaderRow = (row, col1, col2) => {
+    [[11, col1], [12, col2]].forEach(([col, label]) => {
+      const cell = ws.getCell(row, col);
+      cell.value = label;
+      cell.font = { name: "Sarabun", size: 10, bold: true, color: { argb: white } };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: navy } };
+      cell.alignment = { horizontal: "center", vertical: "middle" };
+      cell.border = thin;
+    });
+  };
+  ws.getColumn(11).width = 20; ws.getColumn(12).width = 10;
+  dashHeaderRow(2, "Dashboard สรุปรวม", "จำนวน");
+  const dashRows = [
+    ["ลูกค้าทั้งหมด", summary.total],
+    ["เปิดบัญชีแล้ว", summary.opened],
+    ["Add Indy แล้ว", summary.addIndy],
+    ["ไม่สนใจ", summary.notInterested],
+    ["ช่องทาง ADS", summary.ads],
+  ];
+  dashRows.forEach(([label, value], i) => {
+    const r = 3 + i;
+    ws.getCell(r, 11).value = label; ws.getCell(r, 11).border = thin; ws.getCell(r, 11).font = { name: "Sarabun", size: 10 };
+    ws.getCell(r, 12).value = value; ws.getCell(r, 12).border = thin; ws.getCell(r, 12).alignment = { horizontal: "center" }; ws.getCell(r, 12).font = { name: "Sarabun", size: 10, bold: true };
+  });
+
+  // ---------- เปิดบัญชีจาก ADS (K:L ต่อจากแดชบอร์ดสรุปรวม เว้น 1 แถว) ----------
+  const adsStartRow = 3 + dashRows.length + 2;
+  dashHeaderRow(adsStartRow - 1, "เปิดบัญชีจาก ADS", "จำนวน");
+  adsBreakdown.forEach(([name, count], i) => {
+    const r = adsStartRow + i;
+    ws.getCell(r, 11).value = name; ws.getCell(r, 11).border = thin; ws.getCell(r, 11).font = { name: "Sarabun", size: 10 };
+    ws.getCell(r, 12).value = count; ws.getCell(r, 12).border = thin; ws.getCell(r, 12).alignment = { horizontal: "center" }; ws.getCell(r, 12).font = { name: "Sarabun", size: 10, bold: true };
+  });
+  if (!adsBreakdown.length) { ws.getCell(adsStartRow, 11).value = "— ยังไม่มี —"; ws.getCell(adsStartRow, 11).font = { name: "Sarabun", size: 10, italic: true, color: { argb: "94A3B8" } }; ws.getCell(adsStartRow, 11).border = thin; ws.getCell(adsStartRow, 12).border = thin; }
+
+  // ---------- รายวัน (N:R) ----------
+  ["N", "O", "P", "Q", "R"].forEach((col, i) => { ws.getColumn(14 + i).width = [12, 14, 14, 12, 10][i]; });
+  const dailyHeaders = ["วันที่", "จำนวนทั้งหมด", "เปิดบัญชีแล้ว", "ช่องทาง ADS", "สนใจ"];
+  dailyHeaders.forEach((h, i) => {
+    const cell = ws.getCell(2, 14 + i);
+    cell.value = h; cell.font = { name: "Sarabun", size: 10, bold: true, color: { argb: white } };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: navy } };
+    cell.alignment = { horizontal: "center", vertical: "middle" }; cell.border = thin;
+  });
+  daily.forEach((d, i) => {
+    const r = 3 + i;
+    [d.dateLabel, d.total, d.opened, d.ads, d.interested].forEach((v, ci) => {
+      const cell = ws.getCell(r, 14 + ci);
+      cell.value = v; cell.border = thin; cell.font = { name: "Sarabun", size: 10 };
+      cell.alignment = { horizontal: ci === 0 ? "left" : "center" };
+    });
+  });
+
+  const buffer = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `รายชื่อลูกค้า_${pageName}_${bangkokDate()}.xlsx`;
+  a.click(); URL.revokeObjectURL(url);
+}
+
 export default function CustomerDatabaseTab({ onOpenChat }) {
   const initialViewRef = useRef(getCustomerDatabaseViewCache());
   const initialView = initialViewRef.current;
@@ -506,7 +636,7 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
 
   // map ปุ่มเรียง → คอลัมน์จริงใน DB
   const SORT_COL = { customer_name: "customer_name", page_name: "page_name", trade_id: "trade_id", phone: "phone", email: "email", username: "username", psid: "psid", source: "source", messages: "user_message_count", stage: "stage", first_customer_message_at: "first_customer_message_at", last_message_at: "first_customer_message_at", synced_at: "first_customer_message_at" };
-  const EXPORT_DB_COLS = ["customer_name", "page_name", "trade_id", "phone", "email", "username", "psid", "source", "entry_ad_id", "first_customer_message_at", "stage", "stage_manual", "comment_ad_name", "comment_is_ad", "entry_ad_name"];
+  const EXPORT_DB_COLS = ["customer_name", "page_name", "trade_id", "phone", "email", "username", "psid", "source", "entry_ad_id", "first_customer_message_at", "stage", "stage_manual", "comment_ad_name", "comment_ad_names", "comment_ad_ids", "comment_is_ad", "entry_ad_name", "notes"];
   // สถานะในชีตใช้คำของทีม ไม่ใช่ค่า stage ดิบ — แมปให้ตรงกับที่กรอกมือกันอยู่
   const SHEET_STATUS = {
     account_opened: "เปิดบัญชีแล้ว",
@@ -526,20 +656,29 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
     return "Messenger";
   };
   const sheetDate = (t) => { if (!t) return ""; try { const d = new Date(t); return `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`; } catch { return ""; } };
-  // ชีตที่ทีมใช้สรุป — คอลัมน์เรียงตามของจริง เพื่อวางทับได้เลยไม่ต้องสลับคอลัมน์
-  // tvByUser มาจากตาราง tv_access (สิทธิ์อินดิเคเตอร์) join ด้วย username ของ TradingView
+  // สถานะที่ใช้จริง (ตาม SHEET_STATUS) — ล้อกันกับสีพื้นหลังในตอนเขียนไฟล์ Excel
+  const sheetStatusOf = (row) => SHEET_STATUS[row.stage_manual || row.stage] || "สนใจ";
+  // "เพิ่มอินดี้แล้วหรือยัง" อ้างจาก tv_access — join ด้วย username ของ TradingView
+  const hasAddIndy = (row, tvByUser) => !!tvByUser.get(String(row.username || "").toLowerCase());
+  // "ช่องทาง ADS" = ชื่อโฆษณาที่ทักเข้ามา, ทักมาทางอื่น (ออร์แกนิก/คอมเมนต์ที่ไม่ใช่แอด) ให้ขีด "-"
+  // เหมือนช่องในชีตที่ทีมใช้จริง — ต่างจาก sourceText()/contactChannel() ที่ตอบ "ช่องทางแชท" ไม่ใช่ชื่อแอด
+  const adsChannelOf = (row) => {
+    const fromAd = row.source === "ad" || !!row.entry_ad_id || (row.comment_is_ad && (row.comment_ad_name || row.comment_ad_names?.length));
+    if (!fromAd) return "-";
+    return adNameOf(row) || "โฆษณา";
+  };
+  // ชีตที่ทีมใช้สรุป — คอลัมน์/หัวข้อตรงกับชีต "Ads <เพจ> — <เดือน>" ที่ทีมใช้อยู่ทุกวัน
+  // "ฝากเงิน" ไม่มีข้อมูลในระบบ (ทีมกรอกเองหลัง import) จึงปล่อยว่างไว้ให้กรอกต่อ
   const SHEET_COLUMNS = (tvByUser) => [
     ["ลำดับ", (row, i) => String(i + 1)],
     ["ชื่อ", (row) => row.customer_name || ""],
-    ["สถานะ", (row) => SHEET_STATUS[row.stage_manual || row.stage] || "สนใจ"],
+    ["สถานะ", (row) => sheetStatusOf(row)],
     ["เลขบัญชีเทรด", (row) => row.trade_id || ""],
-    ["อีเมล", (row) => row.email || ""],
-    ["User TradingView", (row) => row.username || ""],
-    ["สถานะอินดี้", (row) => (tvByUser.get(String(row.username || "").toLowerCase()) ? "เพิ่มแล้ว" : "")],
-    ["วันที่เริ่มใช้", (row) => sheetDate(tvByUser.get(String(row.username || "").toLowerCase())?.tv_granted_at)],
-    ["วันหมดอายุ", (row) => sheetDate(tvByUser.get(String(row.username || "").toLowerCase())?.expiration)],
-    ["ช่องทางการติดต่อ", (row) => contactChannel(row)],
-    ["วันที่ติดต่อ", (row) => sheetDate(row.first_customer_message_at)],
+    ["ฝากเงิน", () => ""],
+    ["Add Indy", (row) => (hasAddIndy(row, tvByUser) ? "Add Indy แล้ว" : "")],
+    ["ช่องทาง ADS", (row) => adsChannelOf(row)],
+    ["วันที่", (row) => sheetDate(row.first_customer_message_at)],
+    ["หมายเหตุ", (row) => row.notes || ""],
   ];
 
   const EXPORT_COLUMNS = [
@@ -799,13 +938,64 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
           if (key) tvByUser.set(key, t);
         }
       }
-      const columns = exportFormat === "sheet" ? SHEET_COLUMNS(tvByUser) : EXPORT_COLUMNS;
+      // รูปแบบชีต = ไฟล์ Excel ที่มีตารางหลัก + แดชบอร์ดสรุปด้านขวา (สี/ตัวเลขที่ CSV ทำไม่ได้)
+      if (exportFormat === "sheet") {
+        const pageName = pages.find((p) => p.id === pageFilter)?.name || pageFilter;
+        const columns = SHEET_COLUMNS(tvByUser);
+        const headers = columns.map(([h]) => h);
+        const statusIdx = headers.indexOf("สถานะ");
+        const addIndyIdx = headers.indexOf("Add Indy");
+        const sheetRows = all.map((row, i) => columns.map(([, getValue]) => getValue(row, i)));
+
+        const opened = all.filter((r) => sheetStatusOf(r) === "เปิดบัญชีแล้ว");
+        const notInterested = all.filter((r) => sheetStatusOf(r) === "ไม่สนใจ").length;
+        const addIndy = all.filter((r) => hasAddIndy(r, tvByUser)).length;
+        const ads = all.filter((r) => adsChannelOf(r) !== "-").length;
+        const summary = { total: all.length, opened: opened.length, addIndy, notInterested, ads };
+
+        // เปิดบัญชีจาก ADS — นับเฉพาะคนที่ "เปิดบัญชีแล้ว" แบ่งตามชื่อแอดที่ทักเข้ามา (ตัด "-" ที่ไม่ใช่แอดออก)
+        const adsCountMap = new Map();
+        for (const r of opened) {
+          const ch = adsChannelOf(r);
+          if (ch === "-") continue;
+          adsCountMap.set(ch, (adsCountMap.get(ch) || 0) + 1);
+        }
+        const adsBreakdown = [...adsCountMap.entries()].sort((a, b) => b[1] - a[1]);
+
+        // รายวัน — ไล่ทุกวันตั้งแต่วันแรกถึงวันสุดท้ายที่มีลูกค้าทักเข้ามาในชุดที่ export (เติม 0 ให้วันที่ไม่มีคนทัก)
+        const dayKeys = all.map((r) => (r.first_customer_message_at ? bangkokDate(r.first_customer_message_at) : null)).filter(Boolean);
+        const byDay = new Map();
+        for (const r of all) {
+          if (!r.first_customer_message_at) continue;
+          const key = bangkokDate(r.first_customer_message_at);
+          const bucket = byDay.get(key) || { total: 0, opened: 0, ads: 0, interested: 0 };
+          bucket.total += 1;
+          if (sheetStatusOf(r) === "เปิดบัญชีแล้ว") bucket.opened += 1;
+          if (sheetStatusOf(r) === "สนใจ") bucket.interested += 1;
+          if (adsChannelOf(r) !== "-") bucket.ads += 1;
+          byDay.set(key, bucket);
+        }
+        const daily = dayKeys.length
+          ? dayRangeKeys(dayKeys.reduce((a, b) => (a < b ? a : b)), dayKeys.reduce((a, b) => (a > b ? a : b)))
+            .map((key) => ({ dateLabel: dmyOfKey(key), ...(byDay.get(key) || { total: 0, opened: 0, ads: 0, interested: 0 }) }))
+          : [];
+
+        // หัวรายงาน "Ads <เพจ> — <เดือน>" — ใช้เดือน/ปีของวันที่ล่าสุดในชุดที่ export (ตรงกับที่ทีมตั้งชื่อชีตไว้จริง)
+        const latestKey = dayKeys.length ? dayKeys.reduce((a, b) => (a > b ? a : b)) : bangkokDate();
+        const [ly, lm] = latestKey.split("-").map(Number);
+        const dateLabel = `${THAI_MONTHS[lm - 1]} ${ly}`;
+
+        await downloadSheetXlsx({ pageName, dateLabel, headers, sheetRows, statusIdx, addIndyIdx, summary, daily, adsBreakdown });
+        setExportDialogOpen(false);
+        return;
+      }
+      const columns = EXPORT_COLUMNS;
       const esc = (v) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
       const csv = [columns.map(([header]) => esc(header)).join(","), ...all.map((row, i) => columns.map(([, getValue]) => esc(getValue(row, i))).join(","))].join("\n");
       const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url; a.download = exportFormat === "sheet" ? `รายชื่อลูกค้า_${bangkokDate()}.csv` : `customers_${bangkokDate()}.csv`;
+      a.href = url; a.download = `customers_${bangkokDate()}.csv`;
       a.click(); URL.revokeObjectURL(url);
       setExportDialogOpen(false);
     } finally {
@@ -892,7 +1082,7 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
               {loading ? <Loader2 className="animate-spin" size={15} /> : <RefreshCw size={15} />} รีเฟรชข้อมูลล่าสุด
             </button>
             <button onClick={openExportDialog} disabled={!pageFilter || exporting} className="bg-white text-slate-700 border border-slate-300 rounded-control px-3 py-2 text-sm font-medium hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1.5">
-              {exporting ? <Loader2 className="animate-spin" size={15} /> : <FileDown size={15} />} Export CSV
+              {exporting ? <Loader2 className="animate-spin" size={15} /> : <FileDown size={15} />} Export
             </button>
           </div>
         </div>
@@ -984,7 +1174,7 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
           <div className="customer-export-modal-panel relative w-full sm:max-w-lg rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden">
             <div className="customer-export-modal-header flex items-start justify-between gap-4 px-5 pt-6 pb-5 sm:px-6">
               <div className="min-w-0">
-                <div className="customer-export-modal-kicker"><FileDown size={14} /> EXPORT CSV</div>
+                <div className="customer-export-modal-kicker"><FileDown size={14} /> EXPORT</div>
                 <h3 className="customer-export-modal-title mt-2 text-xl font-semibold">เลือกช่วงเวลาที่ต้องการ</h3>
                 <p className="customer-export-modal-page mt-2"><span>เพจ</span>{pages.find((p) => p.id === pageFilter)?.name || pageFilter}</p>
               </div>
@@ -996,8 +1186,8 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
                 <span className="customer-export-modal-label">รูปแบบไฟล์</span>
                 <div className="mt-1.5 grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {[
-                    ["sheet", "ชีตสรุปรายชื่อลูกค้า", "ลำดับ · ชื่อ · สถานะ · เลขบัญชีเทรด · อีเมล · TradingView · สถานะอินดี้ · วันเริ่ม/หมดอายุ"],
-                    ["raw", "คอลัมน์ดิบของระบบ", "ชื่อ · เพจ · ไอดีเทรด · เบอร์ · อีเมล · TradingView · PSID · แหล่งที่มา"],
+                    ["sheet", "ชีตสรุปรายชื่อลูกค้า (Excel)", "ลำดับ · ชื่อ · สถานะ · เลขบัญชีเทรด · ฝากเงิน · Add Indy · ช่องทาง ADS · วันที่ · หมายเหตุ + แดชบอร์ดสรุปรายวัน"],
+                    ["raw", "คอลัมน์ดิบของระบบ (CSV)", "ชื่อ · เพจ · ไอดีเทรด · เบอร์ · อีเมล · TradingView · PSID · แหล่งที่มา"],
                   ].map(([val, title, hint]) => (
                     <button
                       key={val}
@@ -1038,7 +1228,7 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
             <div className="customer-export-modal-footer flex flex-col-reverse sm:flex-row sm:justify-end gap-2 px-5 py-4 sm:px-6">
               <button type="button" onClick={() => setExportDialogOpen(false)} disabled={exporting} className="customer-export-modal-cancel rounded-xl px-4 py-2.5 text-sm font-medium">ยกเลิก</button>
               <button type="button" onClick={exportCsv} disabled={exporting || !hasCompleteDateRange(exportDateFilter, exportDateFrom, exportDateTo) || (exportDateFilter === "custom" && exportDateFrom > exportDateTo)} className="customer-export-modal-download inline-flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-semibold">
-                {exporting ? <Loader2 className="animate-spin" size={16} /> : <FileDown size={16} />} ดาวน์โหลด CSV
+                {exporting ? <Loader2 className="animate-spin" size={16} /> : <FileDown size={16} />} ดาวน์โหลด{exportFormat === "sheet" ? " Excel" : " CSV"}
               </button>
             </div>
           </div>
