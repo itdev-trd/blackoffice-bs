@@ -478,37 +478,47 @@ function dayRangeKeys(fromKey, toKey) {
   return keys;
 }
 
-// เขียนไฟล์ Excel รูปแบบ "Ads <เพจ> — <เดือน>" — ตารางหลัก (พร้อมสีสถานะ) + แดชบอร์ดสรุปด้านขวา
-// (Dashboard สรุปรวม, รายวัน, เปิดบัญชีจาก ADS) เหมือนชีตที่ทีมใช้อยู่ประจำ — CSV ทำสีและตารางคู่กันแบบนี้ไม่ได้
-// ไม่รวม "รอดำเนินการ" ในสรุป เพราะระบบนี้ไม่มีสถานะดังกล่าว (มีแค่ สนใจ/เปิดบัญชีแล้ว/ไม่สนใจ)
-async function downloadSheetXlsx({ pageName, dateLabel, headers, sheetRows, statusIdx, addIndyIdx, summary, daily, adsBreakdown }) {
-  const { default: ExcelJS } = await import("exceljs");
-  const wb = new ExcelJS.Workbook();
-  wb.creator = "Besight";
-  wb.created = new Date();
+// ประเทศจากชื่อแอด — ทีมตั้งชื่อแอดใส่ประเทศไว้เสมอ (เช่น "Indy Thai 1", "โฆษณา Indy Philippines 1")
+// แต่เป็นข้อความอิสระ ไม่ใช่ฟิลด์แยกในระบบ จึงจับคำสำคัญแบบไม่สนตัวพิมพ์เล็ก/ใหญ่แทน
+const COUNTRY_KEYWORDS = [
+  ["ไทย", /thai|ไทย/i],
+  ["ลาว", /laos|ลาว/i],
+  ["ฟิลิปปินส์", /philippin|ฟิลิปปินส์/i],
+  ["อินโดนีเซีย", /indonesia|อินโดนีเซีย/i],
+  ["มาเลเซีย", /malaysia|มาเลเซีย/i],
+  ["เวียดนาม", /vietnam|เวียดนาม/i],
+  ["เมียนมา", /myanmar|เมียนมา|burma/i],
+  ["กัมพูชา", /cambodia|กัมพูชา/i],
+  ["สิงคโปร์", /singapore|สิงคโปร์/i],
+];
+const COUNTRY_ORDER = COUNTRY_KEYWORDS.map(([name]) => name);
+const countryOfAdName = (adName) => {
+  const name = String(adName || "");
+  for (const [country, re] of COUNTRY_KEYWORDS) if (re.test(name)) return country;
+  return "อื่นๆ"; // ทักออร์แกนิก หรือชื่อแอดที่ไม่ได้ระบุประเทศ (เช่น "ทุนเทรด 1")
+};
 
-  const navy = "1F2B4C", headBlue = "2F5597", white = "FFFFFF", border = "D9D9D9";
-  const green = "1B7A43", paleGreen = "C6EFCE", paleRed = "FFC7CE", darkRed = "9C0006", darkGreen = "006100";
-  const thin = { top: { style: "thin", color: { argb: border } }, left: { style: "thin", color: { argb: border } }, bottom: { style: "thin", color: { argb: border } }, right: { style: "thin", color: { argb: border } } };
-  const ws = wb.addWorksheet("รายชื่อลูกค้า", { views: [{ state: "frozen", ySplit: 2, showGridLines: false }] });
+const XLSX_NAVY = "1F2B4C", XLSX_HEAD_BLUE = "2F5597", XLSX_WHITE = "FFFFFF", XLSX_BORDER = "D9D9D9";
+const XLSX_GREEN = "1B7A43", XLSX_PALE_GREEN = "C6EFCE", XLSX_PALE_RED = "FFC7CE", XLSX_DARK_RED = "9C0006", XLSX_DARK_GREEN = "006100";
+const XLSX_THIN = { top: { style: "thin", color: { argb: XLSX_BORDER } }, left: { style: "thin", color: { argb: XLSX_BORDER } }, bottom: { style: "thin", color: { argb: XLSX_BORDER } }, right: { style: "thin", color: { argb: XLSX_BORDER } } };
+const CUSTOMER_TABLE_COL_WIDTHS = [6, 22, 16, 16, 12, 14, 20, 12, 26];
 
-  // ---------- ตารางหลัก (A:I) ----------
-  ws.columns = [
-    { width: 6 }, { width: 22 }, { width: 16 }, { width: 16 }, { width: 12 },
-    { width: 14 }, { width: 20 }, { width: 12 }, { width: 26 },
-  ];
+// เขียนตาราง "ลำดับ/ชื่อ/สถานะ/..." ลงชีตหนึ่งชีต (หัวเรื่อง + หัวคอลัมน์ + สีสถานะ/Add Indy)
+// แยกออกมาเพื่อใช้ซ้ำได้ทั้งชีตรวมและชีตแยกรายประเทศ (โครงตารางเหมือนกันทุกอย่าง ต่างแค่ชุดแถว)
+function writeCustomerTable(ws, { title, headers, sheetRows, statusIdx, addIndyIdx }) {
+  ws.columns = CUSTOMER_TABLE_COL_WIDTHS.map((width) => ({ width }));
   const lastCol = headers.length; // 9
   ws.mergeCells(1, 1, 1, lastCol);
-  ws.getCell(1, 1).value = `Ads ${pageName} — ${dateLabel}`;
-  ws.getCell(1, 1).font = { name: "Sarabun", size: 14, bold: true, color: { argb: white } };
-  ws.getCell(1, 1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: navy } };
+  ws.getCell(1, 1).value = title;
+  ws.getCell(1, 1).font = { name: "Sarabun", size: 14, bold: true, color: { argb: XLSX_WHITE } };
+  ws.getCell(1, 1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: XLSX_NAVY } };
   ws.getCell(1, 1).alignment = { vertical: "middle", horizontal: "center" };
   ws.getRow(1).height = 26;
 
   const headerRow = ws.getRow(2);
   headerRow.values = headers;
   headerRow.height = 20;
-  headerRow.eachCell((cell) => { cell.font = { name: "Sarabun", size: 10, bold: true, color: { argb: white } }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: headBlue } }; cell.alignment = { horizontal: "center", vertical: "middle" }; cell.border = thin; });
+  headerRow.eachCell((cell) => { cell.font = { name: "Sarabun", size: 10, bold: true, color: { argb: XLSX_WHITE } }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: XLSX_HEAD_BLUE } }; cell.alignment = { horizontal: "center", vertical: "middle" }; cell.border = XLSX_THIN; });
   ws.autoFilter = { from: { row: 2, column: 1 }, to: { row: 2, column: lastCol } };
 
   sheetRows.forEach((values, i) => {
@@ -517,16 +527,35 @@ async function downloadSheetXlsx({ pageName, dateLabel, headers, sheetRows, stat
     row.eachCell({ includeEmpty: true }, (cell, col) => {
       cell.font = { name: "Sarabun", size: 10, color: { argb: "1F2937" } };
       cell.alignment = { vertical: "middle", horizontal: [1, 8].includes(col) ? "center" : "left", wrapText: col === lastCol };
-      cell.border = thin;
+      cell.border = XLSX_THIN;
     });
     const statusCell = row.getCell(statusIdx + 1);
     const status = values[statusIdx];
-    if (status === "เปิดบัญชีแล้ว") { statusCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: green } }; statusCell.font = { name: "Sarabun", size: 10, bold: true, color: { argb: white } }; statusCell.alignment = { horizontal: "center", vertical: "middle" }; }
-    else if (status === "ไม่สนใจ") { statusCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: paleRed } }; statusCell.font = { name: "Sarabun", size: 10, bold: true, color: { argb: darkRed } }; statusCell.alignment = { horizontal: "center", vertical: "middle" }; }
-    else if (status === "สนใจ") { statusCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: paleGreen } }; statusCell.font = { name: "Sarabun", size: 10, bold: true, color: { argb: darkGreen } }; statusCell.alignment = { horizontal: "center", vertical: "middle" }; }
+    if (status === "เปิดบัญชีแล้ว") { statusCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: XLSX_GREEN } }; statusCell.font = { name: "Sarabun", size: 10, bold: true, color: { argb: XLSX_WHITE } }; statusCell.alignment = { horizontal: "center", vertical: "middle" }; }
+    else if (status === "ไม่สนใจ") { statusCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: XLSX_PALE_RED } }; statusCell.font = { name: "Sarabun", size: 10, bold: true, color: { argb: XLSX_DARK_RED } }; statusCell.alignment = { horizontal: "center", vertical: "middle" }; }
+    else if (status === "สนใจ") { statusCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: XLSX_PALE_GREEN } }; statusCell.font = { name: "Sarabun", size: 10, bold: true, color: { argb: XLSX_DARK_GREEN } }; statusCell.alignment = { horizontal: "center", vertical: "middle" }; }
     const addIndyCell = row.getCell(addIndyIdx + 1);
-    if (values[addIndyIdx]) { addIndyCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: green } }; addIndyCell.font = { name: "Sarabun", size: 10, bold: true, color: { argb: white } }; addIndyCell.alignment = { horizontal: "center", vertical: "middle" }; }
+    if (values[addIndyIdx]) { addIndyCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: XLSX_GREEN } }; addIndyCell.font = { name: "Sarabun", size: 10, bold: true, color: { argb: XLSX_WHITE } }; addIndyCell.alignment = { horizontal: "center", vertical: "middle" }; }
   });
+}
+
+// เขียนไฟล์ Excel รูปแบบ "Ads <เพจ> — <เดือน>" — ชีตแรกเป็นตารางรวม (พร้อมสีสถานะ) + แดชบอร์ดสรุปด้านขวา
+// (Dashboard สรุปรวม, รายวัน, เปิดบัญชีจาก ADS) เหมือนชีตที่ทีมใช้อยู่ประจำ — CSV ทำสีและตารางคู่กันแบบนี้ไม่ได้
+// ต่อด้วยชีตแยกรายประเทศ (ตามชื่อแอดที่ทักเข้ามา) ให้ทีมเปิดดูเฉพาะประเทศได้โดยไม่ต้องกรองเอง
+// ไม่รวม "รอดำเนินการ" ในสรุป เพราะระบบนี้ไม่มีสถานะดังกล่าว (มีแค่ สนใจ/เปิดบัญชีแล้ว/ไม่สนใจ)
+async function downloadSheetXlsx({ pageName, dateLabel, headers, sheetRows, countries, statusIdx, addIndyIdx, summary, daily, adsBreakdown }) {
+  const { default: ExcelJS } = await import("exceljs");
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "Besight";
+  wb.created = new Date();
+
+  const navy = XLSX_NAVY, white = XLSX_WHITE, border = XLSX_BORDER;
+  const thin = XLSX_THIN;
+  const ws = wb.addWorksheet("รายชื่อลูกค้า", { views: [{ state: "frozen", ySplit: 2, showGridLines: false }] });
+
+  // ---------- ตารางหลัก (A:I) ----------
+  writeCustomerTable(ws, { title: `Ads ${pageName} — ${dateLabel}`, headers, sheetRows, statusIdx, addIndyIdx });
+  const lastCol = headers.length; // 9
 
   // ---------- แดชบอร์ดสรุปรวม (K:L) ----------
   // K = คอลัมน์ 11, L = คอลัมน์ 12 — ตารางสรุปทั้งสองชุด (Dashboard สรุปรวม / เปิดบัญชีจาก ADS) วางที่นี่
@@ -582,6 +611,26 @@ async function downloadSheetXlsx({ pageName, dateLabel, headers, sheetRows, stat
       cell.alignment = { horizontal: ci === 0 ? "left" : "center" };
     });
   });
+
+  // ---------- แท็บแยกรายประเทศ (ตามชื่อแอดที่ทักเข้ามา) ----------
+  // จัดเรียงตามลำดับประเทศที่รู้จักก่อน ตามด้วยประเทศอื่นที่ไม่อยู่ใน list (ถ้ามี) แล้วปิดท้ายด้วย "อื่นๆ" เสมอ
+  const byCountry = new Map();
+  sheetRows.forEach((values, i) => {
+    const country = countries?.[i] || "อื่นๆ";
+    if (!byCountry.has(country)) byCountry.set(country, []);
+    byCountry.get(country).push(values);
+  });
+  const orderedCountries = [
+    ...COUNTRY_ORDER.filter((c) => byCountry.has(c)),
+    ...[...byCountry.keys()].filter((c) => !COUNTRY_ORDER.includes(c) && c !== "อื่นๆ"),
+    ...(byCountry.has("อื่นๆ") ? ["อื่นๆ"] : []),
+  ];
+  for (const country of orderedCountries) {
+    // เลขลำดับในแท็บนี้เริ่มนับใหม่ 1..N เฉพาะของประเทศนั้น ไม่ใช่ลำดับเดิมจากชีตรวม
+    const rowsForCountry = byCountry.get(country).map((values, i) => { const clone = [...values]; clone[0] = String(i + 1); return clone; });
+    const wsCountry = wb.addWorksheet(country.slice(0, 31));
+    writeCustomerTable(wsCountry, { title: `Ads ${pageName} — ${dateLabel} (${country})`, headers, sheetRows: rowsForCountry, statusIdx, addIndyIdx });
+  }
 
   const buffer = await wb.xlsx.writeBuffer();
   const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
@@ -948,6 +997,7 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
         const statusIdx = headers.indexOf("สถานะ");
         const addIndyIdx = headers.indexOf("Add Indy");
         const sheetRows = all.map((row, i) => columns.map(([, getValue]) => getValue(row, i)));
+        const countries = all.map((row) => countryOfAdName(adsChannelOf(row)));
 
         const opened = all.filter((r) => sheetStatusOf(r) === "เปิดบัญชีแล้ว");
         const notInterested = all.filter((r) => sheetStatusOf(r) === "ไม่สนใจ").length;
@@ -987,7 +1037,7 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
         const [ly, lm] = latestKey.split("-").map(Number);
         const dateLabel = `${THAI_MONTHS[lm - 1]} ${ly}`;
 
-        await downloadSheetXlsx({ pageName, dateLabel, headers, sheetRows, statusIdx, addIndyIdx, summary, daily, adsBreakdown });
+        await downloadSheetXlsx({ pageName, dateLabel, headers, sheetRows, countries, statusIdx, addIndyIdx, summary, daily, adsBreakdown });
         setExportDialogOpen(false);
         return;
       }
