@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Loader2, RefreshCw, ChevronLeft, ChevronRight, ChevronDown, MessageSquare, CheckCircle2, Clock, AlertTriangle, ArrowUpCircle } from "lucide-react";
 import { StatCard as DsStatCard } from "@/components/ui";
 import { supabase } from "@/lib/supabase/client";
@@ -170,6 +170,45 @@ export function ChatSyncConfigPanel() {
     if (data?.ok === false) { setOriginRes({ error: data.error }); return; }
     setOriginRes(data);
   }
+
+  // กู้ประวัติแชทเก่าที่เคยถูก sync ทับหายไปก่อนแก้บั๊ก (commit 85c6a2e) — เดินหน้าทีละ batch
+  // เล็กๆ ต่อเพจ พักระหว่างรอบกันยิง Meta รัวเกิน ผู้ใช้กด "หยุด" ระหว่างทางได้ทุกเมื่อ
+  const [backfillPageId, setBackfillPageId] = useState("");
+  const [backfillBusy, setBackfillBusy] = useState(false);
+  const [backfillStat, setBackfillStat] = useState(null);
+  const backfillStopRef = useRef(false);
+  useEffect(() => { if (!backfillPageId && labelPages.length) setBackfillPageId(labelPages[0].id); }, [labelPages]); // eslint-disable-line react-hooks/exhaustive-deps
+  async function runBackfill() {
+    if (!backfillPageId) return;
+    setBackfillBusy(true);
+    backfillStopRef.current = false;
+    let after = null;
+    const totals = { scanned: 0, gaps_found: 0, gaps_filled: 0, messages_recovered: 0 };
+    setBackfillStat({ ...totals, running: true });
+    for (;;) {
+      if (backfillStopRef.current) { setBackfillStat((s) => ({ ...s, running: false, stopped: true })); break; }
+      const { data, error } = await supabase.functions.invoke("sync-conversations", {
+        body: { job: "backfill_transcript", page_id: backfillPageId, after, batch_size: 10 },
+      });
+      if (error) { const msg = await readFunctionErrorMessage(error); setBackfillStat({ ...totals, running: false, error: msg }); break; }
+      if (data?.ok === false) { setBackfillStat((s) => ({ ...s, running: false, error: data.error })); break; }
+      totals.scanned += data.scanned || 0;
+      totals.gaps_found += data.gaps_found || 0;
+      totals.gaps_filled += data.gaps_filled || 0;
+      totals.messages_recovered += data.messages_recovered || 0;
+      setBackfillStat({ ...totals, running: !data.done, rate_limited: data.rate_limited });
+      if (data.done) break;
+      after = data.next_after;
+      if (data.rate_limited) {
+        // โดน Meta จำกัดโควตา — พักยาวกว่าปกติแล้วลองต่อจาก cursor เดิม
+        await new Promise((res) => setTimeout(res, 30_000));
+      } else {
+        await new Promise((res) => setTimeout(res, 400));
+      }
+    }
+    setBackfillBusy(false);
+  }
+  function stopBackfill() { backfillStopRef.current = true; }
 
   async function fetchDatasets() {
     setDsLoading(true); setDsResult(null);
@@ -419,6 +458,56 @@ export function ChatSyncConfigPanel() {
                     : <span className="text-amber-600 shrink-0">✗ ยังไม่ผูก</span>}
                 </div>
               ))}
+          </div>
+        )}
+      </div>
+
+      {/* กู้ประวัติแชทเก่าที่เคยหายไป — ต้องแก้บั๊ก sync ทับ transcript (commit 85c6a2e) ก่อนแล้วเท่านั้น
+          ถึงจะเรียกได้ครั้งเดียวจบ ไม่มีอะไรให้กู้ซ้ำ กดซ้ำได้ปลอดภัย (ข้ามห้องที่ไม่มีช่องว่างแล้ว) */}
+      <div className="rounded-xl border border-purple-200 bg-purple-50/40 p-4 space-y-2">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <div className="text-sm font-medium text-slate-800">กู้ประวัติแชทเก่าที่เคยหายไป</div>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              ก่อนหน้านี้แชทที่คุยเยอะๆ ประวัติเก่าจะถูกซิงก์ทับหายไปเรื่อยๆ (แก้ต้นตอแล้ว) — ปุ่มนี้ไล่ดึงย้อนหลัง
+              จาก Meta มาเติมคืนเฉพาะห้องที่ขาดจริง ทีละล็อตเล็กๆ พักระหว่างล็อตกันยิง Meta ถี่เกิน · หยุดพักได้ทุกเมื่อแล้วกดต่อได้จาก
+              จุดเดิม (ไม่ต้องเริ่มใหม่) · ใช้เวลานาน (ห้องเป็นร้อย) ปิดหน้านี้ระหว่างทางจะหยุดค้าง ต้องเปิดหน้านี้ทิ้งไว้
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {labelPages.length > 1 && (
+              <select value={backfillPageId} onChange={(e) => setBackfillPageId(e.target.value)} disabled={backfillBusy}
+                className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs bg-white max-w-[180px]">
+                {labelPages.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            )}
+            {!backfillBusy ? (
+              <button onClick={runBackfill} disabled={!backfillPageId}
+                className="bg-purple-700 text-white rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-purple-800 disabled:opacity-50 flex items-center gap-1.5">
+                <RefreshCw size={14} /> {backfillStat?.stopped ? "เริ่มต่อจากที่ค้าง" : "เริ่มกู้ประวัติ"}
+              </button>
+            ) : (
+              <button onClick={stopBackfill} className="border border-purple-300 text-purple-700 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-purple-50 flex items-center gap-1.5">
+                <Loader2 className="animate-spin" size={14} /> หยุด
+              </button>
+            )}
+          </div>
+        </div>
+        {backfillStat && (
+          <div className="text-xs bg-white rounded-lg border border-slate-200 p-2.5 space-y-1">
+            <div className="flex flex-wrap gap-3 text-slate-700">
+              <span>ตรวจแล้ว <b>{backfillStat.scanned}</b> ห้อง</span>
+              <span>เจอช่องว่าง <b className="text-amber-600">{backfillStat.gaps_found}</b> ห้อง</span>
+              <span>กู้สำเร็จ <b className="text-emerald-600">{backfillStat.gaps_filled}</b> ห้อง</span>
+              <span>ข้อความที่ได้คืนมา <b className="text-emerald-600">{backfillStat.messages_recovered}</b> ข้อความ</span>
+            </div>
+            {backfillStat.running && <div className="text-purple-600">กำลังทำงาน...</div>}
+            {backfillStat.rate_limited && <div className="text-amber-600">Meta จำกัดโควตาชั่วคราว — กำลังพัก 30 วิแล้วลองต่อเอง</div>}
+            {backfillStat.stopped && <div className="text-slate-500">หยุดไว้ชั่วคราว กดปุ่มด้านบนเพื่อทำต่อจากจุดเดิมได้</div>}
+            {!backfillStat.running && !backfillStat.stopped && !backfillStat.error && backfillStat.scanned > 0 && (
+              <div className="text-emerald-600">ทำครบทุกห้องของเพจนี้แล้ว ✓</div>
+            )}
+            {backfillStat.error && <div className="text-rose-600">{backfillStat.error}</div>}
           </div>
         )}
       </div>
