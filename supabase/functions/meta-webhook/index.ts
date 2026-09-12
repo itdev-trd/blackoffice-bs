@@ -15,6 +15,9 @@ import { getSelectedCommentPageIds, resolveCommentAds } from "../_shared/comment
 const COMMENTS_ENABLED = true;
 const GRAPH_BASE = "https://graph.facebook.com/v22.0";
 const MAX_TRANSCRIPT_TEXT = 10_000;
+// เพดานจำนวนข้อความที่เก็บต่อห้อง — เดิม 80 ตัดประวัติแชทของลูกค้าที่คุยเยอะทิ้งเงียบๆ ทุกครั้งที่มีข้อความใหม่เข้ามา
+// (sync-conversations ก็เจอปัญหาเดียวกันจาก messages.limit ของ Meta ที่ดึงมาแค่ช่วงล่าสุด) ยกเป็นค่าเดียวกันทั้งสองฝั่ง
+const MAX_TRANSCRIPT_ITEMS = 300;
 // อิโมจิ/อักขระเสริมถูกเก็บเป็น surrogate pair 2 ตัว ถ้าลูกค้าส่งมาไม่ครบคู่
 // (หรือถูกเราตัดกลางคู่ตอน slice) Postgres จะปฏิเสธ "Unicode low surrogate must follow a high surrogate"
 // แล้วล้มการเขียนทั้ง batch — ต้องตัดตัวเดี่ยวที่ค้างออกหลัง slice เสมอ
@@ -251,7 +254,7 @@ Deno.serve(async (req) => {
               const tr = Array.isArray(target.transcript) ? target.transcript : [];
               const already = tr.some((m: any) => String(m?.mid || "") === commentId);
               const replyText = text || "[ตอบจาก Instagram]";
-              const nextTr = already ? tr : [...tr, { w: "p", t: replyText, at: atIso, mid: commentId, via: "instagram_comment", by_name: "ตอบจาก Instagram" }].slice(-80);
+              const nextTr = already ? tr : [...tr, { w: "p", t: replyText, at: atIso, mid: commentId, via: "instagram_comment", by_name: "ตอบจาก Instagram" }].slice(-MAX_TRANSCRIPT_ITEMS);
               await admin.from("chat_customers").update({
                 transcript: nextTr, awaiting_reply: false, unread: false, read_at: atIso,
                 last_reply_text: replyText, last_reply_by: "ตอบจาก Instagram", last_reply_at: atIso,
@@ -271,7 +274,7 @@ Deno.serve(async (req) => {
             if (existing) {
               const tr = Array.isArray(existing.transcript) ? existing.transcript : [];
               const already = tr.some((m: any) => String(m?.mid || "") === commentId);
-              const nextTr = already ? tr : [...tr, { w: "u", t: text, at: atIso, mid: commentId, via: "instagram_comment" }].slice(-80);
+              const nextTr = already ? tr : [...tr, { w: "u", t: text, at: atIso, mid: commentId, via: "instagram_comment" }].slice(-MAX_TRANSCRIPT_ITEMS);
               await admin.from("chat_customers").update({
                 source: "comment", comment_promoted_to_inbox: false,
                 customer_name: username || existing.customer_name || "Instagram user",
@@ -350,7 +353,7 @@ Deno.serve(async (req) => {
             }
             const oldTr = Array.isArray(row?.transcript) ? row.transcript : [];
             if (mid && oldTr.some((m: any) => String(m?.mid || "") === mid)) continue;
-            const transcript = [...oldTr, ...items].slice(-80);
+            const transcript = [...oldTr, ...items].slice(-MAX_TRANSCRIPT_ITEMS);
             const preview = msg.text ? String(msg.text).slice(0, 300) : items[items.length - 1]?.t || "[สื่อ]";
             // ลูกค้าถูกบล็อก/สแปม → เก็บประวัติเงียบ ๆ ไม่เด้ง/ไม่แจ้งเตือน/ไม่ตั้งธง AI
             if (row?.blocked_at) {
@@ -488,7 +491,7 @@ Deno.serve(async (req) => {
           if (row?.blocked_at) {
             const btr = Array.isArray(row.transcript) ? row.transcript : [];
             if (!(inMid && btr.some((m: any) => String(m?.mid || "") === inMid))) {
-              await admin.from("chat_customers").update({ transcript: [...btr, ...items].slice(-80), last_message_at: nowIso, updated_at: nowIso }).eq("id", row.id);
+              await admin.from("chat_customers").update({ transcript: [...btr, ...items].slice(-MAX_TRANSCRIPT_ITEMS), last_message_at: nowIso, updated_at: nowIso }).eq("id", row.id);
             }
             continue;
           }
@@ -522,7 +525,7 @@ Deno.serve(async (req) => {
               }
               continue;
             }
-            const newTr = [...tr, ...items].slice(-80);
+            const newTr = [...tr, ...items].slice(-MAX_TRANSCRIPT_ITEMS);
             const upd: Record<string, unknown> = {
               transcript: newTr, awaiting_reply: true, unread: true,
               last_user_text: lastText, last_message_at: nowIso, updated_at: nowIso,
@@ -733,7 +736,7 @@ Deno.serve(async (req) => {
             const tr = Array.isArray(target.transcript) ? target.transcript : [];
             const replyText = text || (v.photo || v.photos ? "[รูปภาพ]" : "[ตอบจากเพจ]");
             const already = tr.some((m: any) => m?.mid === commentId);
-            const nextTr = already ? tr : [...tr, { w: "p", t: replyText, at: atIso, mid: commentId, via: "facebook_page", by_name: "ตอบจากเพจ" }].slice(-80);
+            const nextTr = already ? tr : [...tr, { w: "p", t: replyText, at: atIso, mid: commentId, via: "facebook_page", by_name: "ตอบจากเพจ" }].slice(-MAX_TRANSCRIPT_ITEMS);
             await admin.from("chat_customers").update({
               transcript: nextTr, awaiting_reply: false, unread: false, read_at: atIso,
               last_reply_text: replyText, last_reply_by: "ตอบจากเพจ", last_reply_at: atIso,
@@ -755,7 +758,7 @@ Deno.serve(async (req) => {
           const { data: existing } = await admin.from("chat_customers").select("id, transcript, comment_from_id").eq("id", rowId).maybeSingle();
           if (existing) {
             const tr = Array.isArray(existing.transcript) ? existing.transcript : [];
-            const nextTr = v.verb === "edited" ? tr : [...tr, { w: "u", t: text, at: atIso }].slice(-80);
+            const nextTr = v.verb === "edited" ? tr : [...tr, { w: "u", t: text, at: atIso }].slice(-MAX_TRANSCRIPT_ITEMS);
             await admin.from("chat_customers").update({
               source: "comment", comment_promoted_to_inbox: false,
               comment_from_id: existing.comment_from_id || fromId,   // เผื่อแถวเก่าก่อนมีคอลัมน์นี้ยังไม่เคยเก็บไว้

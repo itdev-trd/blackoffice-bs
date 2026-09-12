@@ -29,6 +29,8 @@ const RECENT_COOLDOWN_MS = 5 * 1000;    // cooldown ร่วมต่อเพ�
 const RECENT_LIMIT = 25;                // Meta เรียง conversations ตาม updated_time ล่าสุดก่อน
 const DEFAULT_READ_STATUS_COOLDOWN_MS = 5 * 60 * 1000;
 const MAX_TRANSCRIPT_TEXT = 10_000;
+// เพดานจำนวนข้อความที่เก็บต่อห้อง — ตรงกับ meta-webhook (ต้องเท่ากันสองฝั่ง ไม่งั้นฝั่งที่เพดานต่ำกว่าจะตัดทิ้งของอีกฝั่ง)
+const MAX_TRANSCRIPT_ITEMS = 300;
 // อิโมจิ/อักขระเสริมถูกเก็บเป็น surrogate pair 2 ตัว ถ้าลูกค้าส่งมาไม่ครบคู่
 // (หรือถูกเราตัดกลางคู่ตอน slice) Postgres จะปฏิเสธ "Unicode low surrogate must follow a high surrogate"
 // แล้วล้มการเขียนทั้ง batch — ต้องตัดตัวเดี่ยวที่ค้างออกหลัง slice เสมอ
@@ -299,9 +301,11 @@ Deno.serve(async (req) => {
         // เก็บบทสนทนา (ทั้งสองฝั่ง) ไว้ให้กดดูรายคนได้ว่าดึงอะไรมาวิเคราะห์ — เรียงเก่า→ใหม่, จำกัดความยาว
         // รวม "สื่อ" (รูป/วิดีโอ/ไฟล์) ด้วย — เดิมกรองทิ้งเพราะไม่มี message ทำให้รูปที่ webhook เก็บไว้หายทุกครั้งที่ซิงก์ทับ
         // และเก็บ mid (message id) ให้ตรงกับ webhook — ใช้กันข้อความเบิ้ลตอน echo
+        // ไม่ตัดซ้ำที่นี่แล้ว — msgLimit (พารามิเตอร์ Graph API ด้านบน, เพดาน 100) จำกัดจำนวนที่ดึงมาอยู่แล้ว
+        // และการ carryOver/MAX_TRANSCRIPT_ITEMS ด้านล่างเป็นตัวคุมขนาดสุดท้ายที่ถูกต้องกว่า (เดิมตัดซ้อนกันสองชั้น
+        // ทำให้ข้อความใหม่เกิน 60 รายการในรอบเดียวหายไปได้ ทั้งที่ msgLimit อนุญาตถึง 100)
         const transcript = msgs
           .filter((m) => m.message || m.attachments?.data?.length || m.sticker)
-          .slice(0, 60)
           .map((m) => {
             const att = (m.attachments?.data ?? [])[0];
             const mt = String(att?.mime_type || "");
@@ -354,8 +358,10 @@ Deno.serve(async (req) => {
         for (const pm of prevTr) {
           if (pm?.mid) previousByMid[String(pm.mid)] = pm;
         }
+        const newMids = new Set<string>();
         for (const it of r.transcript) {
           if (!it?.mid) continue;
+          newMids.add(String(it.mid));
           const old = previousByMid[String(it.mid)];
           if (!old) continue;
 
@@ -378,6 +384,17 @@ Deno.serve(async (req) => {
             it.img = old.img;
             it.img_source = "webhook";
           }
+        }
+
+        // ผนวกข้อความเก่าที่ Meta ไม่ได้คืนมาในรอบนี้กลับเข้า transcript แทนที่จะปล่อยให้ upsert ทับด้วยแค่ชุด
+        // ล่าสุด (messages.limit(${msgLimit}) ของ Graph API คืนแค่ msgLimit ข้อความล่าสุดต่อห้องเสมอ) — เดิมทุกครั้งที่
+        // sync ทำงาน (รวมถึง job "recent" ที่รันทุกไม่กี่วินาที) transcript ทั้งก้อนจะถูกแทนที่ด้วยแค่ช่วงล่าสุดนี้
+        // ทำให้ข้อความเก่ากว่านั้นหายไปเงียบๆ แม้ webhook เคยเก็บไว้ถูกต้องแล้วก็ตาม
+        const carryOver = prevTr.filter((pm: any) => !pm?.mid || !newMids.has(String(pm.mid)));
+        if (carryOver.length) {
+          const merged = [...carryOver, ...r.transcript];
+          merged.sort((a: any, b: any) => timeMs(a?.at) - timeMs(b?.at));
+          r.transcript = merged.length > MAX_TRANSCRIPT_ITEMS ? merged.slice(merged.length - MAX_TRANSCRIPT_ITEMS) : merged;
         }
       }
 
