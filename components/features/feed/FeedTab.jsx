@@ -51,15 +51,10 @@ export default function FeedTab({ active = true }) {
   const [notice, setNotice] = useState(null);   // { id, ok, message }
   const [email, setEmail] = useState("");
   const [translate, setTranslate] = useState(false);   // ค่าเริ่มต้น = ส่งตามที่พิมพ์ (เหมือนตอบผ่าน Facebook)
-  const [asDm, setAsDm] = useState(false);             // ตอบเป็นข้อความส่วนตัวแทนการตอบใต้คอมเมนต์
-  const [saved, setSaved] = useState([]);              // คลังคำตอบ (ใช้ร่วมกับหน้าตอบแชท)
   const loadingRef = useRef(false);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => setEmail(data?.user?.email || ""));
-    // คลังคำตอบชุดเดียวกับหน้าตอบแชท (เอาเฉพาะข้อความ ไม่เอารูป เพราะคอมเมนต์ตอบด้วยข้อความ)
-    supabase.from("saved_replies").select("id, title, message, page_id, sort").order("sort").order("created_at")
-      .then(({ data }) => setSaved((data || []).filter((r) => r.message)));
   }, []);
 
   const load = useCallback(async () => {
@@ -91,7 +86,9 @@ export default function FeedTab({ active = true }) {
     return () => { clearInterval(timer); window.removeEventListener("focus", onFocus); };
   }, [active, load]);
 
-  async function sendReply(row) {
+  // mode: "public" = ตอบใต้คอมเมนต์ (ทุกคนเห็น) · "private" = ส่งข้อความส่วนตัวถึงคนคอมเมนต์ (Meta อนุญาต 1 ครั้ง/คอมเมนต์)
+  // แยกเป็นสองปุ่มกดตรง ๆ แทนการติ๊กเช็คบ็อกซ์ก่อนกดปุ่มเดียว กันกดพลาดว่าจะส่งแบบไหน
+  async function sendReply(row, mode) {
     const body = text.trim();
     if (!body || sending) return;
     setSending(true); setNotice(null);
@@ -102,14 +99,14 @@ export default function FeedTab({ active = true }) {
       body: {
         action: "send", id: row.id, text_th: body, by: email,
         ...(translate ? {} : { approved_text: body }),
-        comment_reply_mode: asDm ? "private" : "public",
+        comment_reply_mode: mode,
       },
     });
     setSending(false);
     if (error) { setNotice({ id: row.id, ok: false, message: await readFunctionErrorMessage(error) }); return; }
     if (!data?.ok) { setNotice({ id: row.id, ok: false, message: data?.error || "ตอบคอมเมนต์ไม่สำเร็จ" }); return; }
-    logActivity("reply_comment", { id: row.id, page_id: row.page_id, customer_name: row.customer_name });
-    setNotice({ id: row.id, ok: true, message: asDm ? "ส่งข้อความส่วนตัวแล้ว" : "ตอบใต้คอมเมนต์แล้ว" });
+    logActivity("reply_comment", { id: row.id, page_id: row.page_id, customer_name: row.customer_name, mode });
+    setNotice({ id: row.id, ok: true, message: mode === "private" ? "ส่งข้อความส่วนตัวแล้ว" : "ตอบใต้คอมเมนต์แล้ว" });
     setText(""); setOpenId(null);
     load();
   }
@@ -208,43 +205,30 @@ export default function FeedTab({ active = true }) {
                           <textarea
                             value={text} onChange={(e) => setText(e.target.value)} rows={2} autoFocus
                             placeholder={translate ? "พิมพ์ไทย — ระบบจะแปลเป็นภาษาลูกค้าก่อนส่ง" : "พิมพ์คำตอบ — ส่งตามที่พิมพ์เลย (เหมือนตอบใน Facebook)"}
-                            onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") sendReply(row); }}
+                            onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") sendReply(row, "public"); }}
                             className="w-full rounded-lg border border-slate-300 px-2.5 py-2 text-sm"
                           />
 
-                          {/* คลังคำตอบชุดเดียวกับหน้าตอบแชท — กดแล้วเติมข้อความลงกล่องเลย */}
-                          {saved.filter((r) => !r.page_id || String(r.page_id) === String(row.page_id)).length > 0 && (
-                            <div className="flex flex-wrap gap-1">
-                              {saved.filter((r) => !r.page_id || String(r.page_id) === String(row.page_id)).slice(0, 8).map((r) => (
-                                <button key={r.id} type="button" onClick={() => setText(r.message)}
-                                  title={r.message}
-                                  className="rounded-full border border-slate-300 px-2 py-0.5 text-[10.5px] text-slate-600 hover:bg-slate-50">
-                                  {r.title || String(r.message).slice(0, 20)}
-                                </button>
-                              ))}
-                            </div>
-                          )}
+                          <label className="inline-flex items-center gap-1.5 cursor-pointer text-[11px] text-slate-600">
+                            <input type="checkbox" checked={translate} onChange={(e) => setTranslate(e.target.checked)} />
+                            แปลเป็นภาษาลูกค้าก่อนส่ง
+                          </label>
 
-                          <div className="flex items-center gap-3 flex-wrap text-[11px] text-slate-600">
-                            <label className="inline-flex items-center gap-1.5 cursor-pointer">
-                              <input type="checkbox" checked={translate} onChange={(e) => setTranslate(e.target.checked)} />
-                              แปลเป็นภาษาลูกค้าก่อนส่ง
-                            </label>
-                            <label className="inline-flex items-center gap-1.5 cursor-pointer" title="Meta อนุญาตให้ส่งข้อความส่วนตัวถึงคนคอมเมนต์ได้ 1 ครั้งต่อคอมเมนต์">
-                              <input type="checkbox" checked={asDm} onChange={(e) => setAsDm(e.target.checked)} />
-                              ส่งเป็นข้อความส่วนตัว (DM) แทน
-                            </label>
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            <button type="button" onClick={() => sendReply(row)} disabled={sending || !text.trim()}
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <button type="button" onClick={() => sendReply(row, "public")} disabled={sending || !text.trim()}
                               className="inline-flex items-center gap-1.5 rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 disabled:opacity-50">
                               {sending ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
-                              {asDm ? "ส่งข้อความส่วนตัว" : "ตอบใต้คอมเมนต์"}
+                              ตอบใต้คอมเมนต์
+                            </button>
+                            <button type="button" onClick={() => sendReply(row, "private")} disabled={sending || !text.trim()}
+                              title="Meta อนุญาตให้ส่งข้อความส่วนตัวถึงคนคอมเมนต์ได้ 1 ครั้งต่อคอมเมนต์"
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-brand-400/60 px-3 py-1.5 text-xs font-semibold text-brand-600 hover:bg-brand-50 disabled:opacity-50">
+                              {sending ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+                              ส่งข้อความส่วนตัว (DM)
                             </button>
                             <button type="button" onClick={() => { setOpenId(null); setText(""); }}
                               className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-600 hover:bg-slate-50">ยกเลิก</button>
-                            <span className="text-[10.5px] text-slate-400">Ctrl/⌘ + Enter = ส่ง</span>
+                            <span className="text-[10.5px] text-slate-400">Ctrl/⌘ + Enter = ตอบใต้คอมเมนต์</span>
                           </div>
                         </div>
                       ) : (

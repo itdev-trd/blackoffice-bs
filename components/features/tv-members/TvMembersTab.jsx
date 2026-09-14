@@ -809,21 +809,23 @@ export default function TvMembersTab({ active = true, embedded = false, onOpenCh
             {RANGE_PRESETS.map(([key, label]) => (
               <button key={key} onClick={() => key === "custom" ? openDatePicker() : setRangeKey(key)} className={`px-2.5 py-1 rounded-lg text-xs font-medium ${rangeKey === key ? "bg-brand-600 text-white" : "text-slate-600 hover:bg-slate-100 border border-slate-200"}`}>{label}</button>
             ))}
-            {rangeKey === "custom" && <button onClick={openDatePicker} className="tv-date-trigger rounded-lg border border-slate-300 px-3 py-1 text-xs text-slate-200">{fmtDMY2(customFrom)} ถึง {fmtDMY2(customTo)}</button>}
+            {rangeKey === "custom" && <button onClick={openDatePicker} className="tv-date-trigger rounded-lg border border-slate-300 px-3 py-1 text-xs text-slate-700">{fmtDMY2(customFrom)} ถึง {fmtDMY2(customTo)}</button>}
             <span className="ml-auto text-xs text-slate-400">กำลังแสดง: {rangeLabel}</span>
             {datePickerOpen && (
-              <div className="tv-date-picker absolute z-30 top-full left-0 mt-2 w-[min(340px,calc(100vw-32px))] rounded-2xl border p-4 shadow-2xl">
+              // เดิมกล่องนี้ไม่มี bg และใช้สีตัวอักษร/เส้นขอบของธีมมืดเดิม (text-slate-200/300, border-slate-700)
+              // พอแอปเปลี่ยนเป็นธีมสว่างเป็นค่าเริ่มต้น กล่องเลยโปร่งใส ตัวเลขในปฏิทินไปทับกับตารางด้านหลังจนอ่านไม่ออก
+              <div className="tv-date-picker absolute z-30 top-full left-0 mt-2 w-[min(340px,calc(100vw-32px))] rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl">
                 <div className="flex items-center justify-between gap-2 mb-3">
-                  <button onClick={() => setPickerMonth((d) => new Date(d.getFullYear(), d.getMonth() - 1, 1))} className="p-1.5 rounded-lg text-slate-300 hover:bg-slate-700"><ChevronLeft size={18} /></button>
+                  <button onClick={() => setPickerMonth((d) => new Date(d.getFullYear(), d.getMonth() - 1, 1))} className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100"><ChevronLeft size={18} /></button>
                   <div className="flex items-center gap-1.5">
-                    <select value={pickerMonth.getMonth()} onChange={(e) => setPickerMonth(new Date(pickerMonth.getFullYear(), Number(e.target.value), 1))} className="tv-date-select rounded-lg px-2 py-1 text-sm font-semibold">
+                    <select value={pickerMonth.getMonth()} onChange={(e) => setPickerMonth(new Date(pickerMonth.getFullYear(), Number(e.target.value), 1))} className="tv-date-select rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm font-semibold text-slate-700">
                       {Array.from({ length: 12 }, (_, month) => <option key={month} value={month}>{new Date(2020, month, 1).toLocaleDateString("th-TH", { month: "long" })}</option>)}
                     </select>
-                    <select value={pickerMonth.getFullYear()} onChange={(e) => setPickerMonth(new Date(Number(e.target.value), pickerMonth.getMonth(), 1))} className="tv-date-select rounded-lg px-2 py-1 text-sm font-semibold">
+                    <select value={pickerMonth.getFullYear()} onChange={(e) => setPickerMonth(new Date(Number(e.target.value), pickerMonth.getMonth(), 1))} className="tv-date-select rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm font-semibold text-slate-700">
                       {Array.from({ length: 8 }, (_, i) => pickerMonth.getFullYear() - 5 + i).map((year) => <option key={year} value={year}>{year + 543}</option>)}
                     </select>
                   </div>
-                  <button onClick={() => setPickerMonth((d) => new Date(d.getFullYear(), d.getMonth() + 1, 1))} className="p-1.5 rounded-lg text-slate-300 hover:bg-slate-700"><ChevronRight size={18} /></button>
+                  <button onClick={() => setPickerMonth((d) => new Date(d.getFullYear(), d.getMonth() + 1, 1))} className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100"><ChevronRight size={18} /></button>
                 </div>
                 <div className="grid grid-cols-7 gap-1 text-center text-[11px] text-slate-500 mb-1">{["จ", "อ", "พ", "พฤ", "ศ", "ส", "อา"].map((day) => <span key={day}>{day}</span>)}</div>
                 <div className="grid grid-cols-7 gap-1">
@@ -831,10 +833,10 @@ export default function TvMembersTab({ active = true, embedded = false, onOpenCh
                     const disabled = item.date > thToday;
                     const selected = item.date === draftFrom || item.date === draftTo;
                     const between = draftFrom && draftTo && item.date > draftFrom && item.date < draftTo;
-                    return <button key={item.date} disabled={disabled} onClick={() => selectPickerDate(item.date)} className={`h-8 rounded-lg text-xs ${selected ? "bg-brand-600 text-white font-semibold" : between ? "bg-brand-600/20 text-brand-200" : item.current ? "text-slate-200 hover:bg-slate-700" : "text-slate-600"} ${disabled ? "opacity-30 cursor-not-allowed" : ""}`}>{item.day}</button>;
+                    return <button key={item.date} disabled={disabled} onClick={() => selectPickerDate(item.date)} className={`h-8 rounded-lg text-xs ${selected ? "bg-brand-600 text-white font-semibold" : between ? "bg-brand-600/20 text-brand-700" : item.current ? "text-slate-700 hover:bg-slate-100" : "text-slate-300"} ${disabled ? "opacity-30 cursor-not-allowed" : ""}`}>{item.day}</button>;
                   })}
                 </div>
-                <div className="flex items-center justify-between gap-2 mt-4 pt-3 border-t border-slate-700/60">
+                <div className="flex items-center justify-between gap-2 mt-4 pt-3 border-t border-slate-200">
                   <span className="text-[11px] text-slate-500">{draftFrom ? fmtDMY2(draftFrom) : "เริ่มต้น"} → {draftTo ? fmtDMY2(draftTo) : "วันสิ้นสุด"}</span>
                   <button onClick={applyDateRange} disabled={!draftFrom || !draftTo || draftFrom > draftTo} className="rounded-lg bg-brand-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40">ใช้ช่วงวันที่</button>
                 </div>
