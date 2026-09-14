@@ -2492,7 +2492,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
             </button>
           )}
         </div>
-        <div className="flex-1 overflow-y-auto divide-y divide-night-border-subtle">
+        <div className="flex-1 overflow-y-auto overscroll-contain divide-y divide-night-border-subtle">
           {listError && list === null ? (
             <div className="p-6 text-center space-y-3">
               <div className="text-sm font-semibold text-rose-400">โหลดแชทไม่สำเร็จ</div>
@@ -2676,7 +2676,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                   <span className="text-amber-400 md:ml-auto">คำตอบจาก LINE OA Manager ไม่ถูกส่งออกทาง API · ตอบจากแอปนี้เพื่อให้ประวัติครบ</span>
                 </div>
               )}
-              <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-night-surface2/40">
+              <div className="flex-1 min-h-[96px] overflow-y-auto overscroll-contain p-4 space-y-2 bg-night-surface2/40">
                 {selected.transcript === null ? <Spinner label="กำลังโหลดบทสนทนา..." /> : <>{tItems.map((m, i) => (
                   m.w === "p" ? (
                     <div key={i} data-msg-at={m.at || undefined} data-msg-mid={m.mid || undefined} className={`flex flex-col items-end group ${isHl(m) ? "scroll-mt-20" : ""} ${m.pending ? "opacity-60" : ""}`}>
@@ -2878,12 +2878,12 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                 )}
 
                 {activeCompose === "trade" && (
-                  <div className="max-h-[46vh] overflow-y-auto rounded-xl border border-night-border p-3">
+                  <div className="max-h-[32vh] overflow-y-auto overscroll-contain rounded-xl border border-night-border p-3">
                     <TradeIdChecker darkMode />
                   </div>
                 )}
                 {activeCompose === "customer" && (
-                  <div className="max-h-[44vh] overflow-y-auto rounded-xl border border-night-border px-3 py-2.5">
+                  <div className="max-h-[32vh] overflow-y-auto overscroll-contain rounded-xl border border-night-border px-3 py-2.5">
                     <CustomerDataForm
                       darkMode
                       compact
@@ -2976,9 +2976,11 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                     <button onClick={() => setReplyTo(null)} className="text-night-ink-3 hover:text-night-ink shrink-0"><X size={14} /></button>
                   </div>
                 )}
-                {/* รูป/ไฟล์ที่พักไว้รอส่ง — ลบได้ */}
+                {/* รูป/ไฟล์ที่พักไว้รอส่ง — ลบได้
+                    จำกัดความสูง: แนบรูปหลายรูปพร้อมกันบนมือถือ (คีย์บอร์ดเปิดอยู่แล้ว) ไม่งั้นแถวรูปจะดัน
+                    ช่องพิมพ์ + พื้นที่แชทด้านบนให้เหลือแทบไม่เห็นอะไรเลย (ดู min-h ของกล่องข้อความด้านบน) */}
                 {pendingFiles.length > 0 && (
-                  <div className="flex flex-wrap gap-2 mb-2">
+                  <div className="flex flex-wrap gap-2 mb-2 max-h-24 overflow-y-auto overscroll-contain">
                     {pendingFiles.map((pf, idx) => (
                       <div key={idx} className="relative group">
                         {pf.preview
