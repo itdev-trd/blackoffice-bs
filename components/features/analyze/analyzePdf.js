@@ -6,10 +6,18 @@ import {
   AGE_LABEL, BD_KEYS, BD_METRIC_LABEL, COMPARE_METRICS, DEVICE_LABEL, GENDER_LABEL,
   OBJECTIVE_LABEL, REGION_LABEL, beDateTH, escHtml, fmtMoney, fmtNum, headlineResult, rangeLabel,
 } from "./analyzeLabels";
-export function buildCompareHtml(rows, preset) {
+// options.metricKeys — เลือกเฉพาะตัวชี้วัดที่ติ๊กไว้ (แบบเดียวกับตัวเลือกคอลัมน์ของ Meta Ads Manager)
+//   ไม่ส่งมา/ว่าง = เอาทั้งหมดเหมือนเดิม
+// options.includeImages — แถวรูปโฆษณาต่อคอลัมน์ (rows[i].thumb ต้องดึงมาก่อนเรียกฟังก์ชันนี้ — ดึงสดตอนกด
+//   export เท่านั้น เพราะ thumbnail_url ของ Meta เป็นลิงก์เซ็นชื่อหมดอายุไว แคชไว้นานแล้วเปิดจะพัง)
+export function buildCompareHtml(rows, preset, options = {}) {
   const esc = escHtml;
+  const metrics = options.metricKeys?.length ? COMPARE_METRICS.filter((m) => options.metricKeys.includes(m.key)) : COMPARE_METRICS;
   const head = rows.map((r) => `<th>${esc(r.item.headline)}</th>`).join("");
-  const body = COMPARE_METRICS.map((m) => {
+  const imageRow = options.includeImages
+    ? `<tr class="imgrow"><th>รูปโฆษณา</th>${rows.map((r) => `<td>${r.thumb ? `<img src="${esc(r.thumb)}" alt="">` : "—"}</td>`).join("")}</tr>`
+    : "";
+  const body = metrics.map((m) => {
     const cells = rows.map((r) => {
       const v = r.overall?.[m.key];
       return `<td style="text-align:right">${v == null ? "—" : esc(m.fmt(v))}</td>`;
@@ -20,19 +28,20 @@ export function buildCompareHtml(rows, preset) {
 <style>body{font-family:'Sarabun','Noto Sans Thai',system-ui,sans-serif;color:#1e293b;margin:24px}
 h1{font-size:18px} table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px}
 th,td{border:1px solid #e2e8f0;padding:6px 8px} th{background:#f8fafc;text-align:left}
+tr.imgrow td{text-align:center;padding:8px} tr.imgrow img{width:64px;height:64px;object-fit:cover;border-radius:6px}
 @page{margin:12mm;size:landscape}</style></head><body>${exportPageNavHtml("analyze")}
 <h1>เปรียบเทียบโฆษณา (${rows.length} รายการ)</h1>
 <div style="color:#64748b;font-size:12px">อัปเดต ${esc(new Date().toLocaleString("th-TH"))}</div>
-<table><tr><th>ตัวชี้วัด</th>${head}</tr>${body}</table>
+<table><tr><th>ตัวชี้วัด</th>${head}</tr>${imageRow}${body}</table>
 <script>setTimeout(function(){try{window.focus();window.print();}catch(e){}},450);</script>
 </body></html>`;
 }
 
-export function exportComparePdf(rows, preset) {
+export function exportComparePdf(rows, preset, options = {}) {
   const w = window.open("", "_blank");
   if (!w) { alert("เบราว์เซอร์บล็อกป็อปอัป — อนุญาตแล้วลองใหม่"); return; }
   w.document.open();
-  w.document.write(buildCompareHtml(rows, preset));
+  w.document.write(buildCompareHtml(rows, preset, options));
   w.document.close();
 }
 

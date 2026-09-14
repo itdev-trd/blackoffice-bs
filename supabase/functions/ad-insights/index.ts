@@ -111,7 +111,14 @@ Deno.serve(async (req) => {
       } catch { /* cache พลาด = ดึงสดต่อ */ }
     }
 
-    const [overallRows, ageGenderRows, regionRows, placementRows, deviceRows, dailyRows] = await Promise.all([
+    // รูปโฆษณา — ใช้ตอน export เปรียบเทียบ (Compare) ที่ต้องฝังรูปในรายงาน · เฉพาะระดับ "ad" เท่านั้น
+    // ที่มี creative ตรงตัว (ระดับ adset/campaign ไม่มี field นี้ ปล่อยให้ error เงียบแล้วได้ null แทน)
+    const creativeFetch = (typeof level === "string" ? level : "ad") === "ad"
+      ? fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${ad_id}?fields=creative{thumbnail_url}&access_token=${META_TOKEN}`)
+          .then((r) => r.json()).catch(() => ({}))
+      : Promise.resolve({});
+
+    const [overallRows, ageGenderRows, regionRows, placementRows, deviceRows, dailyRows, creativeRow] = await Promise.all([
       fetchInsights(ad_id, {
         ...rangeParams,
         fields: "objective,spend,impressions,reach,frequency,clicks,ctr,cpm,cpc,inline_link_clicks,actions",
@@ -125,7 +132,9 @@ Deno.serve(async (req) => {
       }),
       fetchInsights(ad_id, { ...rangeParams, breakdowns: "impression_device", fields: "impressions,spend,clicks,actions" }),
       fetchInsights(ad_id, { ...rangeParams, time_increment: "1", fields: "spend,impressions,clicks,actions" }),
+      creativeFetch,
     ]);
+    const thumbnailUrl = (creativeRow as any)?.creative?.thumbnail_url || null;
 
     const o = overallRows[0] ?? {};
     const overall = buildOverall(o);
@@ -212,7 +221,7 @@ Deno.serve(async (req) => {
     } catch (_e) { /* ไม่ให้กระทบแดชบอร์ดหลัก */ }
 
     const nowIso = new Date().toISOString();
-    const result: Record<string, unknown> = { ok: true, generated_at: nowIso, date_preset: preset, objective: o.objective ?? null, overall, segments: segmentsOut, age, gender, region, placement, device, daily, account_opens_by_date, page_chats_by_date };
+    const result: Record<string, unknown> = { ok: true, generated_at: nowIso, date_preset: preset, objective: o.objective ?? null, thumbnail_url: thumbnailUrl, overall, segments: segmentsOut, age, gender, region, placement, device, daily, account_opens_by_date, page_chats_by_date };
     // เก็บลง shared cache (เฉพาะโหมดปกติ ไม่ใช่ segments) — user อื่นเปิดตัวเดิม+ช่วงเดิมจะได้ของนี้เลย
     if (cacheable) {
       try {

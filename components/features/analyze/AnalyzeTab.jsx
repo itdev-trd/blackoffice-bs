@@ -848,6 +848,34 @@ function CompareView({ items, onClose, aiModel }) {
   const [aiBusy, setAiBusy] = useState(false);
   const [aiResult, setAiResult] = useState(null);
   const [aiError, setAiError] = useState("");
+  // ตัวเลือกก่อน export — แบบเดียวกับตัวเลือกคอลัมน์ของ Meta Ads Manager (ติ๊กว่าจะเอาตัวชี้วัดไหนบ้าง)
+  // + ตัวเลือกรวมรูปโฆษณา (ต้องดึงสดตอนกด export เท่านั้น เพราะ thumbnail_url เป็นลิงก์หมดอายุไว)
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportKeys, setExportKeys] = useState(() => new Set(COMPARE_METRICS.map((m) => m.key)));
+  const [exportImages, setExportImages] = useState(true);
+  const [exportBusy, setExportBusy] = useState(false);
+  function toggleExportKey(key) {
+    setExportKeys((cur) => { const next = new Set(cur); if (next.has(key)) next.delete(key); else next.add(key); return next; });
+  }
+  async function runExportPdf() {
+    setExportBusy(true);
+    try {
+      let exportRows = rows;
+      if (exportImages) {
+        // ดึงรูปสดเฉพาะตอน export — ตัวที่ใช้แสดงผลบนจอ (rows) ไม่มี thumbnail เลย ไม่งั้นต้องยิง Meta
+        // เพิ่มทุกครั้งที่เปิดหน้าเปรียบเทียบทั้งที่ผู้ใช้อาจไม่ export เลยก็ได้
+        exportRows = await Promise.all(rows.map(async (r) => {
+          const { data } = await supabase.functions.invoke("ad-insights", { body: { ad_id: r.item.ad_id, ...rangeToBody(range), force: true } });
+          return { ...r, thumb: data?.ok ? data.thumbnail_url : null };
+        }));
+      }
+      exportComparePdf(exportRows, range, { metricKeys: [...exportKeys], includeImages: exportImages });
+      logActivity("export", { format: "compare_pdf", count: rows.length, include_images: exportImages });
+    } finally {
+      setExportBusy(false);
+      setExportOpen(false);
+    }
+  }
   const rangeKey = JSON.stringify(rangeToBody(range));
   const customIncomplete = range.preset === "custom" && (!range.since || !range.until);
 
@@ -913,9 +941,37 @@ function CompareView({ items, onClose, aiModel }) {
             <button onClick={analyzeAI} disabled={loading || aiBusy} className="text-xs bg-brand-600 text-white rounded-lg px-3 py-1.5 font-medium hover:bg-brand-700 disabled:opacity-50 flex items-center gap-1.5">
               {aiBusy ? <Loader2 className="animate-spin" size={14} /> : <Sparkles size={14} />} AI วิเคราะห์
             </button>
-            <button onClick={() => exportComparePdf(rows, range)} disabled={loading} className="text-xs border border-slate-300 rounded-lg px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1.5">
-              <FileDown size={14} /> Export PDF
-            </button>
+            <div className="relative">
+              <button onClick={() => setExportOpen((v) => !v)} disabled={loading} className="text-xs border border-slate-300 rounded-lg px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1.5">
+                <FileDown size={14} /> Export PDF <ChevronDown size={13} />
+              </button>
+              {exportOpen && !loading && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setExportOpen(false)} />
+                  <div className="absolute right-0 mt-1 z-20 bg-white border border-slate-200 rounded-lg shadow-lg py-2 w-64">
+                    <div className="px-3 pb-1.5 text-[10px] font-semibold text-slate-400">เลือกตัวชี้วัดที่จะ export</div>
+                    <div className="max-h-56 overflow-y-auto px-1">
+                      {COMPARE_METRICS.map((m) => (
+                        <label key={m.key} className="flex items-center gap-2 px-2 py-1.5 text-xs text-slate-700 hover:bg-slate-50 rounded-md cursor-pointer">
+                          <input type="checkbox" checked={exportKeys.has(m.key)} onChange={() => toggleExportKey(m.key)} />
+                          {m.label}
+                        </label>
+                      ))}
+                    </div>
+                    <div className="my-1.5 border-t border-slate-100" />
+                    <label className="flex items-center gap-2 px-3 py-1.5 text-xs text-slate-700 cursor-pointer">
+                      <input type="checkbox" checked={exportImages} onChange={(e) => setExportImages(e.target.checked)} />
+                      รวมรูปโฆษณา
+                    </label>
+                    <div className="px-3 pt-1.5">
+                      <button onClick={runExportPdf} disabled={exportBusy || exportKeys.size === 0} className="w-full text-xs bg-brand-600 text-white rounded-lg px-3 py-1.5 font-medium hover:bg-brand-700 disabled:opacity-50 flex items-center justify-center gap-1.5">
+                        {exportBusy ? <Loader2 size={13} className="animate-spin" /> : <FileDown size={13} />} ส่งออก PDF
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
             <RangePicker value={range} onChange={setRange} />
           </div>
         </div>
