@@ -17,7 +17,7 @@ import {
   SectionTitle, StatCard, Button, Card, Dialog, SearchInput, FilterPill, Field, Input, Select, EmptyState,
 } from "@/components/ui";
 import {
-  Gauge, CheckCircle2, XCircle, Plus, Download, RefreshCw, Loader2, Pencil, Trash2, ChevronLeft, ChevronRight,
+  Gauge, CheckCircle2, XCircle, Plus, Download, RefreshCw, Loader2, Pencil, Trash2, ChevronLeft, ChevronRight, ListTree,
 } from "lucide-react";
 
 const MEMBER_TYPES = [["free", "Free"], ["paid", "จ่ายเงิน"], ["promotion", "โปรโมชั่น"]];
@@ -31,6 +31,29 @@ function statusInfo(a) {
   if (a.status === "revoked") return { label: "ถอนสิทธิ์แล้ว", tone: "text-slate-500 bg-slate-100 border-slate-200" };
   if (a.status === "expired") return { label: "หมดอายุ", tone: "text-amber-700 bg-amber-50 border-amber-200" };
   return { label: "ไม่มีสิทธิ์", tone: "text-rose-700 bg-rose-50 border-rose-200" };
+}
+
+// สมาชิกคนหนึ่งอาจมีหลายแถวใน tv_access (หนึ่งแถวต่ออินดิเคเตอร์หนึ่งตัว) — ตารางเดิม
+// โชว์ทีละแถวทำให้คนเดียวโผล่ซ้ำหลายบรรทัด (ชื่อ/เบอร์/อีเมลซ้ำกันทุกแถว) ดูเหมือน UI ค้าง/ซ้อนกัน
+// จัดกลุ่มตาม username ให้เหลือ "หนึ่งคนหนึ่งแถว" แล้วเลือกแถว "หลัก" มาโชว์ในตาราง
+// ถ้ามีมากกว่า 1 อินดิเคเตอร์ กดเข้าไปดูรายละเอียดเพิ่มเติมได้ (ดู detailMember ด้านล่าง)
+function pickPrimaryIndicator(indicatorRows) {
+  const active = indicatorRows.filter((r) => r.status === "active");
+  const pool = active.length ? active : indicatorRows;
+  return [...pool].sort((a, b) => {
+    const ea = a.expiration ? new Date(a.expiration).getTime() : Infinity; // ตลอดชีพ (ไม่มีวันหมดอายุ) ถือว่าไกลสุด
+    const eb = b.expiration ? new Date(b.expiration).getTime() : Infinity;
+    return eb - ea;
+  })[0];
+}
+function earliestOf(indicatorRows, field) {
+  let min = Infinity;
+  for (const r of indicatorRows) {
+    if (!r[field]) continue;
+    const t = new Date(r[field]).getTime();
+    if (t < min) min = t;
+  }
+  return Number.isFinite(min) ? new Date(min).toISOString() : null;
 }
 
 // เดือนปัจจุบัน (เวลาไทย) เป็นช่วงเริ่มต้นของการเช็ค Lot — ตรงกับที่แอดมินคุ้นเคย ("ปิดยอดรายเดือน")
@@ -65,10 +88,11 @@ export default function BesightMembersTab({ active = true }) {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [formErr, setFormErr] = useState("");
-  const [editRow, setEditRow] = useState(null);
+  const [editMember, setEditMember] = useState(null);   // สมาชิก (ไม่ใช่แถวเดียว) ที่กำลังแก้ข้อมูลร่วม
   const [editForm, setEditForm] = useState(emptyForm);
   const [editSaving, setEditSaving] = useState(false);
   const [busyRow, setBusyRow] = useState(null);
+  const [detailMember, setDetailMember] = useState(null);   // สมาชิกที่กำลังดูรายละเอียด (ครบทุกอินดิเคเตอร์)
   const { start: periodStart, end: periodEnd } = useMemo(() => currentMonthRange(), []);
 
   const brand = brands.find((b) => b.id === brandId) || null;
@@ -118,19 +142,40 @@ export default function BesightMembersTab({ active = true }) {
   const scriptName = (pineId) => scripts.find((s) => s.pine_id === pineId)?.name || pineId;
   const lotsOf = (tradeId) => (tradeId ? lotUsage.get(String(tradeId))?.lots ?? 0 : 0);
 
-  const filtered = rows.filter((a) => {
-    if (memberTypeFilter && a.member_type !== memberTypeFilter) return false;
-    if (statusFilter && a.status !== statusFilter) return false;
+  // จัดกลุ่ม tv_access ทีละแถว (หนึ่งแถวต่ออินดิเคเตอร์) ให้เหลือหนึ่งแถวต่อสมาชิกจริง
+  const members = useMemo(() => {
+    const byUsername = new Map();
+    for (const r of rows) {
+      const key = String(r.username || "").toLowerCase();
+      if (!byUsername.has(key)) byUsername.set(key, []);
+      byUsername.get(key).push(r);
+    }
+    return [...byUsername.entries()].map(([key, indicators]) => {
+      const primary = pickPrimaryIndicator(indicators);
+      return {
+        key, primary, indicators,
+        username: primary.username, display_name: primary.display_name, email: primary.email,
+        phone: primary.phone, country: primary.country, telegram: primary.telegram,
+        trade_id: primary.trade_id, member_type: primary.member_type, contact_channel: primary.contact_channel,
+        granted_at: earliestOf(indicators, "granted_at") || primary.granted_at,
+        created_at: earliestOf(indicators, "created_at") || primary.created_at,
+      };
+    });
+  }, [rows]);
+
+  const filtered = members.filter((m) => {
+    if (memberTypeFilter && m.member_type !== memberTypeFilter) return false;
+    if (statusFilter && !m.indicators.some((r) => r.status === statusFilter)) return false;
     if (q.trim()) {
       const needle = q.trim().toLowerCase();
-      const hay = [a.display_name, a.username, a.email, a.trade_id, a.phone, a.telegram].filter(Boolean).join(" ").toLowerCase();
+      const hay = [m.display_name, m.username, m.email, m.trade_id, m.phone, m.telegram].filter(Boolean).join(" ").toLowerCase();
       if (!hay.includes(needle)) return false;
     }
     return true;
   });
-  const passedCount = rows.filter((a) => lotsOf(a.trade_id) >= quota && quota > 0).length;
-  const notPassedCount = rows.length - passedCount;
-  const passedPct = rows.length ? Math.round((passedCount / rows.length) * 100) : 0;
+  const passedCount = members.filter((m) => lotsOf(m.trade_id) >= quota && quota > 0).length;
+  const notPassedCount = members.length - passedCount;
+  const passedPct = members.length ? Math.round((passedCount / members.length) * 100) : 0;
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -184,27 +229,34 @@ export default function BesightMembersTab({ active = true }) {
     loadMembers();
   }
 
-  function openEdit(a) {
-    setEditRow(a);
+  function openEdit(m) {
+    setEditMember(m);
     setEditForm({
-      username: a.username || "", display_name: a.display_name || "", email: a.email || "",
-      trade_id: a.trade_id || "", phone: a.phone || "", country: a.country || "", telegram: a.telegram || "",
-      contact_channel: a.contact_channel || "", member_type: a.member_type || "",
+      username: m.username || "", display_name: m.display_name || "", email: m.email || "",
+      trade_id: m.trade_id || "", phone: m.phone || "", country: m.country || "", telegram: m.telegram || "",
+      contact_channel: m.contact_channel || "", member_type: m.member_type || "",
     });
   }
 
+  // สมาชิกอาจมีหลายอินดิเคเตอร์ (หลายแถวใน tv_access) — ข้อมูลติดต่อ/แหล่งที่มา/ช่องทาง
+  // เป็นของคนคนเดียวกัน จึงต้องอัปเดตทุกแถวพร้อมกัน ไม่ใช่แค่แถวเดียว ไม่งั้นข้อมูลจะไม่ตรงกันเอง
   async function submitEdit() {
-    if (!editRow) return;
+    if (!editMember) return;
     setEditSaving(true);
-    const { data, error } = await supabase.functions.invoke("tradingview", { body: {
-      action: "update_member", id: editRow.id, username: editForm.username.trim(), display_name: editForm.display_name.trim(),
+    const payload = {
+      action: "update_member", username: editForm.username.trim(), display_name: editForm.display_name.trim(),
       email: editForm.email.trim(), trade_id: editForm.trade_id.trim(), phone: editForm.phone.trim(),
       country: editForm.country.trim(), telegram: editForm.telegram.trim(),
       contact_channel: editForm.contact_channel, member_type: editForm.member_type,
-    } });
+    };
+    let firstError = "";
+    for (const row of editMember.indicators) {
+      const { data, error } = await supabase.functions.invoke("tradingview", { body: { ...payload, id: row.id } });
+      if (!firstError && (error || !data?.ok)) firstError = data?.error || (await readFunctionErrorMessage(error)) || "แก้ไขไม่สำเร็จ";
+    }
     setEditSaving(false);
-    if (error || !data?.ok) { alert(data?.error || (await readFunctionErrorMessage(error)) || "แก้ไขไม่สำเร็จ"); return; }
-    setEditRow(null);
+    if (firstError) { alert(firstError); return; }
+    setEditMember(null);
     loadMembers();
   }
 
@@ -215,18 +267,20 @@ export default function BesightMembersTab({ active = true }) {
     setBusyRow(null);
     if (error || !data?.ok) { alert(data?.error || (await readFunctionErrorMessage(error)) || "ถอนสิทธิ์ไม่สำเร็จ"); return; }
     loadMembers();
+    setDetailMember((cur) => (cur ? { ...cur, indicators: cur.indicators.filter((r) => r.id !== a.id) } : cur));
   }
 
   function exportCsv() {
     const head = ["สมาชิก", "อีเมล", "แหล่ง", "เบอร์โทร", "ประเทศ", "Trade ID", "TradingView", "Telegram", "Indicator", "Lots ใช้ไป", "Lots โควตา", "สถานะสิทธิ์", "วันเริ่มต้น", "วันหมดอายุ", "วันที่เข้าร่วม", "ช่องทาง"];
-    const lines = [head, ...filtered.map((a) => [
-      a.display_name || "", a.email || "", memberTypeLabel(a.member_type), a.phone || "", a.country || "",
-      a.trade_id || "", a.username || "", a.telegram || "", scriptName(a.pine_id),
-      lotsOf(a.trade_id), quota, statusInfo(a).label,
-      a.granted_at ? new Date(a.granted_at).toLocaleDateString("th-TH") : "",
-      a.expiration ? new Date(a.expiration).toLocaleDateString("th-TH") : "ตลอดชีพ",
-      a.created_at ? new Date(a.created_at).toLocaleDateString("th-TH") : "",
-      channelLabel(a.contact_channel),
+    const lines = [head, ...filtered.map((m) => [
+      m.display_name || "", m.email || "", memberTypeLabel(m.member_type), m.phone || "", m.country || "",
+      m.trade_id || "", m.username || "", m.telegram || "",
+      m.indicators.map((r) => scriptName(r.pine_id)).join(" · "),
+      lotsOf(m.trade_id), quota, statusInfo(m.primary).label,
+      m.granted_at ? new Date(m.granted_at).toLocaleDateString("th-TH") : "",
+      m.primary.expiration ? new Date(m.primary.expiration).toLocaleDateString("th-TH") : "ตลอดชีพ",
+      m.created_at ? new Date(m.created_at).toLocaleDateString("th-TH") : "",
+      channelLabel(m.contact_channel),
     ])];
     const csv = lines.map((r) => r.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\n");
     const blob = new Blob([`﻿${csv}`], { type: "text/csv;charset=utf-8;" });
@@ -311,25 +365,34 @@ export default function BesightMembersTab({ active = true }) {
                 </tr>
               </thead>
               <tbody>
-                {pageRows.map((a) => {
-                  const st = statusInfo(a);
-                  const lots = lotsOf(a.trade_id);
+                {pageRows.map((m) => {
+                  const st = statusInfo(m.primary);
+                  const lots = lotsOf(m.trade_id);
                   const passed = quota > 0 && lots >= quota;
+                  const extraCount = m.indicators.length - 1;
                   return (
-                    <tr key={a.id} className="border-b border-slate-50 hover:bg-slate-50/60">
+                    <tr key={m.key} className="border-b border-slate-50 hover:bg-slate-50/60">
                       <td className="px-4 py-2.5 whitespace-nowrap">
-                        <div className="font-medium text-slate-800">{a.display_name || a.username}</div>
-                        {a.email && <div className="text-2xs text-slate-400">{a.email}</div>}
+                        <div className="font-medium text-slate-800">{m.display_name || m.username}</div>
+                        {m.email && <div className="text-2xs text-slate-400">{m.email}</div>}
                       </td>
                       <td className="px-4 py-2.5 whitespace-nowrap">
-                        <span className="text-2xs font-semibold px-2 py-0.5 rounded-full border border-slate-200 bg-slate-50 text-slate-600">{memberTypeLabel(a.member_type)}</span>
+                        <span className="text-2xs font-semibold px-2 py-0.5 rounded-full border border-slate-200 bg-slate-50 text-slate-600">{memberTypeLabel(m.member_type)}</span>
                       </td>
-                      <td className="px-4 py-2.5 whitespace-nowrap text-slate-600">{a.phone || "—"}</td>
-                      <td className="px-4 py-2.5 whitespace-nowrap text-slate-600">{a.country || "—"}</td>
-                      <td className="px-4 py-2.5 whitespace-nowrap text-slate-600">{a.trade_id || "—"}</td>
-                      <td className="px-4 py-2.5 whitespace-nowrap text-slate-600">{a.username}</td>
-                      <td className="px-4 py-2.5 whitespace-nowrap text-slate-600">{a.telegram || "—"}</td>
-                      <td className="px-4 py-2.5 whitespace-nowrap text-slate-600">{scriptName(a.pine_id)}</td>
+                      <td className="px-4 py-2.5 whitespace-nowrap text-slate-600">{m.phone || "—"}</td>
+                      <td className="px-4 py-2.5 whitespace-nowrap text-slate-600">{m.country || "—"}</td>
+                      <td className="px-4 py-2.5 whitespace-nowrap text-slate-600">{m.trade_id || "—"}</td>
+                      <td className="px-4 py-2.5 whitespace-nowrap text-slate-600">{m.username}</td>
+                      <td className="px-4 py-2.5 whitespace-nowrap text-slate-600">{m.telegram || "—"}</td>
+                      <td className="px-4 py-2.5 whitespace-nowrap">
+                        {extraCount > 0 ? (
+                          <button onClick={() => setDetailMember(m)} className="inline-flex items-center gap-1 text-brand-600 hover:underline">
+                            {scriptName(m.primary.pine_id)} <span className="text-2xs text-slate-400">+{extraCount} ตัว</span>
+                          </button>
+                        ) : (
+                          <span className="text-slate-600">{scriptName(m.primary.pine_id)}</span>
+                        )}
+                      </td>
                       <td className="px-4 py-2.5 whitespace-nowrap">
                         <span className={passed ? "text-emerald-700 font-semibold" : "text-rose-600 font-semibold"}>{lots.toFixed(2)}</span>
                         <span className="text-slate-400"> / {quota.toFixed(2)}</span>
@@ -337,16 +400,19 @@ export default function BesightMembersTab({ active = true }) {
                       <td className="px-4 py-2.5 whitespace-nowrap">
                         <span className={`text-2xs font-semibold px-2 py-0.5 rounded-full border ${st.tone}`}>{st.label}</span>
                       </td>
-                      <td className="px-4 py-2.5 whitespace-nowrap text-slate-500">{a.granted_at ? new Date(a.granted_at).toLocaleDateString("th-TH") : "—"}</td>
-                      <td className="px-4 py-2.5 whitespace-nowrap text-slate-500">{a.expiration ? new Date(a.expiration).toLocaleDateString("th-TH") : "ตลอดชีพ"}</td>
-                      <td className="px-4 py-2.5 whitespace-nowrap text-slate-500">{a.created_at ? new Date(a.created_at).toLocaleDateString("th-TH") : "—"}</td>
-                      <td className="px-4 py-2.5 whitespace-nowrap text-slate-500">{channelLabel(a.contact_channel)}</td>
+                      <td className="px-4 py-2.5 whitespace-nowrap text-slate-500">{m.granted_at ? new Date(m.granted_at).toLocaleDateString("th-TH") : "—"}</td>
+                      <td className="px-4 py-2.5 whitespace-nowrap text-slate-500">{m.primary.expiration ? new Date(m.primary.expiration).toLocaleDateString("th-TH") : "ตลอดชีพ"}</td>
+                      <td className="px-4 py-2.5 whitespace-nowrap text-slate-500">{m.created_at ? new Date(m.created_at).toLocaleDateString("th-TH") : "—"}</td>
+                      <td className="px-4 py-2.5 whitespace-nowrap text-slate-500">{channelLabel(m.contact_channel)}</td>
                       <td className="px-4 py-2.5 whitespace-nowrap text-right">
                         <div className="inline-flex items-center gap-1">
-                          <button onClick={() => openEdit(a)} className="p-1.5 rounded-lg text-slate-400 hover:text-brand-600 hover:bg-brand-50" title="แก้ไข"><Pencil size={14} /></button>
-                          <button onClick={() => revoke(a)} disabled={busyRow === a.id} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 disabled:opacity-50" title="ถอนสิทธิ์">
-                            {busyRow === a.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                          </button>
+                          <button onClick={() => setDetailMember(m)} className="p-1.5 rounded-lg text-slate-400 hover:text-brand-600 hover:bg-brand-50" title="ดูรายละเอียด/อินดิเคเตอร์ทั้งหมด"><ListTree size={14} /></button>
+                          <button onClick={() => openEdit(m)} className="p-1.5 rounded-lg text-slate-400 hover:text-brand-600 hover:bg-brand-50" title="แก้ไข"><Pencil size={14} /></button>
+                          {m.indicators.length === 1 && (
+                            <button onClick={() => revoke(m.primary)} disabled={busyRow === m.primary.id} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 disabled:opacity-50" title="ถอนสิทธิ์">
+                              {busyRow === m.primary.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -418,12 +484,13 @@ export default function BesightMembersTab({ active = true }) {
         </div>
       </Dialog>
 
-      <Dialog open={!!editRow} title="แก้ไขข้อมูลสมาชิก" onClose={() => setEditRow(null)}
+      <Dialog open={!!editMember} title="แก้ไขข้อมูลสมาชิก" onClose={() => setEditMember(null)}
+        description={editMember?.indicators.length > 1 ? `ใช้กับทั้ง ${editMember.indicators.length} อินดิเคเตอร์ของสมาชิกนี้` : undefined}
         footer={<>
-          <Button variant="secondary" onClick={() => setEditRow(null)}>ยกเลิก</Button>
+          <Button variant="secondary" onClick={() => setEditMember(null)}>ยกเลิก</Button>
           <Button variant="primary" loading={editSaving} onClick={submitEdit}>บันทึก</Button>
         </>}>
-        {editRow && (
+        {editMember && (
           <div className="space-y-3">
             <Field label="USER TradingView"><Input value={editForm.username} onChange={(e) => setEditForm((f) => ({ ...f, username: e.target.value }))} /></Field>
             <div className="grid grid-cols-2 gap-3">
@@ -448,6 +515,37 @@ export default function BesightMembersTab({ active = true }) {
                 </Select>
               </Field>
             </div>
+          </div>
+        )}
+      </Dialog>
+
+      {/* รายละเอียดสมาชิก — โผล่เฉพาะตอนกด "ดูรายละเอียด" ในตาราง เห็นครบทุกอินดิเคเตอร์ของคนคนเดียวกัน
+          (ตารางหลักโชว์แค่ตัว "หลัก" ตัวเดียวต่อแถว กันไม่ให้คนเดียวโผล่ซ้ำหลายบรรทัด) */}
+      <Dialog open={!!detailMember} title={detailMember ? `อินดิเคเตอร์ของ ${detailMember.display_name || detailMember.username}` : ""} onClose={() => setDetailMember(null)}
+        footer={<Button variant="secondary" onClick={() => setDetailMember(null)}>ปิด</Button>}>
+        {detailMember && (
+          <div className="space-y-2">
+            {detailMember.indicators.map((r) => {
+              const st = statusInfo(r);
+              return (
+                <div key={r.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 p-3">
+                  <div className="min-w-0">
+                    <div className="font-medium text-slate-800">{scriptName(r.pine_id)}</div>
+                    <div className="text-2xs text-slate-500 mt-0.5">
+                      หมดอายุ: {r.expiration ? new Date(r.expiration).toLocaleDateString("th-TH") : "ตลอดชีพ"}
+                      {" · "}เริ่ม: {r.granted_at ? new Date(r.granted_at).toLocaleDateString("th-TH") : "—"}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className={`text-2xs font-semibold px-2 py-0.5 rounded-full border ${st.tone}`}>{st.label}</span>
+                    <button onClick={() => revoke(r)} disabled={busyRow === r.id} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 disabled:opacity-50" title="ถอนสิทธิ์อินดิเคเตอร์นี้">
+                      {busyRow === r.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+            {detailMember.indicators.length === 0 && <div className="text-sm text-slate-400 text-center py-4">ถอนสิทธิ์ครบทุกอินดิเคเตอร์แล้ว</div>}
           </div>
         )}
       </Dialog>
