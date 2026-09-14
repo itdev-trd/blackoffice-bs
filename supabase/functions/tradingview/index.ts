@@ -14,6 +14,8 @@
 //   revoke { username, pine_id }          → สั่ง n8n ถอนสิทธิ์ + ลบ DB
 //   expire  (service/cron)                → ถอนสิทธิ์ที่หมดอายุ (สั่ง n8n ทีละราย)
 //   sync    (service/cron)                → ดึงรายชื่อสิทธิ์ต่อสคริปต์วันละครั้ง เก็บเป็น snapshot แยกจากประวัติสมาชิกใน tv_access
+//   refresh_lots { period_start, period_end, brand_id? } (admin) → ดึงยอด lot จริงจาก broker (XM) มา cache
+//     ใน tv_lot_usage ต่อ trade_id/ช่วงเดือน ใช้กับหน้า "จัดการสมาชิก Indicator" (ปุ่ม "ตรวจ Lot ทุกคน")
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { hasFullData, authorizeRequest } from "../_shared/permissions.ts";
@@ -405,7 +407,7 @@ Deno.serve(async (req) => {
 
     // ---- จัดการแบรนด์ TradingView (คุกกี้/เพจ/โชว์ในหน้าจัดการ) ----
     if (action === "list_brands") {
-      const { data: brands } = await db.from("tv_brands").select("id, name, tv_base, pages, show_in_manager, active, ingest_token").order("created_at");
+      const { data: brands } = await db.from("tv_brands").select("id, name, tv_base, pages, show_in_manager, active, ingest_token, lot_quota_per_month").order("created_at");
       // แนบสถานะว่ามีคุกกี้แล้วไหม (ไม่ส่งคุกกี้จริงออกไป)
       const withCookie = await Promise.all((brands ?? []).map(async (b: any) => {
         const c = await getBrandCookie(b.id);
@@ -425,6 +427,8 @@ Deno.serve(async (req) => {
         show_in_manager: body?.show_in_manager !== false,
         active: body?.active !== false, updated_at: nowIso,
       };
+      // โควตา lot/เดือน ของหน้า "จัดการสมาชิก Indicator" — ส่งมาก็แก้ ไม่ส่งมาก็ไม่แตะของเดิม (แก้ผ่านการ์ดสรุปแยกต่างหาก)
+      if (body?.lot_quota_per_month !== undefined) row.lot_quota_per_month = Math.max(0, Number(body.lot_quota_per_month) || 0);
       let id = Number(body?.id) || null;
       if (id) {
         const { error } = await db.from("tv_brands").update(row).eq("id", id);
@@ -521,6 +525,9 @@ Deno.serve(async (req) => {
       if ("trade_id" in body) patch.trade_id = String(body.trade_id || "").trim() || null;
       if ("contact_channel" in body) patch.contact_channel = normalizeContactChannel(body.contact_channel);
       if ("member_type" in body) patch.member_type = normalizeMemberType(body.member_type);
+      if ("phone" in body) patch.phone = String(body.phone || "").trim() || null;
+      if ("country" in body) patch.country = String(body.country || "").trim() || null;
+      if ("telegram" in body) patch.telegram = String(body.telegram || "").trim() || null;
       if (usernameChanged) {
         const cookie = await getBrandCookie(Number(current.brand_id) || await pineBrandId(current.pine_id));
         const oldUsername = String(current.username).trim();
@@ -681,6 +688,10 @@ Deno.serve(async (req) => {
           if (grantChannel) payload.contact_channel = grantChannel;
           const grantMemberType = normalizeMemberType(body?.member_type);
           if (grantMemberType) payload.member_type = grantMemberType;
+          // เบอร์/ประเทศ/Telegram — ใส่เฉพาะตอนส่งมาจริง เหตุผลเดียวกับ channel/member_type ด้านบน
+          if (body?.phone) payload.phone = String(body.phone).trim();
+          if (body?.country) payload.country = String(body.country).trim();
+          if (body?.telegram) payload.telegram = String(body.telegram).trim();
           if (existing) { payload.edited_by = grantedBy; payload.edited_at = nowIso; }
           else { payload.granted_by = grantedBy; payload.granted_at = nowIso; }
           const { error: upsertError } = await db.from("tv_access").upsert(payload, { onConflict: "username,pine_id" });
@@ -732,6 +743,55 @@ Deno.serve(async (req) => {
         }
       }
       return json({ ok: true, found: verification?.found === true, verified_at: verification?.verified_at || nowIso, verification });
+    }
+
+    // ---- ดึงยอด lot จริงจาก broker (XM) มา cache ต่อ trade_id/ช่วงเดือน — ปุ่ม "ตรวจ Lot ทุกคน" ----
+    // check-lot คืนยอดของ "ทุกบัญชีใต้ IB เรา" มาในก้อนเดียวเสมอ (พารามิเตอร์ tradeid ไม่มีผลกรอง —
+    // ทดสอบจริงแล้วว่าใส่เลขอะไรก็คืนชุดเดียวกัน) จึงดึงมาครั้งเดียวแล้วจับคู่กับ trade_id ของสมาชิก
+    // แต่ละคนเอง ไม่ต้องยิงทีละคน (105 คน = 105 request ถ้าทำแบบนั้น)
+    if (action === "refresh_lots") {
+      if (!isAdmin) return json({ ok: false, error: "เฉพาะแอดมิน" }, 403);
+      const periodStart = String(body?.period_start || "").trim();
+      const periodEnd = String(body?.period_end || "").trim();
+      if (!periodStart || !periodEnd) return json({ ok: false, error: "ต้องระบุช่วงวันที่ (period_start, period_end)" });
+
+      let rows: any[] = [];
+      try {
+        const url = `https://api.trdapi.com/webhook/check-lot?date_from=${encodeURIComponent(periodStart)}&date_to=${encodeURIComponent(periodEnd)}`;
+        const r = await fetch(url, { signal: AbortSignal.timeout(20000) });
+        const j = await r.json().catch(() => null);
+        rows = Array.isArray(j) ? j : [];
+      } catch (e) {
+        return json({ ok: false, error: `ดึงข้อมูล Lot จาก broker ไม่สำเร็จ: ${String(e instanceof Error ? e.message : e)}` });
+      }
+      const lotByLogin = new Map<string, { lots: number; campaign_name: string | null }>();
+      for (const r of rows) {
+        const login = String(r?.loginId ?? r?.login_id ?? r?.tradeid ?? "").trim();
+        if (!login) continue;
+        lotByLogin.set(login, { lots: Number(r?.lots) || 0, campaign_name: r?.campaignName ? String(r.campaignName) : null });
+      }
+
+      // เฉพาะสมาชิกที่มี trade_id (จำกัดตามแบรนด์ถ้าระบุมา)
+      let q = db.from("tv_access").select("trade_id").not("trade_id", "is", null);
+      const brandId = Number(body?.brand_id) || null;
+      if (brandId) q = q.eq("brand_id", brandId);
+      const { data: members, error: membersErr } = await q;
+      if (membersErr) return json({ ok: false, error: membersErr.message });
+      const tradeIds = [...new Set((members ?? []).map((m: any) => String(m.trade_id).trim()).filter(Boolean))];
+
+      const nowIso = new Date().toISOString();
+      const upserts = tradeIds.map((tid) => {
+        const hit = lotByLogin.get(tid);
+        return {
+          trade_id: tid, period_start: periodStart, period_end: periodEnd,
+          lots: hit?.lots ?? 0, campaign_name: hit?.campaign_name ?? null, fetched_at: nowIso,
+        };
+      });
+      if (upserts.length) {
+        const { error } = await db.from("tv_lot_usage").upsert(upserts, { onConflict: "trade_id,period_start,period_end" });
+        if (error) return json({ ok: false, error: error.message });
+      }
+      return json({ ok: true, checked: upserts.length, matched: upserts.filter((u) => u.lots > 0).length, fetched_at: nowIso });
     }
 
     return json({ ok: false, error: `ไม่รู้จัก action "${action}"` });

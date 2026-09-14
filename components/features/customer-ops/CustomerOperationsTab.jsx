@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { MessageSquare, Users, Tv, ScanSearch, Megaphone } from "lucide-react";
+import { MessageSquare, Users, Tv, Gauge, ScanSearch, Megaphone } from "lucide-react";
 import CustomerDatabaseTab, { TradeIdChecker } from "@/components/features/customerdb/CustomerDatabaseTab";
 import TvMembersTab from "@/components/features/tv-members/TvMembersTab";
+import BesightMembersTab from "@/components/features/tv-members/BesightMembersTab";
 import DetectedDataReview from "@/components/features/customerdb/DetectedDataReview";
 import { SavedRepliesPanel } from "@/components/features/settings/SettingsTab";
 import LineBroadcastPanel from "@/components/features/customer-ops/LineBroadcastPanel";
@@ -14,6 +15,7 @@ import { hasFullData } from "@/lib/constants/roles";
 const MODES = [
   ["customers", "ลูกค้า", Users],
   ["tv", "TradingView", Tv],
+  ["indicator", "สมาชิก Indicator", Gauge],
   ["detected", "ตรวจข้อมูลที่พบ", ScanSearch],
   ["replies", "ตอบกลับอัตโนมัติ", MessageSquare],
   ["broadcast", "Broadcast LINE", Megaphone],
@@ -31,8 +33,8 @@ export default function CustomerOperationsTab({ allowedPages = null, onOpenChat 
   // Broadcast LINE = ส่งออกหาลูกค้าจำนวนมาก ให้เฉพาะบทบาทที่มีอำนาจกับข้อมูลเต็มที่
   // (เดิมเช็ค role === "admin" ตรง ๆ ซึ่งพอเพิ่มบทบาท owner แล้วเจ้าของระบบจะมองไม่เห็นเมนูนี้)
   const canBroadcast = hasFullData(perm?.role);
-  const modes = MODES.filter(([key]) => (key !== "tv" || canTv) && (key !== "broadcast" || canBroadcast));
-  const activeMode = mode === "tv" && !canTv ? "customers" : mode;
+  const modes = MODES.filter(([key]) => (key !== "tv" && key !== "indicator" || canTv) && (key !== "broadcast" || canBroadcast));
+  const activeMode = (mode === "tv" || mode === "indicator") && !canTv ? "customers" : mode;
   return (
     <div className="mx-auto w-full max-w-[1600px] space-y-4">
       {/* เดิมเป็นพาเนลดำ (bg-slate-950) พร้อมป้ายสีทอง — เป็นก้อนมืดก้อนเดียวในแอปที่เหลือสว่างทั้งหมด
@@ -66,6 +68,7 @@ export default function CustomerOperationsTab({ allowedPages = null, onOpenChat 
       </div>
       {activeMode === "customers" && <CustomerDatabaseTab onOpenChat={onOpenChat} />}
       {activeMode === "tv" && <TvMembersTab active embedded onOpenChat={onOpenChat} />}
+      {activeMode === "indicator" && <BesightMembersTab active={activeMode === "indicator"} />}
       {activeMode === "detected" && <DetectedDataReview onOpenChat={onOpenChat} />}
       {activeMode === "replies" && <SavedRepliesPanel allowedPages={allowedPages} />}
       {activeMode === "broadcast" && <LineBroadcastPanel />}
