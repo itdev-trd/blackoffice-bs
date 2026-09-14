@@ -111,8 +111,8 @@
   /* ระยะกันแถบโฮมย้ายมาไว้ในแถบพิมพ์แทนที่จะเว้นเป็นขอบของ .chat-shell — พื้นหลังขาวของแผงจะได้ลงไป
      ชิดขอบจอจริง ไม่เหลือแถบสีพื้นค้างท้ายจอ (คีย์บอร์ดเปิดไม่ต้องเว้น เพราะคีย์บอร์ดบังแถบโฮมอยู่แล้ว) */
   .nova-inbox .chat-shell { padding-bottom: 0; }
-  .nova-inbox .app-screen > :last-child { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
-  html.keyboard-open .nova-inbox .app-screen > :last-child { padding-bottom: 12px; }
+  .nova-inbox .app-screen .chat-composer { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
+  html.keyboard-open .nova-inbox .app-screen .chat-composer { padding-bottom: 12px; }
 }
 @media (prefers-reduced-motion: reduce) { .nova-palette { animation: none; } }
 

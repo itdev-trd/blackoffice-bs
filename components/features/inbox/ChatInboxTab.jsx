@@ -2625,8 +2625,10 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
         ) : (
             <>
               {/* หัวแชท: back(มือถือ) + รูปลูกค้า + ชื่อ + มาจากแอด(กดขยาย) + แฮมเบอร์เกอร์
-                  บนมือถือ (fixed เต็มจอ) เว้น safe-area บน กัน header ทับแถบสถานะ/นาฬิกา */}
-              <div className="px-3 py-2.5 border-b border-night-border flex items-center gap-2 shrink-0 bg-night-surface" style={{ paddingTop: "calc(0.625rem + env(safe-area-inset-top))" }}>
+                  ไม่ต้องเว้น safe-area บนเองแล้ว — แผงนี้ไม่ได้ทับแถบสถานะอีกต่อไป (อยู่ใต้แถบเมนูบนของแอป
+                  ซึ่งเว้น safe-area ไว้ให้แล้ว ส่วนตอนคีย์บอร์ดเปิดที่กลับไปเป็น fixed ก็บวก safe-area ใน
+                  nova.css ให้แล้ว) ถ้าเว้นตรงนี้อีกจะกลายเป็นช่องว่างค้างใต้แถบเมนูบนเท่าความสูงติ่งจอ */}
+              <div className="px-3 py-2.5 border-b border-night-border flex items-center gap-2 shrink-0 bg-night-surface">
                 <button className="chat-mobile-back lg:hidden p-1 -ml-1 text-night-ink-2" onClick={() => { setSelected(null); setInfoOpen(false); }}><ArrowLeft size={20} /></button>
                 <div className="w-10 h-10 rounded-full bg-night-accent/25 text-brand-600 dark:text-night-accent-light flex items-center justify-center text-sm font-semibold shrink-0 relative overflow-hidden">
                   <span>{initial(selected.customer_name)}</span>
@@ -2877,7 +2879,9 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                 </div>
               )}
               {knowledgeCaptureMsg && !knowledgeCapture && <div className="px-4 py-1.5 text-[11px] font-medium text-emerald-400 border-t border-emerald-100 bg-emerald-500/15">{knowledgeCaptureMsg}</div>}
-              <div className="p-3 border-t border-night-border relative shrink-0" style={{ paddingBottom: "calc(0.75rem + env(safe-area-inset-bottom))" }}>
+              {/* ระยะกันแถบโฮมย้ายไปคุมใน nova.css แทน inline style — เพราะตอนคีย์บอร์ดเปิดต้องตัดระยะนี้ทิ้ง
+                  (คีย์บอร์ดบังแถบโฮมอยู่แล้ว) ซึ่ง inline style เขียนทับด้วย CSS ไม่ได้ */}
+              <div className="chat-composer p-3 border-t border-night-border relative shrink-0">
                 {/* สลับโหมด — งานที่ทำบ่อยที่สุดสามอย่างอยู่ที่เดียว ไม่ต้องเลื่อนไปแผงขวา
                     ซึ่งบนจอแคบถูกซ่อนอยู่แล้ว ทำให้เช็คไอดี/กรอกข้อมูลไม่ได้เลย */}
                 {!hasSidePanel && (
