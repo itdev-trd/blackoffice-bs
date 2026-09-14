@@ -100,6 +100,12 @@ export default function MetaLabels({ row }) {
   if (unsupported === "line" || unsupported === "instagram") return null;
 
   const attachedSet = new Set((mine || []).map((l) => l.id));
+  // ป้ายลัด 4 ตัวในแผงข้อมูล (เปิดบัญชีแล้ว/ยังไม่เปิดบัญชี/ลูกค้าเก่า/ลูกค้าใหม่) คือสิ่งที่ต้อง
+  // เห็นก่อนเริ่มตอบเสมอ แต่เพจที่ยิงแอดมานานจะมีป้ายระยะ (มาใหม่/มีคุณสมบัติ/...) ปนมาด้วยจาก
+  // Meta แบบไม่เรียงลำดับ — ดันป้ายลัดพวกนี้ขึ้นก่อนเสมอ ไม่ว่า Meta จะคืนมาลำดับไหน
+  const primaryOrder = ["✅ เปิดบัญชีแล้ว", "❌ ยังไม่เปิดบัญชี", "🔁 ลูกค้าเก่า", "🆕 ลูกค้าใหม่"];
+  const primaryRank = (name) => { const i = primaryOrder.indexOf(name); return i === -1 ? primaryOrder.length : i; };
+  const sortedMine = mine ? [...mine].sort((a, b) => primaryRank(a.name) - primaryRank(b.name)) : mine;
 
   return (
     <div ref={boxRef} className="relative flex flex-wrap items-center gap-1.5">
@@ -112,7 +118,7 @@ export default function MetaLabels({ row }) {
       ) : mine.length === 0 ? (
         <span className="text-[11px] text-night-ink-3">ยังไม่มีป้าย</span>
       ) : (
-        mine.map((l) => (
+        sortedMine.map((l) => (
           <span
             key={l.id}
             title={l.system ? "ป้ายที่ Meta สร้างอัตโนมัติจากโฆษณา" : "ป้ายกำกับใน Meta"}
