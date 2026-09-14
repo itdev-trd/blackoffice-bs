@@ -764,6 +764,7 @@ Deno.serve(async (req) => {
       } catch (e) {
         return json({ ok: false, error: `ดึงข้อมูล Lot จาก broker ไม่สำเร็จ: ${String(e instanceof Error ? e.message : e)}` });
       }
+      console.log(`[refresh_lots] raw response: ${rows.length} rows, sample:`, JSON.stringify(rows.slice(0, 5)));
       const lotByLogin = new Map<string, { lots: number; campaign_name: string | null }>();
       for (const r of rows) {
         const login = String(r?.loginId ?? r?.login_id ?? r?.tradeid ?? "").trim();
@@ -787,11 +788,30 @@ Deno.serve(async (req) => {
           lots: hit?.lots ?? 0, campaign_name: hit?.campaign_name ?? null, fetched_at: nowIso,
         };
       });
+      const unmatchedTradeIds = tradeIds.filter((tid) => !lotByLogin.has(tid));
+      console.log(
+        `[refresh_lots] trade_id match: ${tradeIds.length - unmatchedTradeIds.length}/${tradeIds.length} matched. ` +
+          `sample trade_id (ตาราง): ${JSON.stringify(tradeIds.slice(0, 5))}. ` +
+          `sample loginId (broker): ${JSON.stringify([...lotByLogin.keys()].slice(0, 5))}. ` +
+          `unmatched trade_id ตัวอย่าง: ${JSON.stringify(unmatchedTradeIds.slice(0, 10))}`
+      );
       if (upserts.length) {
         const { error } = await db.from("tv_lot_usage").upsert(upserts, { onConflict: "trade_id,period_start,period_end" });
         if (error) return json({ ok: false, error: error.message });
       }
-      return json({ ok: true, checked: upserts.length, matched: upserts.filter((u) => u.lots > 0).length, fetched_at: nowIso });
+      return json({
+        ok: true,
+        checked: upserts.length,
+        matched: upserts.filter((u) => u.lots > 0).length,
+        fetched_at: nowIso,
+        debug: {
+          raw_rows: rows.length,
+          sample_login_ids: [...lotByLogin.keys()].slice(0, 5),
+          sample_trade_ids: tradeIds.slice(0, 5),
+          unmatched_trade_ids_sample: unmatchedTradeIds.slice(0, 10),
+          unmatched_count: unmatchedTradeIds.length,
+        },
+      });
     }
 
     return json({ ok: false, error: `ไม่รู้จัก action "${action}"` });
