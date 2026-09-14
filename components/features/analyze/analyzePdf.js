@@ -6,6 +6,38 @@ import {
   AGE_LABEL, BD_KEYS, BD_METRIC_LABEL, COMPARE_METRICS, DEVICE_LABEL, GENDER_LABEL,
   OBJECTIVE_LABEL, REGION_LABEL, beDateTH, escHtml, fmtMoney, fmtNum, headlineResult, rangeLabel,
 } from "./analyzeLabels";
+import { exportPageNavHtml } from "@/lib/utils/export";
+
+// เปิดรายงาน HTML แล้วสั่งพิมพ์ — บาง webview ฝังตัว (เช่น พรีวิวในแอป) ไม่รองรับหน้าต่าง/แท็บใหม่เลย
+// ทำให้ window.open() คืนค่า null เงียบๆ (ไม่ใช่แค่ถูกบล็อกป็อปอัปทั่วไป) กดปุ่ม export แล้วไม่มีอะไรเกิดขึ้น
+// จึงมีทางสำรอง: ถ้าเปิดหน้าต่างใหม่ไม่ได้ ให้พิมพ์ผ่าน iframe ที่ซ่อนไว้แทน (ไม่ต้องขอสิทธิ์ป็อปอัปเลย)
+// win — หน้าต่างที่เปิดไว้ล่วงหน้าแล้ว (เผื่อต้อง await ก่อนถึงมี html พร้อม เช่น ดึงรูปสด) จะได้เปิดแบบ sync
+//   ในตัวจัดการคลิกโดยตรง ไม่งั้นเบราว์เซอร์ปกติก็จะบล็อกเพราะเปิดหลัง await เหมือนกัน
+export function openReportWindow(html, win) {
+  const w = win !== undefined ? win : (typeof window !== "undefined" ? window.open("", "_blank") : null);
+  if (w) {
+    try {
+      w.document.open();
+      w.document.write(html);
+      w.document.close();
+      return;
+    } catch { /* เปิดได้แต่เขียนเนื้อหาไม่ได้ — ตกไปใช้ iframe ด้านล่างแทน */ }
+  }
+  if (typeof document === "undefined") return;
+  const iframe = document.createElement("iframe");
+  iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden";
+  document.body.appendChild(iframe);
+  const cleanup = () => { if (iframe.parentNode) iframe.parentNode.removeChild(iframe); };
+  try {
+    iframe.contentWindow.onafterprint = cleanup;
+  } catch { /* ไม่มี onafterprint ก็ปล่อยให้ setTimeout ด้านล่างเก็บกวาดแทน */ }
+  const doc = iframe.contentDocument || iframe.contentWindow.document;
+  doc.open();
+  doc.write(html);
+  doc.close();
+  setTimeout(cleanup, 60000);
+}
+
 // options.metricKeys — เลือกเฉพาะตัวชี้วัดที่ติ๊กไว้ (แบบเดียวกับตัวเลือกคอลัมน์ของ Meta Ads Manager)
 //   ไม่ส่งมา/ว่าง = เอาทั้งหมดเหมือนเดิม
 // options.includeImages — แถวรูปโฆษณาต่อคอลัมน์ (rows[i].thumb ต้องดึงมาก่อนเรียกฟังก์ชันนี้ — ดึงสดตอนกด
@@ -37,12 +69,11 @@ tr.imgrow td{text-align:center;padding:8px} tr.imgrow img{width:64px;height:64px
 </body></html>`;
 }
 
-export function exportComparePdf(rows, preset, options = {}) {
-  const w = window.open("", "_blank");
-  if (!w) { alert("เบราว์เซอร์บล็อกป็อปอัป — อนุญาตแล้วลองใหม่"); return; }
-  w.document.open();
-  w.document.write(buildCompareHtml(rows, preset, options));
-  w.document.close();
+// win — หน้าต่างที่เปิดไว้ล่วงหน้าแล้ว (เผื่อ options ต้องรอ await ก่อน เช่น ดึงรูปสด) จะได้เรียก
+//   window.open() แบบ sync ในตัวจัดการคลิกโดยตรง ไม่งั้นเบราว์เซอร์บล็อกป็อปอัปเพราะเปิดหลัง await
+//   ไม่ส่งมา = เปิดหน้าต่างใหม่ตรงนี้เหมือนเดิม (ใช้ได้ตอนไม่มี await ก่อนหน้า)
+export function exportComparePdf(rows, preset, options = {}, win) {
+  openReportWindow(buildCompareHtml(rows, preset, options), win);
 }
 
 export function exportCampaignAnalysisPdf(result) {
@@ -71,11 +102,7 @@ ul{margin:4px 0 0 18px;font-size:12.5px}p{font-size:12.5px;margin:4px 0}@page{ma
 ${cards}
 <script>setTimeout(function(){try{window.focus();window.print();}catch(e){}},450);</script>
 </body></html>`;
-  const w = window.open("", "_blank");
-  if (!w) { alert("เบราว์เซอร์บล็อกป็อปอัป — อนุญาตแล้วลองใหม่"); return; }
-  w.document.open();
-  w.document.write(html);
-  w.document.close();
+  openReportWindow(html);
 }
 
 export function buildAnalysisHtml(analysis) {
@@ -248,15 +275,7 @@ export function buildAnalysisHtml(analysis) {
 }
 
 export function exportAnalysisPdf(analysis) {
-  const html = buildAnalysisHtml(analysis);
-  const w = window.open("", "_blank");
-  if (!w) {
-    alert("เบราว์เซอร์บล็อกป็อปอัป — กรุณาอนุญาต popup สำหรับหน้านี้แล้วลองใหม่");
-    return;
-  }
-  w.document.open();
-  w.document.write(html);
-  w.document.close();
+  openReportWindow(buildAnalysisHtml(analysis));
 }
 
 // ตารางสรุปรายวัน — ใช้ทั้ง export ปกติ (fallback) และ export แบบภาพเต็มหน้า
@@ -367,14 +386,7 @@ export function buildDashboardHtml(ad, data, budget) {
 }
 
 export function exportAdDashboardPdf(ad, data, budget) {
-  const w = window.open("", "_blank");
-  if (!w) {
-    alert("เบราว์เซอร์บล็อกป็อปอัป — กรุณาอนุญาต popup แล้วลองใหม่");
-    return;
-  }
-  w.document.open();
-  w.document.write(buildDashboardHtml(ad, data, budget));
-  w.document.close();
+  openReportWindow(buildDashboardHtml(ad, data, budget));
 }
 
 // ---- Export แดชบอร์ดเป็น Excel (.xls) / CSV (ไม่ต้องใช้ไลบรารีเพิ่ม) ----

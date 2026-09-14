@@ -858,6 +858,11 @@ function CompareView({ items, onClose, aiModel }) {
     setExportKeys((cur) => { const next = new Set(cur); if (next.has(key)) next.delete(key); else next.add(key); return next; });
   }
   async function runExportPdf() {
+    // ต้องพยายามเปิดหน้าต่างแบบ sync ในตัวจัดการคลิกทันที — ถ้าเปิดหลัง await (ตอนดึงรูป) ด้านล่าง
+    // เบราว์เซอร์ปกติจะมองว่าไม่ได้มาจาก user gesture โดยตรงแล้วบล็อกป็อปอัป
+    // เปิดไม่ได้ (คืน null เช่นเปิดในเว็บวิวที่ไม่รองรับหน้าต่างใหม่เลย) ก็ปล่อยผ่านไปก่อน —
+    // exportComparePdf จะสลับไปพิมพ์ผ่าน iframe ที่ซ่อนไว้แทนให้เอง ไม่ต้องเช็ค/บล็อกตรงนี้
+    const w = window.open("", "_blank");
     setExportBusy(true);
     try {
       let exportRows = rows;
@@ -869,7 +874,7 @@ function CompareView({ items, onClose, aiModel }) {
           return { ...r, thumb: data?.ok ? data.thumbnail_url : null };
         }));
       }
-      exportComparePdf(exportRows, range, { metricKeys: [...exportKeys], includeImages: exportImages });
+      exportComparePdf(exportRows, range, { metricKeys: [...exportKeys], includeImages: exportImages }, w);
       logActivity("export", { format: "compare_pdf", count: rows.length, include_images: exportImages });
     } finally {
       setExportBusy(false);
@@ -965,7 +970,31 @@ function CompareView({ items, onClose, aiModel }) {
                     </label>
                     <div className="px-3 pt-1.5">
                       <button onClick={runExportPdf} disabled={exportBusy || exportKeys.size === 0} className="w-full text-xs bg-brand-600 text-white rounded-lg px-3 py-1.5 font-medium hover:bg-brand-700 disabled:opacity-50 flex items-center justify-center gap-1.5">
-                        {exportBusy ? <Loader2 size={13} className="animate-spin" /> : <FileDown size={13} />} ส่งออก PDF
+                        {exportBusy ? <Loader2 size={13} className="animate-spin" /> : <FileDown size={13} />} PDF (พิมพ์/บันทึก)
+                      </button>
+                    </div>
+                    <div className="px-3 pt-1.5 grid grid-cols-2 gap-1.5">
+                      <button
+                        onClick={() => {
+                          logActivity("export", { format: "compare_excel", count: rows.length, include_images: false });
+                          exportCompareExcel(rows, [...exportKeys]);
+                          setExportOpen(false);
+                        }}
+                        disabled={exportKeys.size === 0}
+                        className="text-xs border border-slate-300 rounded-lg px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 flex items-center justify-center gap-1.5"
+                      >
+                        <FileDown size={13} className="text-emerald-500" /> Excel
+                      </button>
+                      <button
+                        onClick={() => {
+                          logActivity("export", { format: "compare_csv", count: rows.length, include_images: false });
+                          exportCompareCsv(rows, [...exportKeys]);
+                          setExportOpen(false);
+                        }}
+                        disabled={exportKeys.size === 0}
+                        className="text-xs border border-slate-300 rounded-lg px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 flex items-center justify-center gap-1.5"
+                      >
+                        <FileDown size={13} className="text-emerald-500" /> CSV
                       </button>
                     </div>
                   </div>
@@ -1469,6 +1498,7 @@ function CampaignOverviewView({ initialResult, campaignIds, range, textModel, on
   const [result, setResult] = useState(initialResult);
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState("");
+  const [exportMenu, setExportMenu] = useState(false);
   const [dashItem, setDashItem] = useState(() => lsGet("ov.dashItem", null));
   const [expandedCamps, setExpandedCamps] = useState(() => lsGet("ov.expandedCamps", {}));
   const toggleCamp = (id) => setExpandedCamps((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -1505,9 +1535,28 @@ function CampaignOverviewView({ initialResult, campaignIds, range, textModel, on
             <button onClick={runAI} disabled={aiBusy} className="text-xs bg-brand-600 text-white rounded-lg px-3 py-1.5 font-medium hover:bg-brand-700 disabled:opacity-60 flex items-center gap-1.5">
               {aiBusy ? <Loader2 className="animate-spin" size={14} /> : <Sparkles size={14} />} AI วิเคราะห์
             </button>
-            <button onClick={() => exportCampaignAnalysisPdf(result)} className="text-xs border border-slate-300 rounded-lg px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-1.5">
-              <FileDown size={14} /> Export PDF
-            </button>
+            <div className="relative">
+              <button onClick={() => setExportMenu((v) => !v)} className="text-xs border border-slate-300 rounded-lg px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-1.5">
+                <FileDown size={14} /> Export <ChevronDown size={13} />
+              </button>
+              {exportMenu && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setExportMenu(false)} />
+                  <div className="absolute right-0 mt-1 z-20 bg-white border border-slate-200 rounded-lg shadow-lg py-1 min-w-[190px] overflow-hidden">
+                    {[
+                      ["PDF (พิมพ์/บันทึก)", () => exportCampaignAnalysisPdf(result)],
+                      ["Excel (.xls)", () => exportCampaignAnalysisExcel(result)],
+                      ["CSV", () => exportCampaignAnalysisCsv(result)],
+                    ].map(([label, fn]) => (
+                      <button key={label} onClick={() => { logActivity("export", { format: label, name: "รายงานแคมเปญ" }); fn(); setExportMenu(false); }}
+                        className="w-full text-left text-xs px-3 py-2 hover:bg-slate-50 text-slate-700 flex items-center gap-2">
+                        <FileDown size={13} className="text-slate-400" /> {label}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -2022,6 +2071,55 @@ function exportAdDashboardExcel(ad, data, budget) {
   const dailyTable = `<table border="1"><tr>${DAILY_HEADERS.map(th).join("")}</tr>${rows.map((r) => `<tr><td>${esc(r.date)}</td><td>${esc(r.link)}</td><td>${r.taks}</td><td>${r.pageChat}</td><td>${r.opens || 0}</td><td>${r.cpr == null ? "" : r.cpr.toFixed(2)}</td><td>${r.impr}</td><td>${r.spend.toFixed(2)}</td></tr>`).join("")}${totalRow}</table>`;
   const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"></head><body><h3>แดชบอร์ดโฆษณา — ${esc(ad.headline || "")}</h3><div>Ad ID: ${esc(ad.ad_id || "-")} · ช่วง ${esc(data?.date_preset || "")}</div><br/>${kv(kpi, "สรุป KPI")}${budgetRows.length ? "<br/>" + kv(budgetRows, "งบยิงโฆษณา") : ""}<br/><h4>สรุปรายวัน</h4>${dailyTable}</body></html>`;
   downloadBlob(new Blob(["﻿" + html], { type: "application/vnd.ms-excel" }), safeFileName(ad, "xls"));
+}
+
+// ---- Export "เปรียบเทียบโฆษณา" (CompareView) เป็น Excel/CSV — คู่กับ exportComparePdf ----
+//   metricKeys เดียวกับที่ติ๊กไว้ในดรอปดาวน์ (ไม่ส่งมา/ว่าง = เอาทั้งหมด) — ไม่มีรูปโฆษณา (มีแค่ในฟอร์แมต PDF)
+function compareMetricRows(rows, metricKeys) {
+  return metricKeys?.length ? COMPARE_METRICS.filter((m) => metricKeys.includes(m.key)) : COMPARE_METRICS;
+}
+function exportCompareCsv(rows, metricKeys) {
+  const esc = (v) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const metrics = compareMetricRows(rows, metricKeys);
+  const lines = [["ตัวชี้วัด", ...rows.map((r) => r.item.headline)].map(esc).join(",")];
+  for (const m of metrics) {
+    lines.push([m.label, ...rows.map((r) => { const v = r.overall?.[m.key]; return v == null ? "" : m.fmt(v); })].map(esc).join(","));
+  }
+  downloadBlob(new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8" }), "เปรียบเทียบโฆษณา.csv");
+}
+function exportCompareExcel(rows, metricKeys) {
+  const esc = escHtml;
+  const th = (t) => `<th style="background:#3f6f5e;color:#fff">${esc(t)}</th>`;
+  const metrics = compareMetricRows(rows, metricKeys);
+  const headRow = `<tr>${th("ตัวชี้วัด")}${rows.map((r) => th(r.item.headline)).join("")}</tr>`;
+  const bodyRows = metrics.map((m) => `<tr><td>${esc(m.label)}</td>${rows.map((r) => { const v = r.overall?.[m.key]; return `<td>${v == null ? "" : esc(m.fmt(v))}</td>`; }).join("")}</tr>`).join("");
+  const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"></head><body><h3>เปรียบเทียบโฆษณา (${rows.length} รายการ)</h3><table border="1">${headRow}${bodyRows}</table></body></html>`;
+  downloadBlob(new Blob(["﻿" + html], { type: "application/vnd.ms-excel" }), "เปรียบเทียบโฆษณา.xls");
+}
+
+// ---- Export "รายงานแคมเปญ" (CampaignOverviewView) เป็น Excel/CSV — คู่กับ exportCampaignAnalysisPdf ----
+const CAMPAIGN_REPORT_HEADERS = ["แคมเปญ", "วัตถุประสงค์", "สถานะ", "Spend", "Leads", "CPL", "CTR (%)", "ผล", "แนะนำ"];
+function campaignReportRow(c) {
+  const m = c.metrics || {};
+  return [
+    c.name || "", OBJECTIVE_LABEL(c.objective) || c.objective || "",
+    c.effective_status === "ACTIVE" ? "กำลังแสดง" : c.effective_status === "PAUSED" ? "หยุดชั่วคราว" : (c.effective_status || ""),
+    Math.round(m.spend || 0), Math.round(m.leads || 0), m.cpl ? Math.round(m.cpl) : "", (m.ctr || 0).toFixed(2),
+    c.result_th || "", c.recommendation_th || "",
+  ];
+}
+function exportCampaignAnalysisCsv(result) {
+  const esc = (v) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const lines = [CAMPAIGN_REPORT_HEADERS.join(",")];
+  for (const c of result.campaigns || []) lines.push(campaignReportRow(c).map(esc).join(","));
+  downloadBlob(new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8" }), "รายงานแคมเปญ.csv");
+}
+function exportCampaignAnalysisExcel(result) {
+  const esc = escHtml;
+  const th = (t) => `<th style="background:#3f6f5e;color:#fff">${esc(t)}</th>`;
+  const rowsHtml = (result.campaigns || []).map((c) => `<tr>${campaignReportRow(c).map((v) => `<td>${esc(v)}</td>`).join("")}</tr>`).join("");
+  const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"></head><body><h3>ผลวิเคราะห์แคมเปญ (${(result.campaigns || []).length} รายการ)</h3><table border="1"><tr>${CAMPAIGN_REPORT_HEADERS.map(th).join("")}</tr>${rowsHtml}</table></body></html>`;
+  downloadBlob(new Blob(["﻿" + html], { type: "application/vnd.ms-excel" }), "รายงานแคมเปญ.xls");
 }
 
 // ---- Export "ฟอร์แมตงบยิง Ads" (ตารางติดตามงบ แบบชีต) — ดึงทั้งแคมเปญ: ชุดโฆษณา→โฆษณา ทุกตัว ----
