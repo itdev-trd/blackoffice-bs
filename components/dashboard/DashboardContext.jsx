@@ -33,8 +33,11 @@ export const TABS = [
   { key: "analyze", label: "วิเคราะห์", icon: BarChart3 },
   { key: "ad_library", label: "คลังโฆษณาคู่แข่ง", icon: LibraryBig },
   { key: "inbox", label: "ตอบแชท", icon: Inbox },
-  // แยกจาก "ตอบแชท" เพราะงานคนละแบบ — คอมเมนต์ใต้โพสต์/โฆษณาไว้กวาดตอบทีละหลายอัน
-  { key: "feed", label: "ฟีด (คอมเมนต์)", icon: MessageSquare },
+  // ซ่อนเมนู "ฟีด (คอมเมนต์)" ไว้ก่อนชั่วคราว — ยังติดปัญหาส่งไม่ได้หลังเกิน 24 ชม.
+  // (คีย์สิทธิ์ "feed" ยังต้องคงไว้ใน lib/constants/roles.js/edge functions เหมือน tv_members
+  // ด้านล่าง เพราะ messenger-reply/ad-source-details เช็ค tab: ["inbox","chat","feed"] อยู่ —
+  // ผู้ใช้ที่มีสิทธิ์ "inbox" อยู่แล้วไม่กระทบ) หน้า /feed ยังเข้าตรงได้ถ้ารู้ลิงก์ แต่จะไม่โผล่ในเมนู
+  // { key: "feed", label: "ฟีด (คอมเมนต์)", icon: MessageSquare },
   // รายงานว่าเงินโฆษณาที่ยิงไป แอดตัวไหนทำให้เกิดแชท/เปิดบัญชีจริง
   { key: "ad_chats", label: "แอดไหนได้ลูกค้า", icon: Megaphone },
   { key: "customerdb", label: "จัดการลูกค้า", icon: UsersRound },

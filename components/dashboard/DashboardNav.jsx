@@ -15,7 +15,7 @@ import ChangePasswordDialog from "@/components/shared/ChangePasswordDialog";
 const GROUPS = [
   { label: "ภาพรวม", keys: ["overview"] },
   { label: "โฆษณา", keys: ["generate", "review", "campaigns", "analyze", "ad_library"] },
-  { label: "ลูกค้า", keys: ["inbox", "feed", "ad_chats", "customerdb", "customer_list"] },
+  { label: "ลูกค้า", keys: ["inbox", "ad_chats", "customerdb", "customer_list"] },
   { label: "ระบบ", keys: ["leaderboard", "settings"] },
 ];
 const MOBILE_KEYS = ["overview", "campaigns", "inbox", "customerdb"];
