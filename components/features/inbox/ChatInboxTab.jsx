@@ -221,6 +221,8 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   const [metaSync, setMetaSync] = useState(null);
   // ชื่อป้ายที่มีอยู่จริงในเพจบน Meta — เอามาเป็นตัวเลือกให้กด เพื่อให้ป้ายสองฝั่งใช้ชื่อชุดเดียวกัน
   const [metaLabelNames, setMetaLabelNames] = useState([]);
+  // เปลี่ยนค่าทุกครั้งที่แผงข้อมูล (ป้ายลัด) เพิ่งส่งป้ายขึ้น Meta สำเร็จ — สั่งให้ MetaLabels ที่หัวแชทดึงป้ายใหม่ทันที
+  const [metaLabelsRefreshToken, setMetaLabelsRefreshToken] = useState(0);
   // สถานะการส่ง "ระยะข้อมูลลูกค้า" ขึ้น Meta ของห้องที่เปิดอยู่
   const [stageSync, setStageSync] = useState(null);
   const metaLabelPageRef = useRef("");
@@ -1660,7 +1662,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
       setNotesSaving(false);
     }
   }
-  async function persistTags(id, nextTags, previousTags) {
+  async function persistTags(id, nextTags, previousTags, opts = {}) {
     const { error } = await supabase.from("chat_customers").update({ tags: nextTags, updated_at: new Date().toISOString() }).eq("id", id);
     if (error) {
       setSelected((s) => (s && s.id === id ? { ...s, tags: previousTags } : s));
@@ -1668,6 +1670,9 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
       setTagMsg(`บันทึกแท็กไม่สำเร็จ: ${error.message || "ตรวจสอบฐานข้อมูลแล้วลองใหม่"}`);
       return false;
     }
+    // skipMirror: กำลังซิงก์ "ขาเข้า" จากป้าย Meta จริง (ดูอ่านค่ามาจากหัวแชทแล้ว) ไม่ต้องส่งกลับขึ้น Meta ซ้ำ
+    // ไม่งั้นจะเป็นการยิงป้ายที่มีอยู่แล้วซ้ำวนไปมาโดยเปล่าประโยชน์
+    if (opts.skipMirror) return true;
     const src = selected?.id === id ? selected?.source : null;
     if (src === "line") {
       // LINE: แท็กแชทไม่มี API — ซิงก์เป็น "กลุ่มผู้ชม" แทน
@@ -1744,6 +1749,9 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
         return;
       }
       setMetaSync({ id, state: "ok", note: "" });
+      // แท็กที่เพิ่งส่งขึ้น Meta สำเร็จแล้ว ให้ MetaLabels ที่หัวแชทดึงป้ายใหม่ จะได้เห็นตรงกันทันที
+      // ไม่ต้องรอสลับห้องแชทไปมาก่อนถึงจะอัปเดต
+      setMetaLabelsRefreshToken((t) => t + 1);
     } catch (e) {
       setMetaSync({ id, state: "error", note: e instanceof Error ? e.message : String(e) });
     }
@@ -1780,6 +1788,24 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     { label: "🔁 ลูกค้าเก่า", opposite: "🆕 ลูกค้าใหม่" },
     { label: "🆕 ลูกค้าใหม่", opposite: "🔁 ลูกค้าเก่า" },
   ];
+  // ป้ายลัด 4 ตัวในแผงข้อมูล กับป้าย Meta ดิบที่หัวแชท (MetaLabels) เป็นคนละระบบ คนละตาราง
+  // (tags ใน chat_customers vs. ป้ายจริงบน Meta) เดิมกดติด/ถอดจากหัวแชทแล้วป้ายลัดในแผงข้อมูล
+  // ไม่ขยับตาม ดูเหมือนไม่ซิงก์กัน — ให้ป้ายลัด 4 ตัวยึดตามสิ่งที่ติดจริงบน Meta เสมอ
+  // (ทิศทางเดียว Meta -> tags เท่านั้น ไม่ mirror กลับ กันยิงป้ายซ้ำวนไม่รู้จบ)
+  function syncQuickTagsFromMeta(names) {
+    if (!selected) return;
+    const id = selected.id;
+    const metaSet = new Set(names || []);
+    const quickTexts = QUICK_TAGS.map((q) => q.label);
+    const previousTags = Array.isArray(selected.tags) ? selected.tags : [];
+    const others = previousTags.filter((t) => !quickTexts.includes(t));
+    const fromMeta = quickTexts.filter((t) => metaSet.has(t));
+    const nextTags = [...others, ...fromMeta];
+    if ([...previousTags].sort().join(" ") === [...nextTags].sort().join(" ")) return;
+    setSelected((s) => (s && s.id === id ? { ...s, tags: nextTags } : s));
+    setList((l) => (l || []).map((x) => (x.id === id ? { ...x, tags: nextTags } : x)));
+    persistTags(id, nextTags, previousTags, { skipMirror: true });
+  }
   async function toggleQuickTag(label, opposite) {
     if (!selected) return;
     const id = selected.id;
@@ -2622,7 +2648,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                   {/* ป้ายกำกับจาก Meta — ต้องเห็นก่อนเริ่มตอบ (จ่ายแล้ว/ลูกค้าเก่า/สแปม)
                       ติด/ถอด/สร้างที่นี่ได้เลย ผลขึ้นใน Meta Business Suite ทันที
                       LINE/Instagram จะไม่เรนเดอร์ เพราะ Meta ผูกป้ายกับ PSID ของเพจ Facebook เท่านั้น */}
-                  <div className="mt-1"><MetaLabels row={selected} /></div>
+                  <div className="mt-1"><MetaLabels row={selected} onLabelsChange={syncQuickTagsFromMeta} refreshToken={metaLabelsRefreshToken} /></div>
                 </div>
               </div>
 

@@ -11,7 +11,11 @@ import { Loader2, Tag, Plus, X, ChevronDown } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { readFunctionErrorMessage } from "@/lib/utils/errors";
 
-export default function MetaLabels({ row }) {
+// onLabelsChange(names) — แจ้งชื่อป้ายที่ติดอยู่จริงกลับไปให้ผู้เรียก ทุกครั้งที่โหลด/ติด/ถอดป้าย
+//   ใช้ซิงก์ป้ายลัด 4 ตัวในแผงข้อมูลลูกค้า (ChatInboxTab) ให้ตรงกับที่ติดจากหัวแชทตรงนี้
+//   (สองระบบเดิมแยกกันคนละ state คนละตาราง — กดจากหัวแชทแล้วแผงข้อมูลไม่ขยับตาม)
+// refreshToken — เปลี่ยนค่าเมื่อไหร่ให้ดึงป้ายของลูกค้ารายนี้ใหม่ (ใช้ตอนแก้ป้ายจากฝั่งแผงข้อมูลแทน)
+export default function MetaLabels({ row, onLabelsChange, refreshToken }) {
   const [mine, setMine] = useState(null);      // ป้ายที่ติดอยู่กับลูกค้ารายนี้
   const [all, setAll] = useState([]);          // ป้ายทั้งหมดของเพจ (โหลดตอนกางเมนู)
   const [open, setOpen] = useState(false);
@@ -37,7 +41,13 @@ export default function MetaLabels({ row }) {
     return data || { ok: false, error: "ไม่มีข้อมูลตอบกลับ" };
   }, []);
 
-  // โหลดป้ายของลูกค้าเมื่อเปลี่ยนแชท
+  // แจ้งชื่อป้ายปัจจุบันออกไปทุกครั้งที่ mine เปลี่ยน — เก็บ ref ของ callback ไว้กันเปลี่ยนทุก render
+  // แล้ว effect ด้านล่างต้องรีรันจนกลายเป็น loop (ผู้เรียกส่ง arrow function ใหม่ทุกครั้งที่ re-render)
+  const onLabelsChangeRef = useRef(onLabelsChange);
+  useEffect(() => { onLabelsChangeRef.current = onLabelsChange; }, [onLabelsChange]);
+  useEffect(() => { if (mine) onLabelsChangeRef.current?.(mine.map((l) => l.name)); }, [mine]);
+
+  // โหลดป้ายของลูกค้าเมื่อเปลี่ยนแชท หรือเมื่อฝั่งแผงข้อมูลแก้ป้ายแล้วสั่งให้ดึงใหม่ (refreshToken)
   useEffect(() => {
     if (!rowId || !supported) { setMine(null); return; }
     let dead = false;
@@ -51,7 +61,8 @@ export default function MetaLabels({ row }) {
       setMine(r.labels || []);
     })();
     return () => { dead = true; };
-  }, [rowId, supported, call]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rowId, supported, call, refreshToken]);
 
   // ปิดเมนูเมื่อคลิกที่อื่น
   useEffect(() => {
