@@ -97,7 +97,7 @@ export default function LeaderboardTab({ active = true }) {
   const PAD = "clamp(20px,4.5vw,60px)";
 
   return (
-    <div className="leaderboard-shell w-full max-w-[1400px] mx-auto" style={{ fontFamily: FONT, background: C.bg, color: C.t1, borderRadius: 26, border: `1px solid ${C.border}`, boxShadow: "0 24px 70px -42px rgb(var(--n-ink) / .28)", overflow: "hidden" }}>
+    <div className="leaderboard-shell w-full max-w-[1400px] mx-auto" style={{ fontFamily: FONT, background: C.bg, color: C.t1, overflow: "hidden" }}>
       <style>{`
         @keyframes lbPulse{0%,100%{opacity:.9;transform:scale(1)}50%{opacity:0;transform:scale(2.2)}}
         @keyframes lbFloat{0%,100%{transform:translateY(0)}50%{transform:translateY(-7px)}}

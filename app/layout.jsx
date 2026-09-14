@@ -1,4 +1,6 @@
 import "./globals.css";
+import "./studio.css";
+import "./nova.css";
 import { Noto_Sans_Thai, Roboto } from "next/font/google";
 import UpdateBanner from "@/components/shared/UpdateBanner";
 import KeyboardViewport from "@/components/shared/KeyboardViewport";
@@ -51,7 +53,7 @@ export default function RootLayout({ children }) {
             ต้องเป็น inline script เพราะ React hydrate ทีหลังเสมอ */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem("ui.theme");var d=t!=="light";document.documentElement.classList.toggle("dark",d);document.documentElement.style.colorScheme=d?"dark":"light";}catch(e){document.documentElement.classList.add("dark");}})();`,
+            __html: `(function(){try{var t=localStorage.getItem("ui.theme.v2");var d=t==="dark";document.documentElement.classList.toggle("dark",d);document.documentElement.style.colorScheme=d?"dark":"light";}catch(e){document.documentElement.classList.remove("dark");}})();`,
           }}
         />
       </head>

@@ -12,10 +12,10 @@ const PasswordInput = forwardRef(function PasswordInput({ className = "", wrappe
       <input ref={ref} {...props} type={show ? "text" : "password"} className={`${className} pr-10`} />
       <button
         type="button"
-        tabIndex={-1}
         onClick={() => setShow((s) => !s)}
-        className="absolute inset-y-0 right-0 flex items-center px-3 text-slate-400 hover:text-slate-600"
+        className="absolute inset-y-1 right-1 flex w-9 items-center justify-center rounded-control text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-2 focus-visible:outline-brand-500"
         aria-label={show ? "ซ่อนรหัสผ่าน" : "แสดงรหัสผ่าน"}
+        aria-pressed={show}
         title={show ? "ซ่อนรหัสผ่าน" : "แสดงรหัสผ่าน"}
       >
         {show ? <EyeOff size={16} /> : <Eye size={16} />}

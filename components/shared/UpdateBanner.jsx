@@ -33,7 +33,12 @@ const APP_BUILD_ID = process.env.NEXT_PUBLIC_BUILD_ID || "dev";
 export default function UpdateBanner() {
   const [ready, setReady] = useState(false);
   useEffect(() => {
-    if (APP_BUILD_ID === "dev") return; // โหมด dev ไม่ต้องเช็ค
+    // เวอร์ชันบน localhost เปลี่ยนด้วย HMR อยู่แล้ว และแบนเนอร์นี้เคยบัง command bar
+    // ของ workspace จึงให้ทำงานเฉพาะ deployment จริงเท่านั้น
+    if (APP_BUILD_ID === "dev" || ["localhost", "127.0.0.1"].includes(window.location.hostname)) {
+      setReady(false);
+      return;
+    }
     let stop = false;
     async function check() {
       try {

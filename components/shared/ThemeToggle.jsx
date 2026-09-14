@@ -10,7 +10,7 @@
 import { useEffect, useState } from "react";
 import { Moon, Sun } from "lucide-react";
 
-export const THEME_KEY = "ui.theme";
+export const THEME_KEY = "ui.theme.v2";
 
 function apply(theme) {
   const root = document.documentElement;
@@ -30,7 +30,7 @@ export default function ThemeToggle({ collapsed = false, icon = false }) {
   useEffect(() => {
     let saved = null;
     try { saved = localStorage.getItem(THEME_KEY); } catch { /* โหมดส่วนตัวอ่านไม่ได้ */ }
-    setTheme(saved === "light" ? "light" : "dark");   // ค่าเริ่มต้นคงเป็นมืดเหมือนเดิม
+    setTheme(saved === "dark" ? "dark" : "light");
     const sync = (e) => setTheme(e.detail === "light" ? "light" : "dark");
     window.addEventListener(THEME_EVENT, sync);
     return () => window.removeEventListener(THEME_EVENT, sync);

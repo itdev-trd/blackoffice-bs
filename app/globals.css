@@ -49,8 +49,9 @@
   --n-ink-3: 102 112 133;
   --n-accent: 52 82 224;
   --n-accent-light: 42 65 184;
-  --radius-card: 14px;
-  --radius-control: 10px;
+  --radius-card: 8px;
+  --radius-control: 6px;
+  color-scheme: light;
   --ease: cubic-bezier(.2, .8, .2, 1);
   --dur: .18s;
 }
@@ -403,8 +404,65 @@ html:not(.dark) .chat-bubble-me * { color: #FFFFFF; }
 .ds-btn-ghost:hover:not(:disabled) { background: rgba(20, 23, 31, .05); color: var(--ink); }
 
 /* หัวข้อ — น้ำหนักและระยะตัวอักษรสร้างลำดับชั้น ไม่ใช้ฟอนต์คนละตระกูล */
-.ds-title { font-weight: 700; letter-spacing: -.015em; line-height: 1.2; color: var(--ink); }
+.ds-title { font-weight: 700; letter-spacing: 0; line-height: 1.45; color: var(--ink); }
 .ds-section-title { margin-bottom: .25rem; }
+.ds-btn:active, .ds-tabs button:active, .ds-icon-button:active { transform: translateY(1px); }
+.ds-card, .ds-card-glass { transition: border-color var(--dur) var(--ease), background-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
+.ds-btn:focus-visible, .ds-tabs button:focus-visible, .ds-tooltip:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; }
+.ds-tooltip { position: relative; display: inline-flex; }
+.ds-tooltip[data-tooltip]::after { content: attr(data-tooltip); position: absolute; z-index: 90; left: 50%; bottom: calc(100% + 8px); max-width: 220px; padding: 6px 8px; border-radius: 5px; background: var(--ink); color: var(--surface); font-size: 11px; line-height: 1.3; opacity: 0; pointer-events: none; transform: translate(-50%, 3px); transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease); white-space: nowrap; }
+.ds-tooltip[data-tooltip]:hover::after, .ds-tooltip[data-tooltip]:focus-within::after { opacity: 1; transform: translate(-50%, 0); }
+.ds-dialog-backdrop { position: fixed; inset: 0; z-index: 110; display: flex; align-items: flex-end; justify-content: center; padding: 0; background: rgb(20 23 31 / .42); backdrop-filter: blur(3px); animation: ds-fade-in var(--dur) var(--ease); }
+.ds-dialog { width: min(100%, 480px); max-height: min(90dvh, 760px); overflow: auto; border: 1px solid var(--line); border-radius: 14px 14px 0 0; background: var(--surface); color: var(--ink); box-shadow: 0 24px 70px rgb(20 23 31 / .22); animation: ds-dialog-in .22s var(--ease); }
+.ds-dialog-header, .ds-dialog-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 20px; border-color: var(--line); }
+.ds-dialog-header { border-bottom: 1px solid var(--line); }
+.ds-dialog-footer { border-top: 1px solid var(--line); background: var(--ground); }
+.ds-dialog-body { padding: 20px; }
+.ds-tabs { display: flex; gap: 4px; overflow-x: auto; border-bottom: 1px solid var(--line); scrollbar-width: none; }
+.ds-tabs::-webkit-scrollbar { display: none; }
+.ds-tab { display: inline-flex; align-items: center; gap: 7px; min-height: 42px; flex: 0 0 auto; padding: 0 12px; border-bottom: 2px solid transparent; color: var(--ink-3); font-size: 13px; font-weight: 600; transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease), background-color var(--dur) var(--ease); }
+.ds-tab:hover { color: var(--ink); background: var(--ground); }
+.ds-tab.is-active { border-color: var(--brand); color: var(--brand); }
+.ds-tab-count { min-width: 20px; border-radius: 999px; padding: 2px 6px; background: var(--brand-soft); color: var(--brand); font-size: 10px; text-align: center; }
+@keyframes ds-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ds-dialog-in { from { opacity: 0; transform: translateY(14px) scale(.99); } to { opacity: 1; transform: translateY(0) scale(1); } }
+.workspace-shell { background: var(--ground); }
+.workspace-shell a, .workspace-shell button { letter-spacing: 0; }
+.workspace-nav a { min-height: 40px; height: auto; padding-block: 9px; }
+.workspace-nav a[aria-current="page"] { background: var(--brand-soft); font-weight: 600; }
+.workspace-nav a span.truncate { white-space: normal; overflow: visible; }
+.workspace-nav > div + div { margin-top: 6px; }
+.workspace-skip { position: fixed; top: -100px; left: 16px; z-index: 100; padding: 12px 18px; background: var(--surface); color: var(--brand); border: 2px solid var(--brand); border-radius: 6px; }
+.workspace-skip:focus { top: 12px; }
+.workspace-shell :is(a, button, input, select, textarea):focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; }
+.dashboard-page-main > * { min-width: 0; }
+.dashboard-page-main .ds-section-title { border-color: var(--line); padding-bottom: 20px; }
+.dashboard-page-main .ds-stat { min-width: 0; border-top: 2px solid var(--line-strong); }
+.dashboard-page-main .ds-stat:hover { border-top-color: var(--brand); }
+.ds-stat .ds-figure { overflow-wrap: anywhere; }
+.dashboard-page-main table { width: 100%; border-collapse: separate; border-spacing: 0; }
+.dashboard-page-main thead { background: var(--ground); }
+.dashboard-page-main th { color: var(--ink-2); font-weight: 600; line-height: 1.5; }
+.dashboard-page-main td { border-bottom-color: var(--line); }
+.dashboard-page-main tbody tr:hover { background-color: rgb(var(--n-accent) / .035); }
+.dashboard-page-main :is(input, select, textarea) { border-radius: var(--radius-control); }
+.dashboard-page-main .bg-white.rounded-2xl.shadow-sm { border-radius: 0; box-shadow: none; border-inline: 0; background: var(--surface); }
+@media (min-width: 1024px) {
+  .workspace-shell > aside { height: calc(100dvh - var(--update-banner-h)); top: var(--update-banner-h); }
+}
+@media (max-width: 639px) {
+  .ds-stat { padding: 12px; gap: 10px; }
+  .ds-stat .ds-figure { font-size: 24px; }
+  .ds-section-actions { flex-wrap: wrap; }
+  .ds-section-actions > * { max-width: 100%; }
+}
+@media (min-width: 640px) {
+  .ds-dialog-backdrop { align-items: center; padding: 20px; }
+  .ds-dialog { border-radius: 14px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
 .ds-section-actions { display: flex; align-items: center; gap: .5rem; }
 
 /* ป้ายเล็กเหนือหัวข้อ — บอกว่ากำลังอยู่ส่วนไหน
@@ -413,7 +471,7 @@ html:not(.dark) .chat-bubble-me * { color: #FFFFFF; }
   display: inline-block;
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: .12em;
+  letter-spacing: 0;
   text-transform: uppercase;
   color: var(--brand);
 }
@@ -424,7 +482,7 @@ html:not(.dark) .chat-bubble-me * { color: #FFFFFF; }
   font-family: "IBM Plex Mono", ui-monospace, monospace;
   font-variant-numeric: tabular-nums;
   font-weight: 600;
-  letter-spacing: -.02em;
+  letter-spacing: 0;
   line-height: 1;
   color: var(--ink);
 }

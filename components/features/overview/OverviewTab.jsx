@@ -57,7 +57,7 @@ function LiveSummary({ onNavigate }) {
   if (d.error) return <Card className="p-5 text-sm text-rose-600">โหลดตัวเลขไม่สำเร็จ</Card>;
 
   return (
-    <div className="grid grid-cols-2 gap-4 lg:grid-cols-4 2xl:grid-cols-5">
+    <div className="overview-live grid grid-cols-2 xl:grid-cols-5">
       <StatCard icon={Inbox} label="ลูกค้าทั้งหมด" value={int(d.customers)}
         sub={`ทักใหม่ 7 วัน ${int(d.fresh7)} คน`} tone="brand" onClick={() => onNavigate?.("customer_list")} />
       <StatCard icon={Inbox} label="ยังไม่ได้ตอบ" value={int(d.unanswered)}
@@ -204,22 +204,39 @@ export default function OverviewTab({ adContent = [], adCopies = [], adImages = 
   );
 
   return (
-    <div className="w-full max-w-[1400px] space-y-5">
-      {/* ไม่ใส่ eyebrow — เมนูซ้ายบอกอยู่แล้วว่าอยู่หน้าภาพรวม ป้ายซ้ำหัวข้อคือสัญญาณรบกวน */}
-      <SectionTitle
-        title="ภาพรวม"
-        subtitle="สรุปสถานะระบบยิงโฆษณาอัตโนมัติแบบเรียลไทม์"
-        right={
-          <Button variant="primary" icon={Sparkles} onClick={() => onNavigate?.("generate")}>
-            สร้างคอนเทนต์ใหม่
-          </Button>
-        }
-      />
+    <div className="nova-dashboard">
+      <header className="nova-dashboard-intro">
+        <div>
+          <span className="nova-kicker">OPERATING CANVAS</span>
+          <h1>ภาพรวมการทำงาน</h1>
+          <p>สถานะลูกค้า โฆษณา และงานที่ต้องตัดสินใจในหนึ่งมุมมอง</p>
+        </div>
+        <Button variant="primary" icon={Sparkles} onClick={() => onNavigate?.("generate")}>
+          สร้างคอนเทนต์
+        </Button>
+      </header>
 
-      <LiveSummary onNavigate={onNavigate} />
+      <section aria-label="ลูกค้าและการติดตาม" className="nova-dashboard-zone nova-customer-zone">
+        <div className="nova-zone-heading">
+          <div>
+            <span>01 / CUSTOMER SIGNALS</span>
+            <h2>ลูกค้าและการติดตาม</h2>
+          </div>
+          <p>สิ่งที่ทีมต้องเห็นก่อนเริ่มวัน</p>
+        </div>
+        <LiveSummary onNavigate={onNavigate} />
+      </section>
 
       {/* ตัวเลขสรุป — ค่าโฆษณามาก่อน เพราะเป็นตัวเดียวที่เป็นเงินไหลออกจริง */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <section aria-label="ผลการโฆษณา" className="nova-dashboard-zone nova-performance-zone">
+        <div className="nova-zone-heading">
+          <div>
+            <span>02 / MEDIA HEALTH</span>
+            <h2>ผลการโฆษณา</h2>
+          </div>
+          <p>ภาพรวมค่าใช้จ่ายและคอนเทนต์ที่กำลังขยับ</p>
+        </div>
+        <div className="overview-ad-stats nova-media-stats grid grid-cols-2 lg:grid-cols-4">
         <StatCard
           icon={BarChart3}
           label="ค่าโฆษณาวันนี้"
@@ -249,9 +266,17 @@ export default function OverviewTab({ adContent = [], adCopies = [], adImages = 
           tone="blue"
           onClick={() => onNavigate?.("campaigns", "scale")}
         />
-      </div>
-
-      <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(320px,1fr)]">
+        </div>
+      </section>
+      <section className="nova-workbench" aria-label="พื้นที่ปฏิบัติงาน">
+        <div className="nova-zone-heading">
+          <div>
+            <span>03 / ACTION DESK</span>
+            <h2>พื้นที่ปฏิบัติงาน</h2>
+          </div>
+          <p>รายการที่ต้องตรวจและการใช้จ่ายที่กำลังเกิดขึ้น</p>
+        </div>
+        <div className="overview-work-grid grid items-start gap-5 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,1fr)]">
         {/* เงินไปลงที่แอดตัวไหน — ดึงสดจาก Meta เฉพาะที่กำลังยิงอยู่ */}
         <RunningAdsToday onNavigate={onNavigate} />
 
@@ -290,7 +315,8 @@ export default function OverviewTab({ adContent = [], adCopies = [], adImages = 
             </ul>
           )}
         </Card>
-      </div>
+        </div>
+      </section>
     </div>
   );
 }

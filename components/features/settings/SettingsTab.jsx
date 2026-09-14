@@ -1067,11 +1067,10 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
 
   return (
     <div className="w-full max-w-[1400px] space-y-5 settings-page">
-      <SectionTitle title="ตั้งค่า" subtitle="ปรับการทำงานของระบบ คีย์ API สิทธิ์ผู้ใช้ และงานอัตโนมัติ" />
+      <SectionTitle eyebrow="WORKSPACE SETTINGS" title="ตั้งค่า" subtitle="ปรับการทำงานของระบบ คีย์ API สิทธิ์ผู้ใช้ และงานอัตโนมัติ" />
       <div className="settings-page-overview ds-card flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <div className="text-xs font-semibold uppercase tracking-wide text-brand-600">Settings center</div>
-          <div className="mt-1 text-sm text-slate-500">เลือกหัวข้อที่ต้องการแก้ไข หรือค้นหาจากชื่อเมนูได้ทันที</div>
+          <div className="text-sm font-semibold text-night-ink">{cur.label}</div>
         </div>
         <div className="relative w-full sm:max-w-xs">
           <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />

@@ -37,7 +37,6 @@ import { logActivity } from "@/lib/utils/activity";
 import { readFunctionErrorMessage } from "@/lib/utils/errors";
 import { calculateVatInclusiveBudget } from "@/lib/budget-vat";
 import { exportPageNavHtml } from "@/lib/utils/export";
-import HomeButton from "@/components/shared/HomeButton";
 import Spinner from "@/components/shared/Spinner";
 import StatusBadge from "@/components/shared/StatusBadge";
 import { GhostAlert, useArchive, ArchiveBar } from "@/components/features/campaigns/CampaignsTab";
@@ -550,25 +549,20 @@ function AdDashboardModal({ ad, ai, onClose, onNavigate }) {
   } = budgetInfo;
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-50 overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-      <div className="safe-top sticky top-0 z-10 bg-white border-b border-slate-200">
-        {/* เดิมสลับเป็นแถวเดียวตั้งแต่ 640px — ช่วงแท็บเล็ตชื่อโฆษณาจึงโดน truncate กลางคำ
-            เลื่อนไปสลับที่ 1024px แทน แท็บเล็ตจะได้ชื่อเต็มบรรทัดแล้วปุ่มลงบรรทัดล่าง */}
-        <div className="w-full px-4 sm:px-6 py-3 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-center gap-3 min-w-0">
-            <button onClick={onClose} className="text-slate-500 hover:text-slate-800 flex items-center gap-1 text-sm shrink-0">
-              <ArrowLeft size={18} /> กลับ
+    <div className="atlas-report-overlay" onClick={(e) => e.stopPropagation()}>
+      <div className="atlas-report-toolbar safe-top sticky top-0 z-10 bg-white border-b border-slate-200">
+        <div className="atlas-report-toolbar-inner">
+          <div className="atlas-report-identity">
+            <button onClick={onClose} className="atlas-report-back" aria-label="กลับไปรายการแคมเปญ">
+              <ArrowLeft size={18} /> <span>รายการแคมเปญ</span>
             </button>
-            <HomeButton />
-            <div className="min-w-0">
-              <div className="font-semibold text-slate-800 truncate">
-                {ad.headline || "แดชบอร์ดแอด"}
-                {data?.objective ? <span className="text-slate-500 font-normal"> ({OBJECTIVE_LABEL(data.objective)})</span> : ""}
-              </div>
-              <div className="text-[11px] text-slate-400">Ad ID: {ad.ad_id || "-"}</div>
+            <div className="atlas-report-title">
+              <span>AD PERFORMANCE REPORT</span>
+              <h1>{ad.headline || "แดชบอร์ดแอด"}{data?.objective ? <em>{OBJECTIVE_LABEL(data.objective)}</em> : ""}</h1>
+              <small>Ad ID: {ad.ad_id || "-"}</small>
             </div>
           </div>
-          <div className="flex items-center gap-2 flex-wrap lg:shrink-0 lg:justify-end">
+          <div className="atlas-report-actions">
             <button
               onClick={runDashboardAI}
               disabled={!data || aiBusy}
@@ -637,7 +631,7 @@ function AdDashboardModal({ ad, ai, onClose, onNavigate }) {
         </div>
       )}
 
-      <div ref={dashRef} className="w-full p-4 sm:p-6 space-y-4">
+      <div ref={dashRef} className="atlas-report-content w-full p-4 sm:p-6 space-y-4">
           {customIncomplete ? (
             <div className="text-sm text-slate-500 bg-white border border-slate-200 rounded-lg px-3 py-4 text-center">เลือกวันเริ่มต้นและวันสิ้นสุดเพื่อดูข้อมูล</div>
           ) : loading ? (
@@ -1249,13 +1243,13 @@ function MetaBrowsePanel({ settings, restricted = false, allowedAccounts = [] })
   const selectedAccount = (accounts || []).find((a) => String(a.account_id) === String(account));
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+    <section className="analysis-explorer bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
       {dashItem && <AdDashboardModal ad={dashItem} ai={null} onClose={() => setDashItem(null)} onNavigate={setDashItem} />}
       {showCompare && <CompareView items={compareItems} onClose={() => setShowCompare(false)} aiModel={textModel} />}
 
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h3 className="font-semibold text-slate-800">ดึงจากบัญชี Meta ทั้งหมด</h3>
+          <div className="flex items-center gap-2"><span className="analysis-step">02</span><h3 className="font-semibold text-slate-800">ดึงจากบัญชี Meta ทั้งหมด</h3></div>
           <p className="text-xs text-slate-500 mt-0.5">เลือกบัญชีโฆษณาที่เข้าถึงได้ แล้วเลือกแคมเปญเพื่อวิเคราะห์/เปรียบเทียบ/ดูแดชบอร์ด</p>
         </div>
         {!open && (
@@ -1410,7 +1404,7 @@ function MetaBrowsePanel({ settings, restricted = false, allowedAccounts = [] })
           )}
         </div>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -1629,6 +1623,7 @@ function AnalyzeTab({ adContent, metricsHistoryByAd, settings, onChanged, restri
   return (
     <div className="w-full max-w-[1600px] space-y-5">
       <SectionTitle
+        eyebrow="INSIGHTS & ANALYSIS"
         title="วิเคราะห์"
         subtitle="ดูผลโฆษณาจริงจาก Meta เทียบแคมเปญ และให้ AI สรุปว่าอะไรควรหยุดหรือขยายงบ"
       />

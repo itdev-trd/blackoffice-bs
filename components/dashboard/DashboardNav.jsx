@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
-import ThemeToggle from "@/components/shared/ThemeToggle";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { ExternalLink, KeyRound, LogOut, Menu, RefreshCw, X } from "lucide-react";
+import { ExternalLink, KeyRound, LogOut, Menu, RefreshCw, Search, X } from "lucide-react";
+import ThemeToggle from "@/components/shared/ThemeToggle";
 import { supabase } from "@/lib/supabase/client";
 import { logActivity } from "@/lib/utils/activity";
 import { clearCustomerDatabaseCaches } from "@/lib/customerdb-cache";
@@ -12,305 +12,102 @@ import { useDashboard, ROUTE_PATH } from "@/components/dashboard/DashboardContex
 import BrandMark from "@/components/shared/BrandMark";
 import ChangePasswordDialog from "@/components/shared/ChangePasswordDialog";
 
-// แถบเมนูล่างมือถือ — เข้าถึง 5 หน้าที่ใช้บ่อยที่สุดได้ในแตะเดียว แบบแอปมือถือทั่วไป
-// (label ย่อกว่าเมนูเต็มด้านข้าง เพราะพื้นที่จำกัด)
-const MOBILE_PRIMARY_TABS = [
-  { key: "overview", navLabel: "ภาพรวม" },
-  { key: "inbox", navLabel: "แชท" },
-  { key: "customerdb", navLabel: "ลูกค้า" },
-  { key: "review", navLabel: "อนุมัติ" },
-  { key: "campaigns", navLabel: "แคมเปญ" },
+const GROUPS = [
+  { label: "ภาพรวม", keys: ["overview"] },
+  { label: "โฆษณา", keys: ["generate", "review", "campaigns", "analyze", "ad_library"] },
+  { label: "ลูกค้า", keys: ["inbox", "feed", "ad_chats", "customerdb", "customer_list"] },
+  { label: "ระบบ", keys: ["leaderboard", "settings"] },
 ];
+const MOBILE_KEYS = ["overview", "campaigns", "inbox", "customerdb"];
 
 export default function DashboardNav({ children }) {
-  const { perm, visibleTabs, loadAll, tab } = useDashboard();
+  const { perm, visibleTabs = [], loadAll, tab } = useDashboard();
   const pathname = usePathname();
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
-  // เปลี่ยนรหัสผ่านอยู่ตรงนี้ ไม่ใช่ในหน้าตั้งค่า เพราะทุกบทบาทต้องเข้าถึงได้
-  // (บทบาทแอดมิน/ยิงแอด เห็นการตั้งค่าแค่หัวข้อเดียว จะไปวางในนั้นไม่ได้)
+  const [query, setQuery] = useState("");
   const [pwOpen, setPwOpen] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const menuRef = useRef(null);
   const isInboxRoute = pathname.startsWith(ROUTE_PATH.inbox);
-  // หน้าตอบแชทมี 3 คอลัมน์ (ลิสต์ + ห้องแชท + พาเนลลูกค้า) จึงยุบเมนูเหลือไอคอนเพื่อสงวนพื้นที่แนวนอน
-  // หน้าอื่นแสดงชื่อเมนูเต็ม เพราะไอคอนล้วนอ่านยากสำหรับคนที่ไม่ได้ใช้ทุกวัน
-  const navCollapsed = isInboxRoute;
-  const tabByKey = Object.fromEntries((visibleTabs || []).map((t) => [t.key, t]));
-  const mobileNavItems = MOBILE_PRIMARY_TABS
-    .map((m) => (tabByKey[m.key] ? { ...tabByKey[m.key], navLabel: m.navLabel } : null))
-    .filter(Boolean);
+  const currentTab = visibleTabs.find((item) => item.key === tab);
+  const groups = GROUPS.map((group) => ({ ...group, tabs: visibleTabs.filter((item) => group.keys.includes(item.key) && item.label.toLowerCase().includes(query.trim().toLowerCase())) })).filter((group) => group.tabs.length);
 
-  // สไตล์แท็บที่กำลังเลือก — ใช้จุดเดียวกันทั้ง sidebar เดสก์ท็อปและเมนูมือถือ ไม่ให้สีเพี้ยนจากกันในธีม light
-  const navLinkClass = (key, { compact = false } = {}) => {
-    const base = compact
-      ? "flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium text-left no-underline"
-      : "flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium no-underline border-l-2";
-    const active = compact ? "bg-night-accent/15 text-night-accent-light" : "border-night-accent bg-night-accent/15 text-night-accent-light";
-    const inactive = compact
-      ? "text-night-ink-2 hover:bg-night-surface2"
-      : "border-transparent text-night-ink-2 hover:text-night-ink hover:bg-night-surface2";
-    return `${base} ${tab === key ? active : inactive}`;
-  };
+  useEffect(() => { setMenuOpen(false); }, [pathname]);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const opener = document.activeElement;
+    const oldOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    requestAnimationFrame(() => menuRef.current?.querySelector("input")?.focus());
+    const onKeyDown = (event) => { if (event.key === "Escape") setMenuOpen(false); };
+    document.addEventListener("keydown", onKeyDown);
+    return () => { document.body.style.overflow = oldOverflow; document.removeEventListener("keydown", onKeyDown); opener?.focus?.(); };
+  }, [menuOpen]);
+
+  async function refresh() {
+    if (refreshing) return;
+    setRefreshing(true);
+    try { await loadAll(); } finally { setRefreshing(false); }
+  }
 
   async function handleLogout() {
     await logActivity("logout");
-    // cache รายงานมีข้อมูลลูกค้า: เก็บเฉพาะระหว่าง session และต้องล้างก่อนออกจากระบบ
     clearCustomerDatabaseCaches();
     try {
-      const reg = await navigator.serviceWorker?.getRegistration?.();
-      const subscription = await reg?.pushManager?.getSubscription?.();
+      const registration = await navigator.serviceWorker?.getRegistration?.();
+      const subscription = await registration?.pushManager?.getSubscription?.();
       if (subscription?.endpoint) {
         await supabase.functions.invoke("send-push", { body: { action: "unsubscribe", endpoint: subscription.endpoint } });
         await subscription.unsubscribe();
       }
-      const notifications = await reg?.getNotifications?.();
-      (notifications || []).forEach((notification) => notification.close());
+      (await registration?.getNotifications?.() || []).forEach((notification) => notification.close());
       if ("clearAppBadge" in navigator) await navigator.clearAppBadge();
-    } catch {
-      /* logout ต้องทำต่อแม้ browser ถอน push ไม่สำเร็จ */
-    }
+    } catch { /* Log out even if browser notification cleanup is unavailable. */ }
     await supabase.auth.signOut();
     router.replace("/login");
   }
 
+  function navLink(item, compact = false) {
+    const content = <><item.icon size={compact ? 19 : 16} /><span>{item.label}</span>{item.href && <ExternalLink size={12} />}</>;
+    const props = { className: `nova-nav-link ${compact ? "is-compact" : ""} ${tab === item.key ? "is-active" : ""}`, title: item.label, "aria-label": item.label, "aria-current": tab === item.key ? "page" : undefined };
+    return item.href
+      ? <a key={item.key} {...props} href={item.href} target="_blank" rel="noopener noreferrer">{content}</a>
+      : <Link key={item.key} {...props} href={ROUTE_PATH[item.key]} onClick={() => setMenuOpen(false)}>{content}</Link>;
+  }
+
   return (
-    <div className="min-h-screen lg:flex">
-      {/* Sidebar ซ้าย — เดสก์ท็อป/แท็บเล็ต */}
-      {/* Sidebar มีสองโหมด:
-          - ปกติ = กว้าง มีชื่อเมนูกำกับทุกอัน (ไอคอนล้วนต้องอาศัยการจำ/hover ทีละอัน
-            ซึ่งเป็นปัญหากับไอคอนที่หน้าตาใกล้กันอย่าง รออนุมัติ/แคมเปญ/วิเคราะห์)
-          - หน้าตอบแชท = ยุบเหลือไอคอน เพราะหน้านั้นมี 3 คอลัมน์อยู่แล้ว ต้องสงวนพื้นที่แนวนอน
-          โหมดยุบยังมี title ให้ hover อ่านชื่อได้ */}
-      <aside
-        className={`hidden lg:flex lg:flex-col lg:shrink-0 lg:h-screen lg:sticky lg:top-0 bg-night-surface border-r border-night-border z-30 py-3 gap-1 transition-[width] duration-200 ease-ui ${
-          // 168px = พอดีกับเมนูที่ยาวที่สุด ("สร้างคอนเทนต์" 85px + ไอคอน + ระยะขอบ) โดยไม่มีชื่อไหนโดนตัด
-          navCollapsed ? "lg:w-[88px] items-center" : "lg:w-[168px]"
-        }`}
-      >
-        <Link
-          href={ROUTE_PATH.overview}
-          className={`flex shrink-0 items-center gap-2.5 rounded-control mb-3 ${navCollapsed ? "h-8 w-8 justify-center" : "px-3 h-10 mx-2"}`}
-          title="Besight — กลับหน้าแรก"
-        >
-          <BrandMark className="h-8 w-8 shrink-0" />
-          {!navCollapsed && <span className="truncate text-[15px] font-bold tracking-tight text-night-ink">Besight</span>}
-        </Link>
-        <nav className={`flex-1 overflow-y-auto flex flex-col gap-1 w-full px-2 ${navCollapsed ? "items-center" : ""}`}>
-          {perm && visibleTabs.map((t) =>
-            t.href ? (
-              <a key={t.key} href={t.href} target="_blank" rel="noopener noreferrer"
-                title={t.label}
-                className={`relative flex shrink-0 items-center rounded-control text-night-ink-2 hover:text-night-ink hover:bg-night-surface2 ${
-                  navCollapsed ? "h-10 w-10 justify-center" : "h-11 w-full gap-3 px-3"
-                }`}>
-                <t.icon size={18} className="shrink-0" />
-                {!navCollapsed && <span className="truncate text-sm font-medium">{t.label}</span>}
-              </a>
-            ) : (
-              <Link key={t.key} href={ROUTE_PATH[t.key]} title={t.label}
-                className={`relative flex shrink-0 items-center rounded-control ${
-                  navCollapsed ? "h-10 w-10 justify-center" : "h-11 w-full gap-3 px-3"
-                } ${
-                  tab === t.key ? "bg-night-accent/15 text-night-accent-light" : "text-night-ink-2 hover:text-night-ink hover:bg-night-surface2"
-                }`}>
-                {tab === t.key && <span className={`absolute top-1/2 -translate-y-1/2 h-5 w-[3px] rounded-r bg-night-accent ${navCollapsed ? "left-[-8px]" : "left-[-8px]"}`} />}
-                <t.icon size={18} className="shrink-0" />
-                {!navCollapsed && <span className="truncate text-sm font-medium">{t.label}</span>}
-              </Link>
-            )
-          )}
-        </nav>
-        {/* ท้าย sidebar: รีเฟรช/ออกจากระบบ/อีเมลผู้ใช้
-            อีเมลสำคัญเพราะพนักงานหลายคนใช้เครื่องร่วมกัน ต้องรู้ว่ากำลังใช้งานด้วยบัญชีไหน */}
-        <div className={`shrink-0 flex pt-3 mt-1 border-t border-night-border w-full px-2 ${navCollapsed ? "flex-col items-center gap-1.5" : "flex-col gap-1.5"}`}>
-          <button
-            onClick={loadAll}
-            className={`flex items-center rounded-lg border border-sky-500/40 bg-sky-500/10 text-sky-700 transition-colors hover:border-sky-500/70 hover:bg-sky-500/15 dark:border-sky-400/30 dark:bg-sky-400/10 dark:text-sky-300 dark:hover:border-sky-300/60 dark:hover:bg-sky-400/20 ${
-              navCollapsed ? "h-11 w-16 flex-col justify-center gap-0.5" : "h-10 w-full gap-2.5 px-3"
-            }`}
-            title="รีเฟรชข้อมูล"
-            aria-label="รีเฟรชข้อมูล"
-          >
-            <RefreshCw size={17} className="shrink-0" />
-            <span className={navCollapsed ? "text-[10px] font-semibold leading-none" : "text-[13px] font-semibold"}>รีเฟรช</span>
-          </button>
-          <ThemeToggle collapsed={navCollapsed} />
-          <button
-            onClick={() => setPwOpen(true)}
-            className={`flex items-center rounded-lg border border-night-border bg-night-surface2 text-night-ink-2 transition-colors hover:border-night-accent/50 hover:text-night-ink ${
-              navCollapsed ? "h-11 w-16 flex-col justify-center gap-0.5" : "h-10 w-full gap-2.5 px-3"
-            }`}
-            title="เปลี่ยนรหัสผ่าน"
-            aria-label="เปลี่ยนรหัสผ่าน"
-          >
-            <KeyRound size={17} className="shrink-0" />
-            <span className={navCollapsed ? "text-[10px] font-semibold leading-none" : "text-[13px] font-semibold"}>รหัสผ่าน</span>
-          </button>
-          <button
-            onClick={handleLogout}
-            className={`flex items-center rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-700 transition-colors hover:border-rose-500/70 hover:bg-rose-500/15 dark:border-rose-400/30 dark:bg-rose-400/10 dark:text-rose-300 dark:hover:border-rose-300/60 dark:hover:bg-rose-400/20 ${
-              navCollapsed ? "h-11 w-16 flex-col justify-center gap-0.5" : "h-10 w-full gap-2.5 px-3"
-            }`}
-            title="ออกจากระบบ"
-            aria-label="ออกจากระบบ"
-          >
-            <LogOut size={17} className="shrink-0" />
-            <span className={navCollapsed ? "text-[10px] font-semibold leading-none" : "text-[13px] font-semibold"}>ออกจากระบบ</span>
-          </button>
-          {perm?.email && (
-            <div
-              className={`mt-1 flex items-center gap-2 min-w-0 ${navCollapsed ? "justify-center" : "px-1 pb-1"}`}
-              title={perm.email}
-            >
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-night-accent/15 text-2xs font-bold uppercase text-night-accent dark:text-night-accent-light dark:text-night-accent-light">
-                {String(perm.email).slice(0, 1)}
-              </span>
-              {!navCollapsed && <span className="min-w-0 flex-1 truncate text-2xs text-night-ink-2">{perm.email}</span>}
-            </div>
-          )}
+    <div className={`nova-shell ${isInboxRoute ? "nova-inbox" : ""}`}>
+      <a href="#workspace-main" className="nova-skip">ข้ามไปเนื้อหา</a>
+      <header className="nova-topbar app-header">
+        <Link href={ROUTE_PATH.overview} className="nova-brand"><BrandMark className="h-8 w-8" /><span>Besight</span></Link>
+        <div className="nova-page-label"><span>WORKSPACE</span><strong>{currentTab?.label || "ภาพรวม"}</strong></div>
+        <div className="nova-actions">
+          <button className="nova-icon-button" title="ค้นหาหน้าและเมนู" aria-label="ค้นหาหน้าและเมนู" onClick={() => { setQuery(""); setMenuOpen(true); }}><Search size={18} /></button>
+          <button className="nova-icon-button" title="รีเฟรชข้อมูล" aria-label="รีเฟรชข้อมูล" disabled={refreshing} onClick={refresh}><RefreshCw size={18} className={refreshing ? "animate-spin" : ""} /></button>
+          <ThemeToggle icon />
+          <button className="nova-user" title={perm?.email || "บัญชีผู้ใช้"} aria-label="เมนูบัญชีผู้ใช้" onClick={() => { setQuery(""); setMenuOpen(true); }}>{perm?.email?.slice(0, 1).toUpperCase() || "B"}</button>
         </div>
-      </aside>
-
-      {/* คอลัมน์ขวา: header มือถือ + เนื้อหา */}
-      <div className="flex-1 min-w-0 flex flex-col min-h-screen">
-        <header className="lg:hidden app-header bg-night-surface border-b border-night-border sticky top-0 z-30">
-          <div className="w-full px-4 sm:px-6 py-3 flex items-center justify-between gap-2">
-            <Link href={ROUTE_PATH.overview} className="flex items-center gap-2 font-semibold text-night-ink hover:opacity-80 min-w-0" title="กลับหน้าแรก">
-              <BrandMark className="h-7 w-7" />
-              <span className="truncate">Besight</span>
-            </Link>
-            {/* เว้นระยะห่างรีเฟรช/ออกจากระบบให้มากพอ กันกดผิด (เดิมชิดกันเกินไป) */}
-            <div className="flex items-center gap-2 shrink-0">
-              {/* สลับธีมอยู่ขวาบน กดได้ทันทีไม่ต้องเปิดเมนู "เพิ่มเติม"
-                  ใช้ไอคอนล้วนเพื่อไม่ให้แถวนี้แน่นจนชื่อแอปโดนบีบ */}
-              <ThemeToggle icon />
-              <button
-                onClick={loadAll}
-                className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-sky-400/40 bg-sky-400/10 px-2.5 text-xs font-semibold text-sky-300 transition-colors hover:border-sky-300/70 hover:bg-sky-400/20"
-                title="รีเฟรชข้อมูล"
-                aria-label="รีเฟรชข้อมูล"
-              >
-                <RefreshCw size={16} />
-                <span>รีเฟรช</span>
-              </button>
-              <button
-                onClick={handleLogout}
-                className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-rose-400/40 bg-rose-400/10 px-2.5 text-xs font-semibold text-rose-300 transition-colors hover:border-rose-300/70 hover:bg-rose-400/20"
-                title="ออกจากระบบ"
-                aria-label="ออกจากระบบ"
-              >
-                <LogOut size={16} />
-                <span>ออก</span>
-              </button>
-            </div>
-          </div>
-        </header>
-
-        {/* หน้าตอบแชทบนมือถือ = ไม่มี padding รอบ (เต็มจอ) · หน้าอื่นและเดสก์ท็อปมี padding ปกติ
-            เผื่อพื้นที่ด้านล่างให้แถบเมนูมือถือ (pb-24) ยกเว้นหน้าแชทที่ไม่โชว์แถบนี้อยู่แล้ว */}
-        <main className={`w-full ${isInboxRoute ? "px-0 py-0 lg:px-0 lg:py-0" : "dashboard-page-main flex justify-center items-start px-4 py-6 pb-24 sm:px-6 sm:py-6 lg:pb-8 lg:px-10"}`}>
-          {children}
-        </main>
-      </div>
-
-      {/* แถบเมนูล่างมือถือ — โชว์ทุกหน้ารวมหน้าแชท ปุ่ม "เพิ่มเติม" อยู่ขวาสุด แทนที่ปุ่มสามขีดเดิมที่เคยอยู่บนซ้ายของ header
-          ตอนเปิดคุยกับลูกค้าเต็มจอ (หน้าแชท) ตัวหน้าต่างแชทจะซ้อนทับแถบนี้เอง (z-index สูงกว่า) ไม่ต้องซ่อนด้วยโค้ดตรงนี้ */}
-      {perm && mobileNavItems.length > 0 && (
-        <nav
-          className="lg:hidden fixed bottom-0 inset-x-0 z-30 bg-night-surface border-t border-night-border flex items-stretch"
-          style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
-        >
-          {mobileNavItems.map((t) => {
-            const active = tab === t.key;
-            return (
-              <Link
-                key={t.key}
-                href={ROUTE_PATH[t.key]}
-                className={`flex-1 flex flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-medium no-underline ${active ? "text-brand-600" : "text-night-ink-3"}`}
-              >
-                <t.icon size={20} />
-                {t.navLabel}
-              </Link>
-            );
-          })}
-          <button
-            onClick={() => setMenuOpen(true)}
-            className={`flex-1 flex flex-col items-center justify-center gap-0.5 py-2 text-[11px] font-medium ${menuOpen ? "text-brand-600" : "text-night-ink-3"}`}
-            aria-label="เพิ่มเติม"
-          >
-            <Menu size={20} />
-            เพิ่มเติม
-          </button>
-        </nav>
-      )}
-
-      {/* แผงเมนูเพิ่มเติม — เลื่อนขึ้นจากล่าง แสดงแท็บที่เหลือ + อีเมล/รีเฟรช/ออกจากระบบ */}
-      {menuOpen && (
-        <div
-          className="lg:hidden fixed inset-0 z-40 bg-black/40 flex items-end"
-          onMouseDown={(e) => { if (e.target === e.currentTarget) setMenuOpen(false); }}
-        >
-          <div className="w-full bg-night-surface rounded-t-2xl shadow-2xl max-h-[80vh] overflow-y-auto" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
-            <div className="sticky top-0 bg-night-surface flex items-center justify-between px-4 py-3 border-b border-night-border">
-              <span className="font-semibold text-night-ink">เพิ่มเติม</span>
-              <button onClick={() => setMenuOpen(false)} className="text-night-ink-3 hover:text-night-ink p-1" aria-label="ปิด"><X size={20} /></button>
-            </div>
-            <div className="p-2 flex flex-col gap-0.5">
-              {perm && visibleTabs.map((t) =>
-                t.href ? (
-                  <a key={t.key} href={t.href} target="_blank" rel="noopener noreferrer" onClick={() => setMenuOpen(false)}
-                    className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm font-medium text-left no-underline text-night-ink-2 hover:bg-night-surface2">
-                    <t.icon size={16} />
-                    {t.label}
-                    <ExternalLink size={12} className="opacity-60 ml-auto" />
-                  </a>
-                ) : (
-                  <Link key={t.key} href={ROUTE_PATH[t.key]} onClick={() => setMenuOpen(false)}
-                    className={navLinkClass(t.key, { compact: true })}>
-                    <t.icon size={16} />
-                    {t.label}
-                  </Link>
-                )
-              )}
-            </div>
-            {/* รีเฟรช / สลับธีม / ออกจากระบบ — เดิมมีแต่ใน sidebar ซึ่งจอมือถือกับแท็บเล็ตไม่มี
-                ทำให้สลับธีมไม่ได้เลยบนสองขนาดนี้ */}
-            <div className="border-t border-night-border p-3 grid grid-cols-2 gap-2">
-              <button
-                onClick={() => { loadAll(); setMenuOpen(false); }}
-                className="flex h-10 items-center justify-center gap-2 rounded-lg border border-sky-500/40 bg-sky-500/10 text-sky-700 dark:border-sky-400/30 dark:bg-sky-400/10 dark:text-sky-300"
-              >
-                <RefreshCw size={17} className="shrink-0" />
-                <span className="text-[13px] font-semibold">รีเฟรช</span>
-              </button>
-              {/* ThemeToggle โหมดปกติสูง h-10 เท่ากับปุ่มรีเฟรชพอดี */}
-              <ThemeToggle />
-              <button
-                onClick={() => { setPwOpen(true); setMenuOpen(false); }}
-                className="col-span-2 flex h-10 items-center justify-center gap-2 rounded-lg border border-night-border bg-night-surface2 text-night-ink-2"
-              >
-                <KeyRound size={17} className="shrink-0" />
-                <span className="text-[13px] font-semibold">เปลี่ยนรหัสผ่าน</span>
-              </button>
-              <button
-                onClick={handleLogout}
-                className="col-span-2 flex h-10 items-center justify-center gap-2 rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-700 dark:border-rose-400/30 dark:bg-rose-400/10 dark:text-rose-300"
-              >
-                <LogOut size={17} className="shrink-0" />
-                <span className="text-[13px] font-semibold">ออกจากระบบ</span>
-              </button>
-            </div>
-            {perm?.email && (
-              <div className="border-t border-night-border p-3 flex items-center gap-2 min-w-0" title={perm.email}>
-                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-night-accent/15 text-2xs font-bold uppercase text-night-accent-light">
-                  {String(perm.email).slice(0, 1)}
-                </span>
-                <span className="min-w-0 flex-1 truncate text-2xs text-night-ink-2">{perm.email}</span>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
+      </header>
+      <nav className="nova-workspace-nav" aria-label="เมนูหลัก">
+        {GROUPS.map((group) => {
+          const items = visibleTabs.filter((item) => group.keys.includes(item.key));
+          if (!items.length) return null;
+          return <div className="nova-nav-group" key={group.label}><span>{group.label}</span><div>{items.map((item) => navLink(item))}</div></div>;
+        })}
+      </nav>
+      <main id="workspace-main" tabIndex={-1} data-page={tab} className={isInboxRoute ? "nova-main nova-chat-main" : "nova-main"}>
+        {!isInboxRoute && <div className="nova-page-meta"><span>{currentTab?.label || "ภาพรวม"}</span><span>{String(Math.max(0, visibleTabs.findIndex((item) => item.key === tab)) + 1).padStart(2, "0")} / {String(visibleTabs.length).padStart(2, "0")}</span></div>}
+        {children}
+      </main>
+      <nav className="nova-mobile-dock" aria-label="เมนูบนมือถือ">{MOBILE_KEYS.map((key) => visibleTabs.find((item) => item.key === key)).filter(Boolean).map((item) => navLink(item, true))}<button className="nova-nav-link is-compact" onClick={() => { setQuery(""); setMenuOpen(true); }} aria-label="เมนูทั้งหมด"><Menu size={20} /><span>เพิ่มเติม</span></button></nav>
+      {menuOpen && <div className="nova-palette-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setMenuOpen(false); }}>
+        <section ref={menuRef} className="nova-palette" role="dialog" aria-modal="true" aria-label="เมนูและคำสั่ง">
+          <div className="nova-palette-search"><Search size={20} /><input aria-label="ค้นหาเมนู" placeholder="ไปที่หน้า..." value={query} onChange={(event) => setQuery(event.target.value)} /><button className="nova-icon-button" aria-label="ปิดเมนู" onClick={() => setMenuOpen(false)}><X size={19} /></button></div>
+          <div className="nova-palette-results">{groups.map((group) => <div key={group.label}><span>{group.label}</span>{group.tabs.map((item) => navLink(item))}</div>)}{groups.length === 0 && <p>ไม่พบเมนู</p>}</div>
+          <footer className="nova-palette-footer"><span>{perm?.email}</span><button onClick={() => { setMenuOpen(false); setPwOpen(true); }}><KeyRound size={16} /> เปลี่ยนรหัสผ่าน</button><button onClick={handleLogout}><LogOut size={16} /> ออกจากระบบ</button></footer>
+        </section>
+      </div>}
       <ChangePasswordDialog open={pwOpen} email={perm?.email} onClose={() => setPwOpen(false)} />
     </div>
   );

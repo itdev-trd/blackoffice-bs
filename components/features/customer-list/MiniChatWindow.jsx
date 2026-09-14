@@ -56,7 +56,7 @@ export default function MiniChatWindow({ row, onClose, onOpenInInbox }) {
   if (!row) return null;
 
   return (
-    <div className="fixed bottom-3 right-3 z-[90] w-[min(340px,calc(100vw-24px))] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+    <div className="customer-mini-chat fixed bottom-3 right-3 z-[90] w-[min(340px,calc(100vw-24px))] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
       <div className="flex items-center gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2">
         <MessageSquare size={14} className="shrink-0 text-brand-600" />
         <div className="min-w-0 flex-1">
@@ -75,7 +75,7 @@ export default function MiniChatWindow({ row, onClose, onOpenInInbox }) {
 
       {!minimized && (
         <>
-          <div ref={bodyRef} className="max-h-[46vh] min-h-[160px] space-y-1.5 overflow-y-auto bg-white px-3 py-2.5">
+          <div ref={bodyRef} className="customer-mini-chat-body max-h-[46vh] min-h-[160px] space-y-1.5 overflow-y-auto bg-white px-3 py-2.5">
             {msgs === null ? (
               <div className="flex items-center gap-2 py-6 text-[11.5px] text-slate-500">
                 <Loader2 size={13} className="animate-spin" /> กำลังโหลดบทสนทนา…

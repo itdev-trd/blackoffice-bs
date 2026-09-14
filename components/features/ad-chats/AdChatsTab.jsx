@@ -12,7 +12,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Megaphone, RefreshCw, Info, ChevronRight, ChevronDown, MessageSquare, Repeat, Sparkles, HelpCircle } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import Spinner from "@/components/shared/Spinner";
-import { EmptyState, FilterPill } from "@/components/ui";
+import { EmptyState, FilterPill, SectionTitle, SearchInput } from "@/components/ui";
 
 const RANGES = [
   { key: "7", label: "7 วัน", days: 7 },
@@ -25,6 +25,8 @@ export default function AdChatsTab({ active = true, onOpenChat }) {
   const [totals, setTotals] = useState(null);
   const [err, setErr] = useState("");
   const [range, setRange] = useState("30");
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState("chats");
   // รายชื่อคนที่ทักมาต่อแอด — ดึงตอนกดเปิดเท่านั้น (ไม่ดึงล่วงหน้าทุกแอด)
   const [openAd, setOpenAd] = useState(null);
   const [people, setPeople] = useState({});     // { [ad_id]: rows | "loading" | { error } }
@@ -64,17 +66,13 @@ export default function AdChatsTab({ active = true, onOpenChat }) {
   }, [openAd, people, range]);
 
   const fmt = (v) => (v == null ? "—" : new Date(v).toLocaleString("th-TH", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }));
+  const visibleAds = (ads || []).filter((ad) => `${ad.ad_name || ""} ${ad.ad_id || ""}`.toLowerCase().includes(query.trim().toLowerCase()))
+    .sort((a, b) => Number(b[sort] || 0) - Number(a[sort] || 0));
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div>
-          <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2"><Megaphone size={18} /> แอดไหนได้ลูกค้า</h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            นับจากลูกค้าที่ระบบรู้ที่มาจริง — ทักจากโฆษณา (referral) และคอมเมนต์ใต้โฆษณา
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
+    <div className="attribution-page w-full space-y-5">
+      <SectionTitle eyebrow="AD ATTRIBUTION" title="แอดไหนได้ลูกค้า" subtitle="ลูกค้าที่ทักจากโฆษณาและคอมเมนต์ใต้โฆษณา" right={
+        <div className="studio-segment flex items-center gap-2">
           {RANGES.map((r) => (
             <FilterPill key={r.key} active={range === r.key} onClick={() => setRange(r.key)}>{r.label}</FilterPill>
           ))}
@@ -82,12 +80,12 @@ export default function AdChatsTab({ active = true, onOpenChat }) {
             <RefreshCw size={14} />
           </button>
         </div>
-      </div>
+      } />
 
       {err && <div className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-sm text-rose-700">{err}</div>}
 
       {/* ที่มาของตัวเลขต้องอยู่ติดกับตัวเลข — ไม่งั้นคนอ่านรายงานเดาเอง แล้วเอาไปใช้ตัดสินใจผิด */}
-      <details className="rounded-xl border border-slate-200 bg-white">
+      <details className="attribution-notes rounded-xl border border-slate-200 bg-white">
         <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold text-slate-700">
           ตัวเลขในหน้านี้นับมาจากไหน (กดเพื่อดู)
         </summary>
@@ -168,12 +166,12 @@ export default function AdChatsTab({ active = true, onOpenChat }) {
           hint="ลูกค้าที่กดจากโฆษณาจะถูกบันทึก ad_id ให้เองผ่าน webhook · ลองเปลี่ยนช่วงเวลาเป็น “ทั้งหมด”" />
       ) : (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <div className="attribution-metrics grid grid-cols-2 md:grid-cols-4">
             {[["ลูกค้าทั้งหมดในช่วงนี้", totals?.total ?? 0, "ทุกห้องแชท/คอมเมนต์ที่เข้าระบบในช่วงนี้ (ไม่นับที่บล็อกว่าสแปม)"],
               ["รู้ที่มาจากแอด", totals?.with_ad ?? 0, "ห้องที่ผูกกับ ad_id ได้"],
               ["ลูกค้าใหม่จากแอด", totals?.ad_new ?? 0, "ทักครั้งแรกพร้อมกับการกดแอด — คนที่แอดหามาได้จริง", "text-emerald-700"],
               ["ลูกค้าเก่ากลับมา", totals?.ad_old ?? 0, "เคยคุยกับเพจอยู่แล้วแต่กดแอดเข้ามาใหม่ — ไม่ใช่คนใหม่ที่แอดหามาได้", "text-amber-700"]].map(([label, value, hint, tone]) => (
-              <div key={label} className="rounded-xl border border-slate-200 bg-white p-3" title={hint}>
+              <div key={label} className="attribution-metric" title={hint}>
                 <div className="text-[11px] text-slate-500">{label}</div>
                 <div className={`text-lg font-semibold ${tone || "text-slate-800"}`}>{Number(value).toLocaleString("th-TH")}</div>
               </div>
@@ -190,7 +188,16 @@ export default function AdChatsTab({ active = true, onOpenChat }) {
             )}
           </div>
 
-          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+          <div className="studio-table-toolbar">
+            <SearchInput aria-label="ค้นหาโฆษณา" placeholder="ค้นหาชื่อหรือไอดีโฆษณา" value={query} onChange={(event) => setQuery(event.target.value)} />
+            <label className="flex items-center gap-2 text-sm text-night-ink-2">เรียงตาม
+              <select value={sort} onChange={(event) => setSort(event.target.value)} className="ds-select border border-night-border bg-night-surface px-3 py-2">
+                <option value="chats">ลูกค้ามากที่สุด</option><option value="new_cust">ลูกค้าใหม่มากที่สุด</option><option value="opened">เปิดบัญชีมากที่สุด</option>
+              </select>
+            </label>
+            <span className="text-xs text-night-ink-3">{visibleAds.length} โฆษณา</span>
+          </div>
+          <div className="studio-data-table overflow-x-auto border border-slate-200 bg-white">
             <table className="min-w-full text-sm">
               <thead className="bg-slate-50 text-[11px] uppercase text-slate-500">
                 <tr>
@@ -207,7 +214,8 @@ export default function AdChatsTab({ active = true, onOpenChat }) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {ads.map((a) => {
+                {visibleAds.length === 0 && <tr><td colSpan={10} className="p-8 text-center text-night-ink-3">ไม่พบโฆษณาที่ตรงกับคำค้น</td></tr>}
+                {visibleAds.map((a) => {
                   const isOpen = openAd === a.ad_id;
                   const rows = people[a.ad_id];
                   return [

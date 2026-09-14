@@ -23,7 +23,7 @@ export function VerdictBadge({ verdict }) {
 export function KpiTile({ label, value, sub, tone = "slate", secondaryLabel, secondaryValue }) {
   const tones = { slate: "text-slate-800", green: "text-emerald-600", rose: "text-rose-600", blue: "text-blue-600", amber: "text-amber-600" };
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-3 min-w-0">
+    <div className="atlas-kpi-tile rounded-xl border border-slate-200 bg-white p-3 min-w-0">
       <div className="text-[11px] text-slate-500">{label}</div>
       <div className={`text-lg font-semibold tabular-nums break-words ${tones[tone]}`}>{value}</div>
       {sub && <div className="text-[11px] text-slate-400 mt-0.5">{sub}</div>}
@@ -49,7 +49,7 @@ export function HeroResult({ o, rangeText }) {
   const res = headlineResult(o);
   const perUnit = res.value > 0 ? o.spend / res.value : null;
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-6">
+    <div className="atlas-result-hero rounded-2xl border border-slate-200 bg-white p-5 sm:p-6">
       <div className="text-xs font-medium text-slate-500">{rangeText} · โฆษณาชิ้นนี้ได้อะไรมา</div>
       <div className="mt-3 flex flex-wrap items-end gap-x-8 gap-y-4">
         <div>
@@ -80,7 +80,7 @@ export function HeroResult({ o, rangeText }) {
 
 export function MetricGroup({ title, hint, children }) {
   return (
-    <section>
+    <section className="atlas-metric-group">
       <div className="mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
         <h4 className="text-sm font-semibold text-slate-800">{title}</h4>
         {hint && <span className="text-[11px] text-slate-500">{hint}</span>}
@@ -95,7 +95,7 @@ export function MetricGroup({ title, hint, children }) {
 export function PlainTile({ name, value, jargon, note, tone = "slate" }) {
   const tones = { slate: "text-slate-900", green: "text-emerald-700", rose: "text-rose-700", blue: "text-blue-700" };
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-3 min-w-0">
+    <div className="atlas-metric-tile rounded-xl border border-slate-200 bg-white p-3 min-w-0">
       <div className="text-[11px] font-medium text-slate-600">{name}</div>
       <div className={`mt-0.5 text-xl font-semibold tabular-nums break-words ${tones[tone]}`}>{value}</div>
       {jargon && <div className="text-[10px] uppercase tracking-wide text-slate-400">{jargon}</div>}

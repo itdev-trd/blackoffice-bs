@@ -219,22 +219,22 @@ function CampaignsTab({ adContent, metricsByAdId, onChanged, filter = "all", onF
   return (
     <div className="w-full max-w-[1400px] space-y-4">
       <SectionTitle
+        eyebrow="CAMPAIGN PERFORMANCE"
         title="แคมเปญ"
         subtitle="ดูผลโฆษณาทั้งบัญชีแบบ Ads Manager หรือดูเฉพาะชิ้นที่ระบบยิงพร้อมคำแนะนำ AI"
         right={<Badge tone={launched.length ? "brand" : "slate"}>ระบบยิงแล้ว {launched.length} ชิ้น</Badge>}
       />
       {/* สองมุมมอง: ทั้งบัญชี (ดึงสดจาก Meta) กับเฉพาะที่ระบบยิง (มี AI แนะนำ/แจ้งแชทผี ซึ่ง Ads Manager ไม่มี) */}
-      <div className="inline-flex flex-wrap gap-1 rounded-card border border-slate-200 bg-slate-100 p-1">
+      <div className="studio-mode-tabs" role="tablist" aria-label="มุมมองแคมเปญ">
         {[
           ["all", "ทั้งบัญชี (แบบ Ads Manager)"],
           ["mine", "ที่ระบบยิง + คำแนะนำ AI"],
         ].map(([key, label]) => (
           <button
             key={key}
+            role="tab"
+            aria-selected={view === key}
             onClick={() => setView(key)}
-            className={`rounded-control px-4 py-2 text-[13.5px] font-semibold transition ${
-              view === key ? "bg-brand-600 text-white shadow-card" : "text-slate-500 hover:text-slate-700"
-            }`}
           >
             {label}
           </button>

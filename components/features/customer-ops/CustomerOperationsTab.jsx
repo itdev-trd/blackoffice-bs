@@ -38,6 +38,7 @@ export default function CustomerOperationsTab({ allowedPages = null, onOpenChat 
       {/* เดิมเป็นพาเนลดำ (bg-slate-950) พร้อมป้ายสีทอง — เป็นก้อนมืดก้อนเดียวในแอปที่เหลือสว่างทั้งหมด
           เปลี่ยนเป็นหัวข้อปกติ แล้วให้เครื่องมือเช็ค Trade ID อยู่ในการ์ดของตัวเองข้างๆ */}
       <SectionTitle
+        eyebrow="CUSTOMER DESK"
         title="ศูนย์จัดการลูกค้า"
         subtitle="ค้นหาลูกค้า เช็ค Trade ID ให้สิทธิ์ TradingView และจัดการข้อความตอบกลับ จากที่เดียว"
         right={
@@ -51,14 +52,13 @@ export default function CustomerOperationsTab({ allowedPages = null, onOpenChat 
       {/* บนมือถือเดิมเป็น flex-wrap ทำให้ปุ่มตกบรรทัดแบบไม่เท่ากัน กว้างบ้างแคบบ้าง กดยาก
           เปลี่ยนเป็นตาราง 2 ช่องเต็มความกว้าง เห็นครบทุกหมวดโดยไม่ต้องเลื่อน และปุ่มใหญ่พอนิ้วกด
           จอ sm ขึ้นไปกลับไปเป็นแถวเดียวแบบ segmented control เหมือนเดิม */}
-      <div className="grid grid-cols-2 gap-1 rounded-card border border-slate-200 bg-slate-100 p-1 sm:inline-flex sm:flex-wrap">
+      <div className="studio-mode-tabs" role="tablist" aria-label="งานลูกค้า">
         {modes.map(([key, label, Icon]) => (
           <button
             key={key}
+            role="tab"
+            aria-selected={activeMode === key}
             onClick={() => setMode(key)}
-            className={`flex min-h-[44px] items-center justify-center gap-2 rounded-control px-3 py-2 text-[13px] font-semibold transition sm:justify-start sm:px-4 sm:text-[13.5px] ${
-              activeMode === key ? "bg-brand-600 text-white shadow-card" : "text-slate-500 hover:text-slate-700"
-            } ${modes.length % 2 === 1 && key === modes[modes.length - 1][0] ? "col-span-2 sm:col-span-1" : ""}`}
           >
             <Icon size={15} className="shrink-0" /> <span className="truncate">{label}</span>
           </button>

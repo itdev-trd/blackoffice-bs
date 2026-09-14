@@ -232,6 +232,7 @@ function ReviewTab({ adCopies, adImages, onChanged, brandConfig }) {
   // ดูเหมือนหน้าพังมากกว่าจะสื่อว่า "เคลียร์หมดแล้ว"
   const header = (
     <SectionTitle
+      eyebrow="APPROVAL QUEUE"
       title="รออนุมัติ"
       subtitle="ตรวจข้อความและรูปที่ AI สร้างไว้ ก่อนอนุมัติขึ้นโฆษณาจริง"
       right={
@@ -248,7 +249,7 @@ function ReviewTab({ adCopies, adImages, onChanged, brandConfig }) {
     return (
       <div className="w-full max-w-[1400px] space-y-5">
         {header}
-        <Card>
+        <Card className="studio-review-empty">
           <EmptyState
             icon={CheckCircle2}
             title="ไม่มีคอนเทนต์รออนุมัติ"
@@ -267,7 +268,7 @@ function ReviewTab({ adCopies, adImages, onChanged, brandConfig }) {
   return (
     <div className="w-full max-w-[1400px] space-y-5">
       {header}
-      <div className="flex flex-wrap items-center gap-3 ds-card p-4">
+      <div className="studio-table-toolbar flex flex-wrap items-center gap-3">
         <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
           แบรนด์ CI
           <select

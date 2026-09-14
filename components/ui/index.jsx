@@ -8,7 +8,7 @@
 // โทเคนสี/รัศมี/ฟอนต์ อยู่ใน tailwind.config.js
 // คลาสประกอบ (.ds-*) อยู่ใน app/globals.css
 // =====================================================================
-import { Loader2, Search } from "lucide-react";
+import { Loader2, Search, X } from "lucide-react";
 
 // สีสถานะ — ธีมสว่างต้องใช้เป็นคู่ (ตัวอักษรเข้ม / พื้นอ่อน / เส้นขอบ)
 // การใช้สีเดียวทั้งพื้นและตัวอักษรทำให้คอนทราสต์ไม่ผ่าน ซึ่งเป็นปัญหาของชุดเดิม
@@ -37,6 +37,24 @@ export const TONE = {
 };
 
 const cx = (...a) => a.filter(Boolean).join(" ");
+
+export function IconButton({ label, icon: Icon, size = "md", variant = "ghost", className = "", ...props }) {
+  const sizes = { sm: "h-8 w-8", md: "h-9 w-9", lg: "h-10 w-10" };
+  const variants = {
+    ghost: "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
+    outline: "border border-slate-300 bg-white text-slate-600 hover:border-brand-400 hover:text-brand-700",
+    solid: "bg-brand-600 text-white hover:bg-brand-700",
+  };
+  return (
+    <button type="button" aria-label={label} title={label} className={cx("inline-flex shrink-0 items-center justify-center rounded-control transition-colors", sizes[size], variants[variant] || variants.ghost, "disabled:cursor-not-allowed disabled:opacity-50", className)} {...props}>
+      {Icon && <Icon size={size === "sm" ? 15 : 17} aria-hidden="true" />}
+    </button>
+  );
+}
+
+export function Tooltip({ label, children, className = "" }) {
+  return <span className={cx("ds-tooltip", className)} data-tooltip={label}>{children}</span>;
+}
 
 // ---------------------------------------------------------------
 // Button — primary | secondary | danger | ghost | icon
@@ -96,7 +114,7 @@ export function Card({ quiet = false, glass = false, hover = false, title, subti
   return (
     <div className={cx(quiet || glass ? "ds-card-glass" : "ds-card", hover && "ds-hover-lift", hasHeader && "overflow-hidden", className)} {...props}>
       {hasHeader && (
-        <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
           <div className="min-w-0">
             {title && <h3 className="ds-title text-[15px]">{title}</h3>}
             {subtitle && <p className="mt-0.5 text-2xs text-slate-400">{subtitle}</p>}
@@ -105,6 +123,39 @@ export function Card({ quiet = false, glass = false, hover = false, title, subti
         </div>
       )}
       {hasHeader ? <div className={bodyClassName}>{children}</div> : children}
+    </div>
+  );
+}
+
+export function Dialog({ open, title, description, onClose, children, footer, className = "" }) {
+  if (!open) return null;
+  return (
+    <div className="ds-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose?.(); }}>
+      <section className={cx("ds-dialog", className)} role="dialog" aria-modal="true" aria-labelledby="ds-dialog-title">
+        <header className="ds-dialog-header">
+          <div className="min-w-0">
+            <h2 id="ds-dialog-title" className="ds-title text-base">{title}</h2>
+            {description && <p className="mt-1 text-xs text-slate-500">{description}</p>}
+          </div>
+          <IconButton label="ปิด" icon={X} onClick={onClose} />
+        </header>
+        <div className="ds-dialog-body">{children}</div>
+        {footer && <footer className="ds-dialog-footer">{footer}</footer>}
+      </section>
+    </div>
+  );
+}
+
+export function Tabs({ items = [], value, onChange, className = "" }) {
+  return (
+    <div className={cx("ds-tabs", className)} role="tablist">
+      {items.map((item) => (
+        <button key={item.value} type="button" role="tab" aria-selected={value === item.value} className={cx("ds-tab", value === item.value && "is-active")} onClick={() => onChange?.(item.value)}>
+          {item.icon && <item.icon size={15} aria-hidden="true" />}
+          {item.label}
+          {item.count != null && <span className="ds-tab-count">{item.count}</span>}
+        </button>
+      ))}
     </div>
   );
 }
@@ -150,10 +201,10 @@ export function StatCard({ icon: Icon, label, value, sub, tone = "brand", delta,
       }
       role={clickable ? "button" : undefined}
       tabIndex={clickable ? 0 : undefined}
-      className={cx("ds-card p-4 sm:p-5 flex flex-col gap-3", clickable && "ds-hover-lift cursor-pointer")}
+      className={cx("ds-card ds-stat p-4 sm:p-5 flex flex-col gap-3", clickable && "ds-hover-lift cursor-pointer")}
     >
       <div className="flex items-center justify-between gap-2">
-        <div className="text-[12.5px] text-slate-500 font-medium min-w-0 truncate">{label}</div>
+        <div className="text-[13px] text-slate-500 font-medium min-w-0 leading-relaxed">{label}</div>
         {Icon && (
           <span className={cx("rounded-control p-1.5 shrink-0", t.bg, t.fg)}>
             <Icon size={16} />
@@ -168,7 +219,7 @@ export function StatCard({ icon: Icon, label, value, sub, tone = "brand", delta,
               {deltaUp ? "▲" : "▼"} {Math.abs(delta)}%
             </span>
           )}
-          {sub && <span className="text-2xs text-slate-400 truncate">{sub}</span>}
+          {sub && <span className="text-xs text-slate-400 leading-relaxed">{sub}</span>}
         </div>
       </div>
     </div>
@@ -204,7 +255,7 @@ export function SearchInput({ className = "", inputClassName = "", ...props }) {
       <input
         {...props}
         className={cx(
-          "w-full rounded-full border border-slate-300 bg-white pl-10 pr-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-50",
+          "w-full rounded-control border border-slate-300 bg-white pl-10 pr-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-50",
           inputClassName
         )}
       />
@@ -278,6 +329,7 @@ export function Toggle({ checked, onChange, label, disabled = false }) {
       type="button"
       role="switch"
       aria-checked={!!checked}
+      aria-label={label || "สลับค่า"}
       disabled={disabled}
       onClick={() => onChange?.(!checked)}
       className="inline-flex items-center gap-2.5 group disabled:opacity-50 disabled:cursor-not-allowed"

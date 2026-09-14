@@ -41,13 +41,13 @@ export default function LoginScreen() {
     "focus:outline-none focus:border-brand-500 focus:ring-4 focus:ring-brand-50";
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4 py-10">
-      <form onSubmit={handleSubmit} className="ds-card w-full max-w-sm p-7 space-y-4 shadow-card">
-        <div className="text-center">
+    <div className="studio-login min-h-screen flex items-center justify-center px-4 py-10">
+      <form onSubmit={handleSubmit} className="studio-login-form w-full max-w-sm space-y-5">
+        <div className="studio-login-heading">
           <div className="inline-flex items-center justify-center w-11 h-11 rounded-card bg-brand-600 text-white mb-3">
             <BrandMark className="h-11 w-11" />
           </div>
-          <h1 className="ds-title text-[17px]">Besight</h1>
+          <h1 className="ds-title text-[36px]">Besight.</h1>
           <p className="mt-1 text-[13.5px] text-slate-500">เข้าสู่ระบบเพื่อจัดการโฆษณาและตอบแชท</p>
         </div>
 

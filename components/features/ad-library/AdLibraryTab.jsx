@@ -291,7 +291,7 @@ export default function AdLibraryTab() {
         </div>
       )}
 
-      <Card className="min-w-0 space-y-6 p-4 sm:p-6">
+      <Card className="studio-library-search min-w-0 space-y-6 p-4 sm:p-6">
         <Step number={1} title="พิมพ์คำที่อยากค้นหา" hint="เช่น ชื่อสินค้า หรือชื่อเพจคู่แข่ง">
           <div className="flex min-w-0 flex-col gap-2.5 sm:flex-row">
             <div className="relative min-w-0 flex-1">

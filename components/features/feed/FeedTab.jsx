@@ -9,7 +9,7 @@ import { supabase } from "@/lib/supabase/client";
 import { logActivity } from "@/lib/utils/activity";
 import { readFunctionErrorMessage } from "@/lib/utils/errors";
 import Spinner from "@/components/shared/Spinner";
-import { EmptyState, FilterPill } from "@/components/ui";
+import { EmptyState, FilterPill, SectionTitle } from "@/components/ui";
 
 const COLS = "id, page_id, page_name, customer_name, profile_pic, source, last_user_text, last_reply_text, last_reply_at, last_message_at, unread, awaiting_reply, comment_ad_name, comment_ad_names, comment_permalink, comment_is_ad, transcript";
 const REFRESH_MS = 15000;
@@ -127,15 +127,7 @@ export default function FeedTab({ active = true }) {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div>
-          <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
-            <MessageSquare size={18} /> ฟีด — ตอบคอมเมนต์
-          </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            คอมเมนต์ใต้โพสต์และโฆษณาของเพจ ตอบได้จากที่นี่เลย (ตอบแล้วจะไปโผล่ใต้คอมเมนต์นั้นจริง)
-          </p>
-        </div>
+      <SectionTitle eyebrow="CONVERSATIONS" title="ฟีดคอมเมนต์" subtitle="คอมเมนต์ใต้โพสต์และโฆษณาของเพจ" right={
         <div className="flex items-center gap-2">
           <FilterPill active={onlyUnanswered} onClick={() => setOnlyUnanswered(true)}>ยังไม่ตอบ {waiting > 0 ? `(${waiting})` : ""}</FilterPill>
           <FilterPill active={!onlyUnanswered} onClick={() => setOnlyUnanswered(false)}>ทั้งหมด</FilterPill>
@@ -144,7 +136,7 @@ export default function FeedTab({ active = true }) {
             <RefreshCw size={14} />
           </button>
         </div>
-      </div>
+      } />
 
       {err && <div className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-sm text-rose-700">{err}</div>}
 
@@ -158,7 +150,7 @@ export default function FeedTab({ active = true }) {
               : "คอมเมนต์ใต้โพสต์/โฆษณาจะเด้งเข้ามาที่นี่เอง"}
           />
         ) : (
-          <div className="space-y-2">
+          <div className="studio-feed-list">
             {list.map((row) => {
               const ig = isIg(row);
               const note = notice?.id === row.id ? notice : null;

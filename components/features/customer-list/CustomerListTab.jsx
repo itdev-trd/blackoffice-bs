@@ -9,9 +9,9 @@
 // สถานะอินดี้/วันเริ่ม/วันหมดอายุ อยู่คนละตาราง (tv_access) join ด้วย username ของ TradingView
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, Search, FileDown, RefreshCw, ClipboardList } from "lucide-react";
+import { Loader2, Search, FileDown, RefreshCw, ClipboardList, MessageSquare, UserRoundSearch } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
-import { EmptyState } from "@/components/ui";
+import { Button, Dialog, EmptyState, SectionTitle } from "@/components/ui";
 import Spinner from "@/components/shared/Spinner";
 import MiniChatWindow from "@/components/features/customer-list/MiniChatWindow";
 
@@ -75,6 +75,7 @@ export default function CustomerListTab({ onOpenChat }) {
   // เพจใหญ่สุดมีลูกค้า ~1,200 คน = โหลดใหม่ 2 คำขอ เร็วพอที่จะไม่ต้องมีชั้นที่สอง
   // ห้องที่เปิดอ่านในหน้าต่างแชทเล็กมุมขวา (null = ไม่ได้เปิด)
   const [chatRow, setChatRow] = useState(null);
+  const [detailRow, setDetailRow] = useState(null);
   const [rangeKey, setRangeKey] = useState("all");     // all | 7 | 30 | 90 | custom
   const [loadFrom, setLoadFrom] = useState("");
   const [loadTo, setLoadTo] = useState("");
@@ -174,6 +175,20 @@ export default function CustomerListTab({ onOpenChat }) {
     ];
   };
 
+  // รายการนี้คือข้อมูลโปรไฟล์ที่ทีมใช้ทำงานต่อจริง ๆ ไม่ใช่ metadata ของแชท
+  // จึงใช้บอกได้ชัดว่า "มีข้อมูล" แค่ชื่อแชท หรือมีข้อมูลลูกค้าพร้อมทำงานแล้ว
+  const detailsOf = (r) => {
+    const tv = tvByUser.get(String(r.username || "").toLowerCase());
+    return [
+      ["เลขบัญชีเทรด", r.trade_id],
+      ["อีเมล", r.email],
+      ["User TradingView", r.username],
+      ["สถานะอินดี้", tv ? "เพิ่มแล้ว" : ""],
+      ["วันที่เริ่มใช้", sheetDate(tv?.tv_granted_at)],
+      ["วันหมดอายุ", sheetDate(tv?.expiration)],
+    ].filter(([, value]) => value);
+  };
+
   function exportCsv() {
     const esc = (v) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
     const csv = [COLS.map(esc).join(","), ...view.map((r, i) => cellsOf(r, i).map(esc).join(","))].join("\n");
@@ -186,12 +201,7 @@ export default function CustomerListTab({ onOpenChat }) {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="text-2xl font-bold text-slate-800">รายชื่อลูกค้า</h2>
-        <p className="mt-1 text-sm text-slate-500">
-          ดูรายชื่อลูกค้าในรูปแบบเดียวกับชีตสรุปที่ทีมใช้ · หน้านี้ดูอย่างเดียว ไม่มีการแก้ไขข้อมูล
-        </p>
-      </div>
+      <SectionTitle eyebrow="CUSTOMER DIRECTORY" title="รายชื่อลูกค้า" subtitle="รายชื่อ บัญชีเทรด และสถานะสิทธิ์ของลูกค้า" />
 
       <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm space-y-3">
         {/* ทั้งสองชั้นอิง "วันที่ทักเข้ามาครั้งแรก" — เขียนกำกับไว้ให้ชัด
@@ -280,6 +290,35 @@ export default function CustomerListTab({ onOpenChat }) {
 
       <MiniChatWindow row={chatRow} onClose={() => setChatRow(null)} onOpenInInbox={onOpenChat} />
 
+      <Dialog
+        open={!!detailRow}
+        title={detailRow?.customer_name || "ข้อมูลลูกค้า"}
+        description={detailRow ? `${contactChannel(detailRow)} · ติดต่อ ${sheetDate(detailRow.first_customer_message_at) || "—"}` : ""}
+        onClose={() => setDetailRow(null)}
+        footer={<Button variant="secondary" onClick={() => setDetailRow(null)}>ปิด</Button>}
+        className="customer-detail-dialog"
+      >
+        {detailRow && (() => {
+          const details = detailsOf(detailRow);
+          return details.length ? (
+            <dl className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {details.map(([label, value]) => (
+                <div key={label} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+                  <dt className="text-[11px] font-medium text-slate-500">{label}</dt>
+                  <dd className="mt-0.5 break-words text-sm font-semibold text-slate-800">{value}</dd>
+                </div>
+              ))}
+            </dl>
+          ) : (
+            <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center">
+              <UserRoundSearch size={22} className="mx-auto text-slate-400" />
+              <p className="mt-2 text-sm font-semibold text-slate-700">ยังไม่มีข้อมูลโปรไฟล์</p>
+              <p className="mt-1 text-xs leading-relaxed text-slate-500">ยังไม่พบเลขบัญชีเทรด อีเมล หรือ User TradingView ของลูกค้าคนนี้</p>
+            </div>
+          );
+        })()}
+      </Dialog>
+
       <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         {!pageFilter ? (
           <EmptyState icon={ClipboardList} title="เลือกเพจหรือบัญชีก่อน" hint="เลือกจากช่องด้านบน แล้วระบบจะโหลดรายชื่อลูกค้าให้" />
@@ -294,10 +333,7 @@ export default function CustomerListTab({ onOpenChat }) {
           <ul className="divide-y divide-slate-100 lg:hidden">
             {pageRows.map((r, i) => {
               const c = cellsOf(r, start + i);
-              const detail = [
-                ["เลขบัญชีเทรด", c[3]], ["อีเมล", c[4]], ["User TradingView", c[5]],
-                ["สถานะอินดี้", c[6]], ["วันที่เริ่มใช้", c[7]], ["วันหมดอายุ", c[8]],
-              ].filter(([, v]) => v);
+              const detail = detailsOf(r);
               return (
                 <li key={r.id} className="p-3.5">
                   <div className="flex items-start justify-between gap-3">
@@ -313,16 +349,16 @@ export default function CustomerListTab({ onOpenChat }) {
                     </div>
                     <span className={`shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_STYLE[c[2]] || "bg-slate-100 text-slate-600"}`}>{c[2]}</span>
                   </div>
-                  {detail.length > 0 && (
-                    <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
-                      {detail.map(([k, v]) => (
-                        <div key={k} className="min-w-0">
-                          <dt className="text-[10px] text-slate-500">{k}</dt>
-                          <dd className="truncate text-[12px] text-slate-800" title={v}>{v}</dd>
-                        </div>
-                      ))}
-                    </dl>
-                  )}
+                  <div className="mt-3 flex items-center gap-2">
+                    <button type="button" onClick={() => setDetailRow(r)}
+                      className={`inline-flex min-h-8 items-center gap-1.5 rounded-lg border px-2.5 text-[11px] font-semibold ${detail.length ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-50 text-slate-500"}`}>
+                      <UserRoundSearch size={14} /> {detail.length ? `ดูข้อมูล · ${detail.length} รายการ` : "ดูข้อมูล · ยังไม่มี"}
+                    </button>
+                    <button type="button" onClick={() => setChatRow(r)}
+                      className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-brand-200 bg-brand-50 px-2.5 text-[11px] font-semibold text-brand-700">
+                      <MessageSquare size={14} /> ดูแชท
+                    </button>
+                  </div>
                 </li>
               );
             })}

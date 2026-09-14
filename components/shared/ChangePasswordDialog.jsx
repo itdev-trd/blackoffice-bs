@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { KeyRound, Loader2, X } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import PasswordInput from "@/components/shared/PasswordInput";
+import { Dialog } from "@/components/ui";
 import { supabase } from "@/lib/supabase/client";
 import { logActivity } from "@/lib/utils/activity";
 
@@ -68,34 +69,9 @@ export default function ChangePasswordDialog({ open, email, onClose }) {
   }
 
   return (
-    <div
-      className="fixed inset-0 z-[110] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"
-      onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) onClose?.(); }}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="change-password-title"
-    >
-      <div
-        className="w-full max-w-sm rounded-t-2xl bg-night-surface shadow-2xl sm:rounded-2xl"
-        style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
-      >
-        <div className="flex items-center justify-between border-b border-night-border px-4 py-3">
-          <span id="change-password-title" className="flex items-center gap-2 font-semibold text-night-ink">
-            <KeyRound size={17} className="text-night-accent" />
-            เปลี่ยนรหัสผ่าน
-          </span>
-          <button
-            onClick={() => !busy && onClose?.()}
-            className="p-1 text-night-ink-3 hover:text-night-ink disabled:opacity-50"
-            disabled={busy}
-            aria-label="ปิด"
-          >
-            <X size={20} />
-          </button>
-        </div>
-
+    <Dialog open={open} title="เปลี่ยนรหัสผ่าน" description={email ? `บัญชี ${email}` : undefined} onClose={() => !busy && onClose?.()} className="max-w-sm">
         {done ? (
-          <div className="flex flex-col gap-3 p-4">
+          <div className="flex flex-col gap-3">
             <p className="text-sm text-emerald-600 dark:text-emerald-400">
               เปลี่ยนรหัสผ่านเรียบร้อยแล้ว ครั้งหน้าเข้าระบบด้วยรหัสใหม่
             </p>
@@ -111,12 +87,7 @@ export default function ChangePasswordDialog({ open, email, onClose }) {
             </button>
           </div>
         ) : (
-          <form className="flex flex-col gap-3 p-4" onSubmit={submit}>
-            {email && (
-              <p className="text-xs text-night-ink-3">
-                บัญชี <span className="font-medium text-night-ink-2">{email}</span>
-              </p>
-            )}
+          <form className="flex flex-col gap-3" onSubmit={submit}>
             <label className="flex flex-col gap-1">
               <span className="text-xs font-medium text-night-ink-2">รหัสผ่านเดิม</span>
               <PasswordInput
@@ -161,7 +132,6 @@ export default function ChangePasswordDialog({ open, email, onClose }) {
             </button>
           </form>
         )}
-      </div>
-    </div>
+    </Dialog>
   );
 }
