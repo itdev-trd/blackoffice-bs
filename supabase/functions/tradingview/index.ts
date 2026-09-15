@@ -431,6 +431,10 @@ Deno.serve(async (req) => {
       if (body?.lot_quota_per_month !== undefined) row.lot_quota_per_month = Math.max(0, Number(body.lot_quota_per_month) || 0);
       let id = Number(body?.id) || null;
       if (id) {
+        // แบรนด์เก่าที่สร้างไว้ก่อนมี ingest_token (เดิมออกให้เฉพาะตอนสร้างใหม่เท่านั้น) จะไม่มี token
+        // ค้างตลอดไป กล่อง "รับคุกกี้อัตโนมัติ" ในหน้าตั้งค่าเลยไม่โผล่ — เติมให้ตอนแก้ไขถ้ายังไม่มี
+        const { data: cur } = await db.from("tv_brands").select("ingest_token").eq("id", id).maybeSingle();
+        if (!cur?.ingest_token) row.ingest_token = crypto.randomUUID().replace(/-/g, "");
         const { error } = await db.from("tv_brands").update(row).eq("id", id);
         if (error) return json({ ok: false, error: error.message });
       } else {
@@ -757,7 +761,7 @@ Deno.serve(async (req) => {
 
       let rows: any[] = [];
       try {
-        const url = `https://api.trdapi.com/webhook/check-lot?date_from=${encodeURIComponent(periodStart)}&date_to=${encodeURIComponent(periodEnd)}`;
+        const url = `https://ai.besight.net/webhook/check-lot?date_from=${encodeURIComponent(periodStart)}&date_to=${encodeURIComponent(periodEnd)}`;
         const r = await fetch(url, { signal: AbortSignal.timeout(20000) });
         const j = await r.json().catch(() => null);
         rows = Array.isArray(j) ? j : [];
