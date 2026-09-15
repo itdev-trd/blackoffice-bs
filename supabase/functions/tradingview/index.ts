@@ -233,6 +233,22 @@ async function verifyTvAccessRow(
   return { ok: true, found, ...(error ? { error } : {}), ...(tvGrantedAt !== undefined ? { tv_granted_at: tvGrantedAt } : {}), verified_at: nowIso };
 }
 
+// ดึงยอด lot จริงจาก broker (XM) มาทั้งก้อน — ใช้ใน refresh_lots (ปุ่มแอดมิน)
+// คืนเป็น Map<login, lots> ดิบ ๆ ไม่ยุ่งกับ DB (ผู้เรียกเอาไปจับคู่กับ trade_id เอง)
+async function fetchBrokerLots(periodStart: string, periodEnd: string): Promise<Map<string, { lots: number; campaign_name: string | null }>> {
+  const url = `https://ai.besight.net/webhook/check-lot?date_from=${encodeURIComponent(periodStart)}&date_to=${encodeURIComponent(periodEnd)}`;
+  const r = await fetch(url, { signal: AbortSignal.timeout(20000) });
+  const j = await r.json().catch(() => null);
+  const rows = Array.isArray(j) ? j : [];
+  const lotByLogin = new Map<string, { lots: number; campaign_name: string | null }>();
+  for (const row of rows as any[]) {
+    const login = String(row?.loginId ?? row?.login_id ?? row?.tradeid ?? "").trim();
+    if (!login) continue;
+    lotByLogin.set(login, { lots: Number(row?.lots) || 0, campaign_name: row?.campaignName ? String(row.campaignName) : null });
+  }
+  return lotByLogin;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...corsHeaders, "content-type": "application/json" } });
@@ -471,7 +487,20 @@ Deno.serve(async (req) => {
       const { data: sc } = await (brandId ? q.eq("brand_id", brandId) : q).limit(1).maybeSingle();
       try {
         const res = await callTv({ action: "ping", pine_id: sc?.pine_id || "" }, cookie);
-        return json({ ok: true, reachable: true, authed: res?.authed === true, status_code: res?.status_code, sample: res?.sample, sid_len: res?.sid_len, sign_len: res?.sign_len });
+        // ยิงตรงกับผ่าน n8n คืนชื่อฟิลด์คนละชุด — เดิมอ่านเฉพาะชื่อฝั่ง n8n (authed/status_code/sid_len/
+        // sign_len/sample) พอสลับมาโหมดยิงตรงแล้ว res เป็นผล tvPing (มี logged_in/http_status แทน)
+        // ฟิลด์พวกนั้นเลยว่างเปล่าตลอด หน้าเว็บจึงขึ้นเตือน "ยังไม่ล็อกอิน" ทั้งที่คุกกี้ใช้ได้จริง
+        // — normalize ให้รองรับทั้งสองโหมด sid_len/sign_len โหมดยิงตรงไม่มีให้มา คำนวณเองจากคุกกี้ที่ถืออยู่
+        const authed = res?.authed === true || res?.logged_in === true;
+        return json({
+          ok: true,
+          reachable: true,
+          authed,
+          status_code: res?.status_code ?? res?.http_status ?? null,
+          sample: res?.sample ?? res?.error ?? null,
+          sid_len: res?.sid_len ?? (cookie.sessionid ? cookie.sessionid.length : 0),
+          sign_len: res?.sign_len ?? (cookie.sign ? cookie.sign.length : 0),
+        });
       } catch (e) {
         return json({ ok: true, reachable: false, error: String(e instanceof Error ? e.message : e) });
       }
@@ -759,22 +788,13 @@ Deno.serve(async (req) => {
       const periodEnd = String(body?.period_end || "").trim();
       if (!periodStart || !periodEnd) return json({ ok: false, error: "ต้องระบุช่วงวันที่ (period_start, period_end)" });
 
-      let rows: any[] = [];
+      let lotByLogin: Map<string, { lots: number; campaign_name: string | null }>;
       try {
-        const url = `https://ai.besight.net/webhook/check-lot?date_from=${encodeURIComponent(periodStart)}&date_to=${encodeURIComponent(periodEnd)}`;
-        const r = await fetch(url, { signal: AbortSignal.timeout(20000) });
-        const j = await r.json().catch(() => null);
-        rows = Array.isArray(j) ? j : [];
+        lotByLogin = await fetchBrokerLots(periodStart, periodEnd);
       } catch (e) {
         return json({ ok: false, error: `ดึงข้อมูล Lot จาก broker ไม่สำเร็จ: ${String(e instanceof Error ? e.message : e)}` });
       }
-      console.log(`[refresh_lots] raw response: ${rows.length} rows, sample:`, JSON.stringify(rows.slice(0, 5)));
-      const lotByLogin = new Map<string, { lots: number; campaign_name: string | null }>();
-      for (const r of rows) {
-        const login = String(r?.loginId ?? r?.login_id ?? r?.tradeid ?? "").trim();
-        if (!login) continue;
-        lotByLogin.set(login, { lots: Number(r?.lots) || 0, campaign_name: r?.campaignName ? String(r.campaignName) : null });
-      }
+      console.log(`[refresh_lots] raw response: ${lotByLogin.size} logins`);
 
       // เฉพาะสมาชิกที่มี trade_id (จำกัดตามแบรนด์ถ้าระบุมา)
       let q = db.from("tv_access").select("trade_id").not("trade_id", "is", null);
@@ -809,7 +829,7 @@ Deno.serve(async (req) => {
         matched: upserts.filter((u) => u.lots > 0).length,
         fetched_at: nowIso,
         debug: {
-          raw_rows: rows.length,
+          raw_rows: lotByLogin.size,
           sample_login_ids: [...lotByLogin.keys()].slice(0, 5),
           sample_trade_ids: tradeIds.slice(0, 5),
           unmatched_trade_ids_sample: unmatchedTradeIds.slice(0, 10),

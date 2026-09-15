@@ -595,10 +595,12 @@ function TvAdminSettingsPanel() {
     const { data, error } = await supabase.functions.invoke("tradingview", { body: { action: "webhook_status", brand_id: b.id } });
     setCheckingId(null);
     if (error || !data?.ok) { setMsg("✗ ตรวจไม่สำเร็จ: " + (data?.error || "")); return; }
-    if (!data.reachable) { setMsg(`✗ [${b.name}] ต่อ n8n ไม่ได้: ` + (data.error || "เช็ค URL/workflow active")); return; }
+    // ข้อความ "ต่อไม่ได้" นี้มาจากทั้งสองโหมด (ยิงตรง/n8n) ไม่ใช่แค่ n8n — เขียนกลางๆ กันสับสน
+    // ตอนสลับมาโหมดยิงตรงแล้วยังขึ้นว่า "ต่อ n8n ไม่ได้" ทั้งที่ไม่ได้ผ่าน n8n เลย
+    if (!data.reachable) { setMsg(`✗ [${b.name}] เชื่อมต่อไม่ได้: ` + (data.error || "เช็ค URL/workflow active (โหมด n8n) หรือคุกกี้ (โหมดยิงตรง)")); return; }
     setMsg(data.authed
       ? `✓ [${b.name}] TradingView ล็อกอินอยู่ — พร้อมให้สิทธิ์`
-      : `⚠️ [${b.name}] ต่อ n8n ได้ แต่ TradingView ยังไม่ล็อกอิน (คุกกี้หมดอายุ?)\nHTTP ${data.status_code ?? "?"} · sid ${data.sid_len ?? "?"} · sign ${data.sign_len ?? "?"}\nTV: ${(data.sample || "").slice(0, 140)}`);
+      : `⚠️ [${b.name}] เชื่อมต่อได้ แต่ TradingView ยังไม่ล็อกอิน (คุกกี้หมดอายุ?)\nHTTP ${data.status_code ?? "?"} · sid ${data.sid_len ?? "?"} · sign ${data.sign_len ?? "?"}\nTV: ${(data.sample || "").slice(0, 140)}`);
   }
   function newBrand() { setBe({ name: "", sessionid: "", sign: "", tv_base: "", pages: [], show_in_manager: true }); }
   function editBrand(b) { setBe({ id: b.id, name: b.name, sessionid: "", sign: "", tv_base: b.tv_base || "", pages: (b.pages || []).map(String), show_in_manager: b.show_in_manager !== false, has_cookie: b.has_cookie, ingest_token: b.ingest_token || "" }); }
