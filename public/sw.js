@@ -127,7 +127,7 @@ self.addEventListener("push", (e) => {
     renotify: true,
     // ข้อความใหม่ (เหมือน Messenger) ให้เด้งแล้วหายเองได้ ; แชทค้างให้ค้างจนกดปิด
     requireInteraction: data.requireInteraction !== false && !(data.tag && String(data.tag).startsWith("newmsg-")),
-    data: { url: data.url || "/?tab=inbox" },
+    data: { url: data.url || "/inbox" },
   };
   // ตั้งจุดแดงบนไอคอนแอป (Badging API) — เด้งบนหน้าจอโฮม/Dock แม้ปิดแอป (iOS 16.4+ PWA, macOS)
   const badge = Number(data.badge);
@@ -146,11 +146,16 @@ self.addEventListener("push", (e) => {
 // กดที่แจ้งเตือน → เปิด/โฟกัสแท็บแอป แล้วไปหน้าที่กำหนด
 self.addEventListener("notificationclick", (e) => {
   e.notification.close();
-  const target = (e.notification.data && e.notification.data.url) || "/?tab=inbox";
+  const target = (e.notification.data && e.notification.data.url) || "/inbox";
   e.waitUntil((async () => {
     const all = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     for (const c of all) {
-      if ("focus" in c) { c.navigate(target).catch(() => {}); return c.focus(); }
+      if (!("focus" in c)) continue;
+      // navigate() ใช้ไม่ได้กับ client ที่ SW ไม่ได้คุม (โยน error เงียบ ๆ แล้วค้างหน้าเดิม)
+      // จึงบอกหน้าเว็บให้พาไปเองด้วย postMessage ควบคู่กันไป — อันไหนทำงานได้ก็เข้าห้องแชทถูกห้อง
+      try { c.postMessage({ type: "navigate", url: target }); } catch { /* ไม่รองรับ */ }
+      c.navigate(target).catch(() => {});
+      return c.focus();
     }
     if (self.clients.openWindow) return self.clients.openWindow(target);
   })());

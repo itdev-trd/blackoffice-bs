@@ -79,7 +79,7 @@ Deno.serve(async (req) => {
       for (const s of mySubs) {
         try {
           await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
-            JSON.stringify({ title: "🔔 ทดสอบแจ้งเตือน", body: "ถ้าเห็นข้อความนี้ = push ใช้งานได้แล้ว", tag: "push-test", url: "/?tab=inbox" }));
+            JSON.stringify({ title: "🔔 ทดสอบแจ้งเตือน", body: "ถ้าเห็นข้อความนี้ = push ใช้งานได้แล้ว", tag: "push-test", url: "/inbox" }));
           ok++;
         } catch (e: any) { errs.push(`(${e?.statusCode || "?"}) ${String(e?.body || e?.message || e).slice(0, 150)}`); }
       }
@@ -176,7 +176,8 @@ Deno.serve(async (req) => {
           body: text,
           tag: `newmsg-${convId || pageId}`,   // ข้อความใหม่ของแชทเดิม = แทนที่อันเก่า ไม่กองซ้อน
           renotify: true,
-          url: "/?tab=inbox",
+          // กดแล้วต้องเข้าห้องแชทนั้นเลย ไม่ใช่หน้าแรก — /inbox?chat=<id> ให้หน้า inbox เปิดห้องให้เอง
+          url: convId ? `/inbox?chat=${encodeURIComponent(convId)}` : "/inbox",
           badge: badgeFor(allowedPages, wantPages),   // จุดแดงบนไอคอน = จำนวนแชทค้างอ่านของเครื่องนี้
         });
         try {
@@ -277,7 +278,8 @@ Deno.serve(async (req) => {
           title: `🔴 ${mine.length} แชทค้างอ่านเกิน ${alertMin} นาที`,
           body: pageNames.length ? `เพจ: ${pageNames.join(", ")}` : "มีลูกค้ารอตอบ",
           tag: "overdue-chat",
-          url: "/?tab=inbox",
+          // ค้างหลายห้อง → เข้าหน้า inbox เฉย ๆ ; ค้างห้องเดียว → เข้าห้องนั้นเลย
+          url: mine.length === 1 ? `/inbox?chat=${encodeURIComponent(mine[0].id)}` : "/inbox",
           badge: mine.length,   // จุดแดงบนไอคอน
         });
         try {

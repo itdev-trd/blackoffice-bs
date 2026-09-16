@@ -24,6 +24,8 @@ const MEMBER_TYPES = [["free", "Free"], ["paid", "จ่ายเงิน"], ["
 const memberTypeLabel = (v) => MEMBER_TYPES.find(([key]) => key === v)?.[1] || "—";
 const CONTACT_CHANNELS = [["facebook", "Facebook"], ["line", "LINE"], ["instagram", "Instagram"], ["telegram", "Telegram"], ["tiktok", "TikTok"], ["youtube", "YouTube"]];
 const channelLabel = (v) => CONTACT_CHANNELS.find(([key]) => key === v)?.[1] || "—";
+// broker ของบัญชีเทรด — XM คือค่าหลัก (ข้อมูลเก่าทั้งหมดเป็น XM) · Exness เป็นตัวเลือกรอง
+const BROKERS = ["XM", "Exness"];
 
 // สถานะสิทธิ์ที่แอดมินต้องเห็น — ต่างจาก TvMembersTab ตรงชื่อป้ายให้ตรงกับหน้านี้ ("ไม่มีสิทธิ์" แทน "หมดอายุ/error" รวมกัน)
 function statusInfo(a) {
@@ -66,7 +68,7 @@ function currentMonthRange() {
 }
 
 const PAGE_SIZE = 10;
-const emptyForm = { username: "", display_name: "", email: "", trade_id: "", phone: "", country: "", telegram: "", contact_channel: "", member_type: "", pine_id: "", days: 30, lifetime: false };
+const emptyForm = { username: "", display_name: "", email: "", trade_id: "", phone: "", country: "", telegram: "", contact_channel: "", member_type: "", broker: "XM", pine_id: "", days: 30, lifetime: false };
 
 export default function BesightMembersTab({ active = true }) {
   const [brands, setBrands] = useState([]);
@@ -157,6 +159,7 @@ export default function BesightMembersTab({ active = true }) {
         username: primary.username, display_name: primary.display_name, email: primary.email,
         phone: primary.phone, country: primary.country, telegram: primary.telegram,
         trade_id: primary.trade_id, member_type: primary.member_type, contact_channel: primary.contact_channel,
+        broker: primary.broker || "XM",
         granted_at: earliestOf(indicators, "granted_at") || primary.granted_at,
         created_at: earliestOf(indicators, "created_at") || primary.created_at,
       };
@@ -216,7 +219,7 @@ export default function BesightMembersTab({ active = true }) {
       action: "grant", username: form.username.trim(), display_name: form.display_name.trim() || null,
       email: form.email.trim() || null, trade_id: form.trade_id.trim() || null,
       phone: form.phone.trim() || null, country: form.country.trim() || null, telegram: form.telegram.trim() || null,
-      contact_channel: form.contact_channel || null, member_type: form.member_type || null,
+      contact_channel: form.contact_channel || null, member_type: form.member_type || null, broker: form.broker || "XM",
       pine_ids: [form.pine_id], lifetime: form.lifetime, days: Number(form.days) || 30,
     } });
     setSaving(false);
@@ -234,7 +237,7 @@ export default function BesightMembersTab({ active = true }) {
     setEditForm({
       username: m.username || "", display_name: m.display_name || "", email: m.email || "",
       trade_id: m.trade_id || "", phone: m.phone || "", country: m.country || "", telegram: m.telegram || "",
-      contact_channel: m.contact_channel || "", member_type: m.member_type || "",
+      contact_channel: m.contact_channel || "", member_type: m.member_type || "", broker: m.broker || "XM",
     });
   }
 
@@ -247,7 +250,7 @@ export default function BesightMembersTab({ active = true }) {
       action: "update_member", username: editForm.username.trim(), display_name: editForm.display_name.trim(),
       email: editForm.email.trim(), trade_id: editForm.trade_id.trim(), phone: editForm.phone.trim(),
       country: editForm.country.trim(), telegram: editForm.telegram.trim(),
-      contact_channel: editForm.contact_channel, member_type: editForm.member_type,
+      contact_channel: editForm.contact_channel, member_type: editForm.member_type, broker: editForm.broker || "XM",
     };
     let firstError = "";
     for (const row of editMember.indicators) {
@@ -271,10 +274,10 @@ export default function BesightMembersTab({ active = true }) {
   }
 
   function exportCsv() {
-    const head = ["สมาชิก", "อีเมล", "แหล่ง", "เบอร์โทร", "ประเทศ", "Trade ID", "TradingView", "Telegram", "Indicator", "Lots ใช้ไป", "Lots โควตา", "สถานะสิทธิ์", "วันเริ่มต้น", "วันหมดอายุ", "วันที่เข้าร่วม", "ช่องทาง"];
+    const head = ["สมาชิก", "อีเมล", "แหล่ง", "เบอร์โทร", "ประเทศ", "Broker", "Trade ID", "TradingView", "Telegram", "Indicator", "Lots ใช้ไป", "Lots โควตา", "สถานะสิทธิ์", "วันเริ่มต้น", "วันหมดอายุ", "วันที่เข้าร่วม", "ช่องทาง"];
     const lines = [head, ...filtered.map((m) => [
       m.display_name || "", m.email || "", memberTypeLabel(m.member_type), m.phone || "", m.country || "",
-      m.trade_id || "", m.username || "", m.telegram || "",
+      m.broker, m.trade_id || "", m.username || "", m.telegram || "",
       m.indicators.map((r) => scriptName(r.pine_id)).join(" · "),
       lotsOf(m.trade_id), quota, statusInfo(m.primary).label,
       m.granted_at ? new Date(m.granted_at).toLocaleDateString("th-TH") : "",
@@ -359,7 +362,7 @@ export default function BesightMembersTab({ active = true }) {
             <table className="w-full text-sm min-w-[1400px]">
               <thead>
                 <tr className="text-left text-2xs text-slate-400 border-b border-slate-100">
-                  {["สมาชิก", "แหล่ง", "เบอร์โทร", "ประเทศ", "Trade ID", "TradingView", "Telegram", "Indicator", "Lots", "สถานะสิทธิ์", "วันเริ่มต้น", "วันหมดอายุ", "วันที่เข้าร่วม", "ช่องทาง", ""].map((h) => (
+                  {["สมาชิก", "แหล่ง", "เบอร์โทร", "ประเทศ", "Broker", "Trade ID", "TradingView", "Telegram", "Indicator", "Lots", "สถานะสิทธิ์", "วันเริ่มต้น", "วันหมดอายุ", "วันที่เข้าร่วม", "ช่องทาง", ""].map((h) => (
                     <th key={h} className="px-4 py-2 font-medium whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -381,6 +384,7 @@ export default function BesightMembersTab({ active = true }) {
                       </td>
                       <td className="px-4 py-2.5 whitespace-nowrap text-slate-600">{m.phone || "—"}</td>
                       <td className="px-4 py-2.5 whitespace-nowrap text-slate-600">{m.country || "—"}</td>
+                      <td className="px-4 py-2.5 whitespace-nowrap text-slate-600">{m.broker}</td>
                       <td className="px-4 py-2.5 whitespace-nowrap text-slate-600">{m.trade_id || "—"}</td>
                       <td className="px-4 py-2.5 whitespace-nowrap text-slate-600">{m.username}</td>
                       <td className="px-4 py-2.5 whitespace-nowrap text-slate-600">{m.telegram || "—"}</td>
@@ -451,6 +455,11 @@ export default function BesightMembersTab({ active = true }) {
           <div className="grid grid-cols-2 gap-3">
             <Field label="ชื่อลูกค้า"><Input value={form.display_name} onChange={(e) => setForm((f) => ({ ...f, display_name: e.target.value }))} /></Field>
             <Field label="อีเมล"><Input value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} /></Field>
+            <Field label="Broker">
+              <Select value={form.broker} onChange={(e) => setForm((f) => ({ ...f, broker: e.target.value }))}>
+                {BROKERS.map((b) => <option key={b} value={b}>{b}</option>)}
+              </Select>
+            </Field>
             <Field label="Trade ID"><Input value={form.trade_id} onChange={(e) => setForm((f) => ({ ...f, trade_id: e.target.value }))} /></Field>
             <Field label="เบอร์โทร"><Input value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} /></Field>
             <Field label="ประเทศ"><Input value={form.country} onChange={(e) => setForm((f) => ({ ...f, country: e.target.value }))} /></Field>
@@ -496,6 +505,11 @@ export default function BesightMembersTab({ active = true }) {
             <div className="grid grid-cols-2 gap-3">
               <Field label="ชื่อลูกค้า"><Input value={editForm.display_name} onChange={(e) => setEditForm((f) => ({ ...f, display_name: e.target.value }))} /></Field>
               <Field label="อีเมล"><Input value={editForm.email} onChange={(e) => setEditForm((f) => ({ ...f, email: e.target.value }))} /></Field>
+              <Field label="Broker">
+                <Select value={editForm.broker} onChange={(e) => setEditForm((f) => ({ ...f, broker: e.target.value }))}>
+                  {BROKERS.map((b) => <option key={b} value={b}>{b}</option>)}
+                </Select>
+              </Field>
               <Field label="Trade ID"><Input value={editForm.trade_id} onChange={(e) => setEditForm((f) => ({ ...f, trade_id: e.target.value }))} /></Field>
               <Field label="เบอร์โทร"><Input value={editForm.phone} onChange={(e) => setEditForm((f) => ({ ...f, phone: e.target.value }))} /></Field>
               <Field label="ประเทศ"><Input value={editForm.country} onChange={(e) => setEditForm((f) => ({ ...f, country: e.target.value }))} /></Field>

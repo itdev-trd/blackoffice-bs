@@ -59,6 +59,10 @@ function normalizeMemberType(value: unknown): string | null {
   const key = String(value ?? "").trim().toLowerCase();
   return MEMBER_TYPES.includes(key) ? key : null;
 }
+// broker ที่แอดมินระบุเอง (ป้ายกำกับเท่านั้น ไม่ได้เช็คจริง) — รับเฉพาะค่าที่ตาราง tv_access ยอม
+function normalizeBroker(value: unknown): string {
+  return String(value ?? "") === "Exness" ? "Exness" : "XM";
+}
 // brand_id ของสคริปต์ (pine)
 async function pineBrandId(pineId: string): Promise<number | null> {
   const { data } = await admin().from("tv_scripts").select("brand_id").eq("pine_id", pineId).maybeSingle();
@@ -558,6 +562,7 @@ Deno.serve(async (req) => {
       if ("trade_id" in body) patch.trade_id = String(body.trade_id || "").trim() || null;
       if ("contact_channel" in body) patch.contact_channel = normalizeContactChannel(body.contact_channel);
       if ("member_type" in body) patch.member_type = normalizeMemberType(body.member_type);
+      if ("broker" in body) patch.broker = normalizeBroker(body.broker);
       if ("phone" in body) patch.phone = String(body.phone || "").trim() || null;
       if ("country" in body) patch.country = String(body.country || "").trim() || null;
       if ("telegram" in body) patch.telegram = String(body.telegram || "").trim() || null;
@@ -721,6 +726,7 @@ Deno.serve(async (req) => {
           if (grantChannel) payload.contact_channel = grantChannel;
           const grantMemberType = normalizeMemberType(body?.member_type);
           if (grantMemberType) payload.member_type = grantMemberType;
+          if ("broker" in (body ?? {})) payload.broker = normalizeBroker(body?.broker);
           // เบอร์/ประเทศ/Telegram — ใส่เฉพาะตอนส่งมาจริง เหตุผลเดียวกับ channel/member_type ด้านบน
           if (body?.phone) payload.phone = String(body.phone).trim();
           if (body?.country) payload.country = String(body.country).trim();
