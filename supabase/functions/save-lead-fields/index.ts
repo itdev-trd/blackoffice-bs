@@ -1,6 +1,6 @@
 // supabase/functions/save-lead-fields/index.ts
 // แอดมินป้อนข้อมูลลูกค้าเองจากหน้าตอบแชท → บันทึกลง chat_customers + มาร์ค manual_data (ล็อกไม่ให้ AI แก้)
-// body: { id, trade_id?, username?, phone?, email?, country? }  (ค่าว่าง = ล้างค่า)
+// body: { id, trade_id?, username?, phone?, email?, country?, broker? }  (ค่าว่าง = ล้างค่า)
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { authorizeRequest } from "../_shared/permissions.ts";
 
@@ -65,11 +65,15 @@ Deno.serve(async (req) => {
     // ตัวตรวจประเทศอัตโนมัติจะไม่เขียนทับค่าที่คนระบุไว้
     const hasCountry = Object.prototype.hasOwnProperty.call(body ?? {}, "country");
     const country = hasCountry ? clean(body?.country) : undefined;
+    // broker เป็นแค่ป้ายกำกับที่แอดมินเลือกเอง (XM หลัก / Exness รอง) — ไม่ส่งมา = ไม่แตะค่าเดิม
+    const hasBroker = Object.prototype.hasOwnProperty.call(body ?? {}, "broker");
+    const broker = hasBroker ? (String(body?.broker) === "Exness" ? "Exness" : "XM") : undefined;
     const by = auth.permission?.email || "unknown";
 
     const patch: Record<string, unknown> = {
       trade_id, username, phone, email,
       ...(hasCountry ? { country, country_source: country ? "manual" : null } : {}),
+      ...(hasBroker ? { broker } : {}),
       manual_data: true, manual_data_by: by, manual_data_at: nowIso,
       // แอดมินยืนยันข้อมูลเอง = ปิดคิว AI (ไม่ต้องจัด/ตรวจซ้ำข้อมูลชุดนี้)
       classified_by: "manual", needs_ai: false, needs_verify: false,
@@ -78,7 +82,7 @@ Deno.serve(async (req) => {
     const { error } = await admin.from("chat_customers").update(patch).eq("id", id);
     if (error) throw error;
 
-    return json({ ok: true, id, trade_id, username, phone, email, ...(hasCountry ? { country } : {}), manual_data_by: by, manual_data_at: nowIso });
+    return json({ ok: true, id, trade_id, username, phone, email, ...(hasCountry ? { country } : {}), ...(hasBroker ? { broker } : {}), manual_data_by: by, manual_data_at: nowIso });
   } catch (err) {
     return json({ ok: false, error: String(err instanceof Error ? err.message : err) }, 500);
   }

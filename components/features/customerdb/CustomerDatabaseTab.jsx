@@ -102,6 +102,17 @@ export function TradeIdChecker({ darkMode = false, standalone = false }) {
   );
 }
 
+// ช่องทางที่ลูกค้าติดต่อเข้ามา — อ่านจากแหล่งของแชทเอง ไม่ต้องให้แอดมินเลือกซ้ำ
+// (key ต้องตรงกับ check constraint ของ tv_access.contact_channel)
+// LINE OA ไม่ผูกกับเพจ Facebook — page_id ของมันคือ "line:<id>" · IG แยกด้วย source
+// ที่เหลือ (Messenger/คอมเมนต์เพจ/มาจากแอด) ล้วนอยู่บนเพจ Facebook
+const CHANNEL_LABELS = { line: "LINE", facebook: "Facebook", instagram: "Instagram" };
+const contactChannelOfChat = (row) => {
+  if (row?.source === "line" || String(row?.page_id || "").startsWith("line:")) return "line";
+  if (row?.source === "instagram") return "instagram";
+  return row?.page_id ? "facebook" : "";
+};
+
 // แอดมินป้อนข้อมูลลูกค้าเอง (ไอดีเทรด/TradingView/เบอร์/อีเมล) จากหน้าตอบแชท
 // บันทึกผ่าน save-lead-fields → มาร์ค manual_data + ผู้ป้อน · AI/sync/webhook จะไม่แก้ทับ
 // compact = เวอร์ชันย่อสำหรับกล่องตอบแชท ซึ่งพื้นที่จำกัดและมีแท็บบอกอยู่แล้วว่านี่คือ "ข้อมูลลูกค้า"
@@ -109,7 +120,7 @@ export function TradeIdChecker({ darkMode = false, standalone = false }) {
 export function CustomerDataForm({ row, onSaved, darkMode = false, compact = false }) {
   // country อยู่ในฟอร์มเดียวกัน — ตัวตรวจอัตโนมัติเดาไม่ได้ทุกภาษา (อังกฤษ/ตากาล็อกเดาไม่ได้เลย)
   // แอดมินที่คุยอยู่รู้ดีที่สุด และค่าที่คนระบุจะไม่ถูกตัวตรวจเขียนทับ (country_source = manual)
-  const [f, setF] = useState({ trade_id: "", username: "", phone: "", email: "", country: "" });
+  const [f, setF] = useState({ trade_id: "", username: "", phone: "", email: "", country: "", broker: "XM" });
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);   // {ok, text}
   // ให้ AI อ่านบทสนทนาแล้วเสนอว่าเลข/ข้อความไหนคืออะไร — เสนอเท่านั้น ไม่เติมลงช่องเองจนแอดมินกดรับ
@@ -133,13 +144,17 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
   const daysFromDate = (d) => { if (!d) return 0; const t = new Date(`${d}T23:59:59+07:00`).getTime(); return Math.max(1, Math.ceil((t - Date.now()) / 86400000)); };
 
   useEffect(() => {
+    // ยังไม่มีใครระบุประเทศ (ทั้งอัตโนมัติและแอดมิน) แต่ชื่อแอดที่ลูกค้ากดเข้ามาบอกประเทศได้อยู่แล้ว
+    // (ทีมตั้งชื่อแอดใส่ประเทศไว้เสมอ เช่น "Indy Thai 1") — เดาจากตรงนั้นแทนที่จะปล่อยว่างให้แอดมินเลือกเอง
+    const guessed = countryOfAdName(row?.entry_ad_name);
     setF({
       trade_id: row?.trade_id || "", username: row?.username || "", phone: row?.phone || "",
-      email: row?.email || "", country: normalizeCountry(row?.country) || "",
+      email: row?.email || "", country: normalizeCountry(row?.country) || (guessed !== "อื่นๆ" ? guessed : ""),
+      broker: row?.broker === "Exness" ? "Exness" : "XM",
     });
     setMsg(null);
     setAi(null);
-  }, [row?.id, row?.trade_id, row?.username, row?.phone, row?.email, row?.country]);
+  }, [row?.id, row?.trade_id, row?.username, row?.phone, row?.email, row?.country, row?.entry_ad_name, row?.broker]);
 
   // โหลด role + flag ปล่อยอัปเดต + สคริปต์ ครั้งเดียว
   // โหลด role + สถานะปล่อยอัปเดต (ครั้งเดียว)
@@ -183,7 +198,7 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
     const { data, error } = await supabase.functions.invoke("save-lead-fields", { body: { id: row.id, ...f } });
     if (error || !data?.ok) return { ok: false, error: data?.error || error?.message || "อาจยังไม่ได้ deploy save-lead-fields" };
     logActivity("save_lead_fields", { id: row.id, customer_name: row?.customer_name });
-    onSaved?.({ trade_id: data.trade_id, username: data.username, phone: data.phone, email: data.email, country: data.country ?? row?.country, manual_data: true, classified_by: "manual", needs_ai: false, needs_verify: false, manual_data_by: data.manual_data_by, manual_data_at: data.manual_data_at });
+    onSaved?.({ trade_id: data.trade_id, username: data.username, phone: data.phone, email: data.email, country: data.country ?? row?.country, broker: data.broker ?? row?.broker, manual_data: true, classified_by: "manual", needs_ai: false, needs_verify: false, manual_data_by: data.manual_data_by, manual_data_at: data.manual_data_at });
     return { ok: true };
   }
 
@@ -241,6 +256,8 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
         const { data: g, error: ge } = await supabase.functions.invoke("tradingview", { body: {
           action: "grant", username: userTv, display_name: row?.customer_name || null, email: f.email.trim() || null,
           pine_ids: [pid], lifetime: d.mode === "lifetime", days: effDays, expiration: expIso, trade_id: tradeId,
+          // ข้อมูลติดต่อที่กรอกในฟอร์มนี้อยู่แล้ว + ช่องทางที่ลูกค้าทักเข้ามา — ส่งไปด้วยจะได้ไม่ต้องไปกรอกซ้ำในหน้าสมาชิก Indicator
+          contact_channel: contactChannelOfChat(row) || null, phone: f.phone.trim() || null, country: f.country || null,
         } });
         if (ge || !g?.ok) fails.push(`${name}: ${g?.error || g?.results?.[0]?.error || "ลองใหม่"}`);
         else summ.push(`${name} (${durLabel(d)})`);
@@ -407,12 +424,30 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
             {f.country && !COUNTRIES.includes(f.country) && <option value={f.country}>{f.country}</option>}
           </select>
         </div>
+        <div className="min-w-0 col-span-2">
+          {/* ป้ายกำกับ broker ที่แอดมินเลือกเอง (XM หลัก / Exness รอง) — ไม่ได้เช็คจริงกับฝั่ง broker
+              ระบบเช็คไอดีเทรดตอนนี้ผูกกับ XM เท่านั้น ป้ายนี้ไว้ช่วยคัดกรอง/บันทึกไว้ก่อน */}
+          <label className="text-[11px] text-slate-400">Broker</label>
+          <div className="mt-0.5 grid grid-cols-2 gap-1.5">
+            {["XM", "Exness"].map((b) => (
+              <button key={b} type="button" onClick={() => setF((st) => ({ ...st, broker: b }))}
+                className={`rounded-lg border px-2 py-1.5 text-sm font-medium ${f.broker === b ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-300 text-slate-600 hover:bg-slate-50"}`}>
+                {b}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* ตัวเลือก TV (เหมือนหน้าจัดการสมาชิก TV) — เห็นเฉพาะแอดมินจนกว่าจะปล่อย */}
       {tvOn && (
         <div className="rounded-lg border border-slate-300 p-2.5 space-y-2">
-          <div className="text-[11px] font-semibold text-slate-600 flex items-center gap-1"><Tv size={12} /> เพิ่มสิทธิ์ TradingView</div>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="text-[11px] font-semibold text-slate-600 flex items-center gap-1"><Tv size={12} /> เพิ่มสิทธิ์ TradingView</div>
+            {contactChannelOfChat(row) && (
+              <span className="text-[10px] text-slate-400">ช่องทาง: {CHANNEL_LABELS[contactChannelOfChat(row)]}</span>
+            )}
+          </div>
           <div>
             <label className="text-[11px] text-slate-400">เลือกสคริปต์ที่จะให้สิทธิ์</label>
             <div className="mt-0.5 rounded-lg border border-slate-300 divide-y divide-slate-100 max-h-60 overflow-y-auto bg-white">

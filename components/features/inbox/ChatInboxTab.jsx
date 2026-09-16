@@ -62,7 +62,7 @@ const SKIP_NOTE = {
   disqualified: "สถานะนี้ไม่ส่งขึ้น Meta โดยเจตนา — การส่งลีดที่ไม่มีคุณสมบัติจะสอนอัลกอริทึมผิดทาง",
 };
 
-const CHAT_OPEN_COLS = "id, page_id, page_name, psid, customer_name, source, stage, stage_manual, classified_by, needs_ai, needs_verify, manual_data, manual_data_by, manual_data_at, trade_id, username, phone, email, awaiting_reply, unread, read_at, cust_read_at, cust_lang, country, profile_pic, transcript, account_opened_at, entry_ad_id, entry_ad_name, last_user_text, last_reply_text, last_reply_by, last_reply_at, last_message_at, comment_ad_name, comment_ad_ids, comment_ad_names, comment_is_ad, comment_promoted_to_inbox, comment_permalink, blocked_at, synced_at, updated_at, notes, tags, ai_summary, ai_summary_at";
+const CHAT_OPEN_COLS = "id, page_id, page_name, psid, customer_name, source, stage, stage_manual, classified_by, needs_ai, needs_verify, manual_data, manual_data_by, manual_data_at, trade_id, username, phone, email, awaiting_reply, unread, read_at, cust_read_at, cust_lang, country, broker, profile_pic, transcript, account_opened_at, entry_ad_id, entry_ad_name, last_user_text, last_reply_text, last_reply_by, last_reply_at, last_message_at, comment_ad_name, comment_ad_ids, comment_ad_names, comment_is_ad, comment_promoted_to_inbox, comment_permalink, blocked_at, synced_at, updated_at, notes, tags, ai_summary, ai_summary_at";
 
 export default function ChatInboxTab({ allowedPages = null, alertAllowed = true, alertMin = 3, alertPages = [], alertSound = true, alertNew = true, gotoChat = null, onGotoDone, active = true }) {
   const isInstagramComment = (row) => String(row?.id || "").startsWith("igc_");
