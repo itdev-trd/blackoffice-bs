@@ -53,8 +53,9 @@ function normalizeContactChannel(value: unknown): string | null {
   const key = String(value ?? "").trim().toLowerCase();
   return CONTACT_CHANNELS.includes(key) ? key : null;
 }
-// ประเภทสมาชิก แบ่งตามที่มาของสิทธิ์ — รับเฉพาะค่าที่ตาราง tv_access ยอม
-const MEMBER_TYPES = ["free", "paid", "promotion"];
+// plan ของสมาชิก (new = ทดลอง 1 เดือน · free = ผ่านทดลองแล้ว · premium = ครบโควตาติดกัน 3 รอบ)
+// — รับเฉพาะค่าที่ check constraint ของ tv_access ยอม
+const MEMBER_TYPES = ["new", "free", "premium"];
 function normalizeMemberType(value: unknown): string | null {
   const key = String(value ?? "").trim().toLowerCase();
   return MEMBER_TYPES.includes(key) ? key : null;
@@ -842,6 +843,48 @@ Deno.serve(async (req) => {
           unmatched_count: unmatchedTradeIds.length,
         },
       });
+    }
+
+    // ---- ประวัติ Lot ย้อนหลังรายเดือนของสมาชิกคนเดียว (ใช้ในหน้ารายละเอียดสมาชิก Indicator) ----
+    // ยิง broker แยกทีละเดือนพร้อมกัน แล้ว cache ลง tv_lot_usage ไปด้วย ประวัติจะได้สะสมขึ้นเรื่อย ๆ
+    // (broker เก็บย้อนหลังไม่ครบทุกเดือน เดือนที่ไม่มีข้อมูลจะได้ 0 ซึ่งแยกไม่ออกจาก "ไม่ได้เทรด" อยู่แล้ว)
+    if (action === "lot_history") {
+      const tradeId = String(body?.trade_id || "").trim();
+      if (!tradeId) return json({ ok: false, error: "ต้องระบุ trade_id" });
+      const months = Math.min(12, Math.max(1, Number(body?.months) || 5));
+
+      // เดือนย้อนหลังตามเวลาไทย (เดือนปัจจุบันเป็นตัวแรก)
+      const nowTh = new Date(Date.now() + 7 * 3600 * 1000);
+      const periods: { start: string; end: string }[] = [];
+      for (let i = 0; i < months; i++) {
+        const y = nowTh.getUTCFullYear(), m = nowTh.getUTCMonth() - i;
+        periods.push({
+          start: new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10),
+          end: new Date(Date.UTC(y, m + 1, 0)).toISOString().slice(0, 10),
+        });
+      }
+
+      const rows = await Promise.all(periods.map(async (p) => {
+        try {
+          const url = `https://ai.besight.net/webhook/check-lot?date_from=${p.start}&date_to=${p.end}&tradeid=${encodeURIComponent(tradeId)}`;
+          const r = await fetch(url, { signal: AbortSignal.timeout(20000) });
+          const j = await r.json().catch(() => null);
+          const list = Array.isArray(j) ? j : [];
+          const hit = list.find((x: any) => String(x?.loginId ?? x?.login_id ?? x?.tradeid ?? "").trim() === tradeId);
+          return { ...p, lots: Number(hit?.lots) || 0, campaign_name: hit?.campaignName ? String(hit.campaignName) : null, ok: true };
+        } catch (e) {
+          return { ...p, lots: 0, campaign_name: null, ok: false, error: String(e instanceof Error ? e.message : e) };
+        }
+      }));
+
+      const fetchedAt = new Date().toISOString();
+      const upserts = rows.filter((r) => r.ok).map((r) => ({
+        trade_id: tradeId, period_start: r.start, period_end: r.end,
+        lots: r.lots, campaign_name: r.campaign_name, fetched_at: fetchedAt,
+      }));
+      if (upserts.length) await db.from("tv_lot_usage").upsert(upserts, { onConflict: "trade_id,period_start,period_end" });
+
+      return json({ ok: true, trade_id: tradeId, months: rows, fetched_at: fetchedAt });
     }
 
     return json({ ok: false, error: `ไม่รู้จัก action "${action}"` });

@@ -20,8 +20,17 @@ import {
   Gauge, CheckCircle2, XCircle, Plus, Download, RefreshCw, Loader2, Pencil, Trash2, ChevronLeft, ChevronRight, ListTree,
 } from "lucide-react";
 
-const MEMBER_TYPES = [["free", "Free"], ["paid", "จ่ายเงิน"], ["promotion", "โปรโมชั่น"]];
+// Plan ของสมาชิก — เลื่อนขั้นตามยอด Lot ที่เทรดได้ในแต่ละรอบอายุ
+//   new     ทดลองใช้ 1 เดือน · ครบโควตา = ต่ออายุ + ขึ้นเป็น free
+//   free    ผ่านทดลองแล้ว · ครบโควตาติดกัน 3 รอบ = ขึ้นเป็น premium
+//   premium ตกโควตาเมื่อไหร่ = ไม่ต่ออายุ และลดกลับเป็น free
+const MEMBER_TYPES = [["new", "ลูกค้าใหม่"], ["free", "Free"], ["premium", "Premium"]];
 const memberTypeLabel = (v) => MEMBER_TYPES.find(([key]) => key === v)?.[1] || "—";
+const PLAN_TONE = {
+  new: "border-sky-200 bg-sky-50 text-sky-700",
+  free: "border-slate-200 bg-slate-50 text-slate-600",
+  premium: "border-amber-200 bg-amber-50 text-amber-700",
+};
 const CONTACT_CHANNELS = [["facebook", "Facebook"], ["line", "LINE"], ["instagram", "Instagram"], ["telegram", "Telegram"], ["tiktok", "TikTok"], ["youtube", "YouTube"]];
 const channelLabel = (v) => CONTACT_CHANNELS.find(([key]) => key === v)?.[1] || "—";
 // broker ของบัญชีเทรด — XM คือค่าหลัก (ข้อมูลเก่าทั้งหมดเป็น XM) · Exness เป็นตัวเลือกรอง
@@ -68,7 +77,7 @@ function currentMonthRange() {
 }
 
 const PAGE_SIZE = 10;
-const emptyForm = { username: "", display_name: "", email: "", trade_id: "", phone: "", country: "", telegram: "", contact_channel: "", member_type: "", broker: "XM", pine_id: "", days: 30, lifetime: false };
+const emptyForm = { username: "", display_name: "", email: "", trade_id: "", phone: "", country: "", telegram: "", contact_channel: "", member_type: "new", broker: "XM", pine_id: "", days: 30, lifetime: false };
 
 export default function BesightMembersTab({ active = true }) {
   const [brands, setBrands] = useState([]);
@@ -95,6 +104,7 @@ export default function BesightMembersTab({ active = true }) {
   const [editSaving, setEditSaving] = useState(false);
   const [busyRow, setBusyRow] = useState(null);
   const [detailMember, setDetailMember] = useState(null);   // สมาชิกที่กำลังดูรายละเอียด (ครบทุกอินดิเคเตอร์)
+  const [lotHistory, setLotHistory] = useState(null);       // { loading } | { months: [...] } | { error }
   const { start: periodStart, end: periodEnd } = useMemo(() => currentMonthRange(), []);
 
   const brand = brands.find((b) => b.id === brandId) || null;
@@ -139,6 +149,23 @@ export default function BesightMembersTab({ active = true }) {
   }, [brandId]);
 
   useEffect(() => { setQuotaDraft(brand ? String(brand.lot_quota_per_month ?? 3) : ""); }, [brand?.id, brand?.lot_quota_per_month]);
+
+  // ประวัติ Lot ย้อนหลัง 5 เดือนของสมาชิกที่เปิดดูอยู่ — ดึงสดจาก broker ทีละเดือน (แล้ว backend cache ให้เอง)
+  // ไม่โหลดล่วงหน้าทั้งตาราง เพราะต้องยิง broker แยกรายคน ถ้าโหลดทุกคนพร้อมกันจะช้าและโดน rate limit
+  useEffect(() => {
+    const tradeId = detailMember?.trade_id;
+    if (!detailMember) { setLotHistory(null); return; }
+    if (!tradeId) { setLotHistory({ months: [] }); return; }
+    let stop = false;
+    setLotHistory({ loading: true });
+    (async () => {
+      const { data, error } = await supabase.functions.invoke("tradingview", { body: { action: "lot_history", trade_id: tradeId, months: 5 } });
+      if (stop) return;
+      if (error || !data?.ok) { setLotHistory({ error: data?.error || (await readFunctionErrorMessage(error)) || "ดึงประวัติ Lot ไม่สำเร็จ" }); return; }
+      setLotHistory({ months: data.months || [] });
+    })();
+    return () => { stop = true; };
+  }, [detailMember?.key, detailMember?.trade_id]);
 
   const quota = Number(brand?.lot_quota_per_month) || 0;
   const scriptName = (pineId) => scripts.find((s) => s.pine_id === pineId)?.name || pineId;
@@ -274,7 +301,7 @@ export default function BesightMembersTab({ active = true }) {
   }
 
   function exportCsv() {
-    const head = ["สมาชิก", "อีเมล", "แหล่ง", "เบอร์โทร", "ประเทศ", "Broker", "Trade ID", "TradingView", "Telegram", "Indicator", "Lots ใช้ไป", "Lots โควตา", "สถานะสิทธิ์", "วันเริ่มต้น", "วันหมดอายุ", "วันที่เข้าร่วม", "ช่องทาง"];
+    const head = ["สมาชิก", "อีเมล", "Plan", "เบอร์โทร", "ประเทศ", "Broker", "Trade ID", "TradingView", "Telegram", "Indicator", "Lots ใช้ไป", "Lots โควตา", "สถานะสิทธิ์", "วันเริ่มต้น", "วันหมดอายุ", "วันที่เข้าร่วม", "ช่องทาง"];
     const lines = [head, ...filtered.map((m) => [
       m.display_name || "", m.email || "", memberTypeLabel(m.member_type), m.phone || "", m.country || "",
       m.broker, m.trade_id || "", m.username || "", m.telegram || "",
@@ -343,7 +370,7 @@ export default function BesightMembersTab({ active = true }) {
         {lotMsg && <div className="text-xs text-slate-500">{lotMsg}</div>}
         <div className="flex flex-wrap items-center gap-2">
           <SearchInput placeholder="ค้นหาชื่อ, อีเมล, Trade ID, TradingView, Telegram..." value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} className="flex-1 min-w-[220px]" />
-          <FilterPill active={!memberTypeFilter} onClick={() => { setMemberTypeFilter(""); setPage(1); }}>แหล่งทั้งหมด</FilterPill>
+          <FilterPill active={!memberTypeFilter} onClick={() => { setMemberTypeFilter(""); setPage(1); }}>ทุก Plan</FilterPill>
           {MEMBER_TYPES.map(([key, label]) => (
             <FilterPill key={key} active={memberTypeFilter === key} onClick={() => { setMemberTypeFilter(key); setPage(1); }}>{label}</FilterPill>
           ))}
@@ -362,7 +389,7 @@ export default function BesightMembersTab({ active = true }) {
             <table className="w-full text-sm min-w-[1400px]">
               <thead>
                 <tr className="text-left text-2xs text-slate-400 border-b border-slate-100">
-                  {["สมาชิก", "แหล่ง", "เบอร์โทร", "ประเทศ", "Broker", "Trade ID", "TradingView", "Telegram", "Indicator", "Lots", "สถานะสิทธิ์", "วันเริ่มต้น", "วันหมดอายุ", "วันที่เข้าร่วม", "ช่องทาง", ""].map((h) => (
+                  {["สมาชิก", "Plan", "เบอร์โทร", "ประเทศ", "Broker", "Trade ID", "TradingView", "Telegram", "Indicator", "Lots", "สถานะสิทธิ์", "วันเริ่มต้น", "วันหมดอายุ", "วันที่เข้าร่วม", "ช่องทาง", ""].map((h) => (
                     <th key={h} className="px-4 py-2 font-medium whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -380,7 +407,7 @@ export default function BesightMembersTab({ active = true }) {
                         {m.email && <div className="text-2xs text-slate-400">{m.email}</div>}
                       </td>
                       <td className="px-4 py-2.5 whitespace-nowrap">
-                        <span className="text-2xs font-semibold px-2 py-0.5 rounded-full border border-slate-200 bg-slate-50 text-slate-600">{memberTypeLabel(m.member_type)}</span>
+                        <span className={`text-2xs font-semibold px-2 py-0.5 rounded-full border ${PLAN_TONE[m.member_type] || PLAN_TONE.free}`}>{memberTypeLabel(m.member_type)}</span>
                       </td>
                       <td className="px-4 py-2.5 whitespace-nowrap text-slate-600">{m.phone || "—"}</td>
                       <td className="px-4 py-2.5 whitespace-nowrap text-slate-600">{m.country || "—"}</td>
@@ -466,7 +493,7 @@ export default function BesightMembersTab({ active = true }) {
             <Field label="Telegram"><Input value={form.telegram} onChange={(e) => setForm((f) => ({ ...f, telegram: e.target.value }))} /></Field>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="แหล่งที่มา">
+            <Field label="Plan">
               <Select value={form.member_type} onChange={(e) => setForm((f) => ({ ...f, member_type: e.target.value }))}>
                 <option value="">— ไม่ระบุ —</option>
                 {MEMBER_TYPES.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
@@ -516,7 +543,7 @@ export default function BesightMembersTab({ active = true }) {
               <Field label="Telegram"><Input value={editForm.telegram} onChange={(e) => setEditForm((f) => ({ ...f, telegram: e.target.value }))} /></Field>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <Field label="แหล่งที่มา">
+              <Field label="Plan">
                 <Select value={editForm.member_type} onChange={(e) => setEditForm((f) => ({ ...f, member_type: e.target.value }))}>
                   <option value="">— ไม่ระบุ —</option>
                   {MEMBER_TYPES.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
@@ -538,7 +565,34 @@ export default function BesightMembersTab({ active = true }) {
       <Dialog open={!!detailMember} title={detailMember ? `อินดิเคเตอร์ของ ${detailMember.display_name || detailMember.username}` : ""} onClose={() => setDetailMember(null)}
         footer={<Button variant="secondary" onClick={() => setDetailMember(null)}>ปิด</Button>}>
         {detailMember && (
-          <div className="space-y-2">
+          <div className="space-y-3">
+            {/* ประวัติ Lot ย้อนหลัง 5 เดือน — ดูได้ว่าเดือนไหนผ่านโควตาบ้าง (ใช้ตัดสินต่ออายุ/เลื่อนขั้น) */}
+            <div className="rounded-xl border border-slate-200 p-3">
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <div className="text-[13px] font-semibold text-slate-700">ประวัติ Lot ย้อนหลัง 5 เดือน</div>
+                <span className="text-2xs text-slate-400">โควตา {quota.toFixed(2)} / เดือน</span>
+              </div>
+              {!detailMember.trade_id ? (
+                <div className="text-xs text-slate-400">ยังไม่มี Trade ID — ดูยอด Lot ไม่ได้</div>
+              ) : lotHistory?.loading ? (
+                <div className="flex items-center gap-2 text-xs text-slate-500"><Loader2 size={13} className="animate-spin" /> กำลังดึงจาก broker…</div>
+              ) : lotHistory?.error ? (
+                <div className="text-xs text-rose-600">{lotHistory.error}</div>
+              ) : (
+                <div className="grid grid-cols-5 gap-1.5">
+                  {(lotHistory?.months || []).map((mo) => {
+                    const passed = quota > 0 && mo.lots >= quota;
+                    return (
+                      <div key={mo.start} className={`rounded-lg border px-2 py-1.5 text-center ${passed ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-slate-50"}`}>
+                        <div className="text-2xs text-slate-500">{new Date(`${mo.start}T00:00:00+07:00`).toLocaleDateString("th-TH", { month: "short", year: "2-digit" })}</div>
+                        <div className={`text-sm font-semibold ${passed ? "text-emerald-700" : "text-slate-600"}`}>{Number(mo.lots).toFixed(2)}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
             {detailMember.indicators.map((r) => {
               const st = statusInfo(r);
               return (
