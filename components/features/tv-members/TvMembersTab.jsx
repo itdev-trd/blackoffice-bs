@@ -4,8 +4,8 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { hasFullData } from "@/lib/constants/roles";
 import { beToCe } from "@/lib/utils/date";
-import { X, Clock, Pencil, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Loader2, Eye, Users, CheckCircle2, AlertTriangle, Tv } from "lucide-react";
-import { Button, SectionTitle, StatCard } from "@/components/ui";
+import { X, Clock, Pencil, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Trash2, Loader2, Eye, Users, CheckCircle2, AlertTriangle, Tv, Plus, PartyPopper } from "lucide-react";
+import { Button, SectionTitle, StatCard, Dialog } from "@/components/ui";
 
 // ช่องทางที่ลูกค้าติดต่อเข้ามา — key ต้องตรงกับ check constraint ของ tv_access.contact_channel
 const CONTACT_CHANNELS = [
@@ -14,9 +14,15 @@ const CONTACT_CHANNELS = [
 ];
 const channelLabel = (v) => CONTACT_CHANNELS.find(([key]) => key === v)?.[1] || "";
 
-// ประเภทสมาชิก แบ่งตามที่มาของสิทธิ์ — key ต้องตรงกับ check constraint ของ tv_access.member_type
-const MEMBER_TYPES = [["free", "ฟรี"], ["paid", "จ่ายเงิน"], ["promotion", "โปรโมชั่น"]];
+// Plan ของสมาชิก — key ต้องตรงกับ check constraint ของ tv_access.member_type (ดู BesightMembersTab.jsx)
+//   new = ทดลองใช้ 1 เดือน · free = ผ่านทดลองแล้ว · premium = ครบโควตาติดกัน 3 รอบ
+const MEMBER_TYPES = [["new", "ลูกค้าใหม่"], ["free", "Free"], ["premium", "Premium"]];
 const memberTypeLabel = (v) => MEMBER_TYPES.find(([key]) => key === v)?.[1] || "";
+const PLAN_TONE = {
+  new: { bg: "rgb(56 189 248 / .13)", fg: "#0369a1" },
+  free: { bg: "rgb(148 163 184 / .18)", fg: "#475569" },
+  premium: { bg: "rgb(245 158 11 / .16)", fg: "#b45309" },
+};
 
 function MemberTypeSelect({ value, onChange }) {
   return (
@@ -80,6 +86,7 @@ export default function TvMembersTab({ active = true, embedded = false, onOpenCh
     return Math.max(1, Math.ceil((target - Date.now()) / 86400000));
   };
   const [granting, setGranting] = useState(false);
+  const [grantSuccess, setGrantSuccess] = useState(null);   // { username, items: [label] } — โชว์ popup ยืนยันตอนเพิ่มสิทธิ์สำเร็จ
   const [verifyFail, setVerifyFail] = useState(null);   // ผลเช็คไอดีเทรดที่ไม่ผ่าน + สาเหตุ
   // ปรับวันหมดอายุ (เพิ่ม/ลด) ของสมาชิกที่มีอยู่
   const [adjRow, setAdjRow] = useState(null);   // แถว tv_access ที่กำลังตั้งวันหมดอายุ
@@ -379,6 +386,7 @@ export default function TvMembersTab({ active = true, embedded = false, onOpenCh
     setGranting(false);
     if (!summ.length) { setMsg("✗ เพิ่มสิทธิ์ไม่สำเร็จ: " + (fails.join(" · ") || "ลองใหม่")); return; }
     setMsg(`✓ ให้สิทธิ์ ${realUser} แล้ว: ${summ.join(", ")}${fails.length ? ` · ไม่สำเร็จ: ${fails.join(" · ")}` : ""}`);
+    setGrantSuccess({ username: realUser, items: summ, fails });
     setUname(""); setDname(""); setDemail(""); setTradeId(""); setChannel(""); setMemberType(""); setDur({});
     load();
   }
@@ -513,6 +521,27 @@ export default function TvMembersTab({ active = true, embedded = false, onOpenCh
         }
         @media (min-width: 1024px) { .tv-members-shell .tv-members-form { position: sticky; top: 20px; } }
       `}</style>
+      {/* popup ยืนยันตอนเพิ่มสิทธิ์สำเร็จ — เดิมขึ้นแค่แถบข้อความเล็ก ๆ เหนือฟอร์ม เลื่อนจอก็พลาดได้ */}
+      <Dialog open={!!grantSuccess} title="เพิ่มสิทธิ์สำเร็จ" onClose={() => setGrantSuccess(null)}
+        footer={<Button variant="primary" onClick={() => setGrantSuccess(null)}>ตกลง</Button>}>
+        {grantSuccess && (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-emerald-700">
+              <PartyPopper size={20} />
+              <span className="font-semibold">ให้สิทธิ์ {grantSuccess.username} แล้ว</span>
+            </div>
+            <ul className="text-sm text-slate-600 list-disc pl-5 space-y-0.5">
+              {grantSuccess.items.map((it) => <li key={it}>{it}</li>)}
+            </ul>
+            {grantSuccess.fails?.length > 0 && (
+              <div className="text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
+                บางสคริปต์ไม่สำเร็จ: {grantSuccess.fails.join(" · ")}
+              </div>
+            )}
+          </div>
+        )}
+      </Dialog>
+
       {/* modal เลือก Indicator ที่จะ export */}
       {exportOpen && (
         <div className="fixed inset-0 z-[200] bg-black/60 flex items-center justify-center p-4" onClick={() => setExportOpen(false)}>
@@ -695,15 +724,19 @@ export default function TvMembersTab({ active = true, embedded = false, onOpenCh
       <div className="flex flex-col lg:flex-row gap-4">
         {/* ซ้าย: ฟอร์มเพิ่มสมาชิก */}
         {/* เดิมเป็น bg-white คู่กับ text-slate-100 = ตัวหนังสือขาวบนพื้นขาวในธีมสว่าง */}
-        <details className="tv-members-form tv-add-member-panel ds-card lg:w-80 shrink-0 p-5 h-fit">
-          <summary className="flex items-center justify-between gap-3 cursor-pointer list-none">
-            <span>
-              <strong className="block font-semibold" style={{ color: "var(--ink)" }}>เพิ่มสมาชิกใหม่</strong>
-              <span className="block text-[11px] mt-1" style={{ color: "var(--ink-3)" }}>กรอกข้อมูล ตรวจสอบ แล้วจึงให้สิทธิ์</span>
+        <details className="tv-members-form tv-add-member-panel ds-card lg:w-80 shrink-0 h-fit">
+          {/* เดิมเป็นแค่หัวข้อตัวหนังสือธรรมดา กลมกลืนกับพื้นหลังจนแอดมินมองข้าม
+              เปลี่ยนเป็นแถบสีเข้มชัดเจนเหมือนปุ่ม CTA — ยังกดขยาย/ยุบได้เหมือนเดิม */}
+          <summary className="flex items-center justify-between gap-3 cursor-pointer list-none rounded-2xl px-5 py-4 bg-brand-600 text-white hover:bg-brand-700 transition-colors">
+            <span className="flex items-center gap-2.5">
+              <span className="tv-add-member-chevron shrink-0 rounded-full bg-white/20 p-1.5"><Plus size={16} /></span>
+              <span>
+                <strong className="block font-semibold">เพิ่มสมาชิกใหม่</strong>
+                <span className="block text-[11px] mt-0.5 text-white/80">กรอกข้อมูล ตรวจสอบ แล้วจึงให้สิทธิ์</span>
+              </span>
             </span>
-            <span className="tv-add-member-chevron text-lg leading-none" style={{ color: "var(--ink-3)" }}>+</span>
           </summary>
-          <div className="tv-add-member-fields space-y-3 mt-4 pt-4" style={{ borderTop: "1px solid var(--line)" }}>
+          <div className="tv-add-member-fields space-y-3 mt-4 px-5 pb-5">
           <div className="tv-form-section-title"><span>1</span>ข้อมูลลูกค้า</div>
           <div>
             <label className="text-xs text-slate-500">TradingView username</label>
@@ -908,7 +941,13 @@ export default function TvMembersTab({ active = true, embedded = false, onOpenCh
                         <button key={a.id} type="button" onClick={() => setSheetRow(a)}
                           className="tv-row flex w-full items-center gap-3 px-4 py-3 text-left">
                           <span className="min-w-0 flex-1">
-                            <span className="block truncate text-sm font-medium" style={{ color: "var(--ink)" }}>{a.display_name || a.username}</span>
+                            <span className="flex items-center gap-1.5">
+                              <span className="truncate text-sm font-medium" style={{ color: "var(--ink)" }}>{a.display_name || a.username}</span>
+                              {a.member_type && (
+                                <span className="shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
+                                  style={{ background: (PLAN_TONE[a.member_type] || PLAN_TONE.free).bg, color: (PLAN_TONE[a.member_type] || PLAN_TONE.free).fg }}>{memberTypeLabel(a.member_type)}</span>
+                              )}
+                            </span>
                             <span className="mt-0.5 block truncate text-[11px]" style={{ color: "var(--ink-3)" }}>
                               {a.username}{a.trade_id ? ` · ${a.trade_id}` : ""}
                             </span>
@@ -941,9 +980,16 @@ export default function TvMembersTab({ active = true, embedded = false, onOpenCh
                         {/* กดชื่อ = เปิดประวัติแชทของลูกค้าคนนั้น
                             เดิมเป็นลิงก์ `?tab=inbox&open_trade=...` ซึ่งเป็น URL ของแอปเวอร์ชันหน้าเดียว
                             พอย้ายมาเป็นหลายเส้นทางของ Next.js ลิงก์นั้นเปิดแท็บใหม่มาที่หน้าเดิมแล้วไม่เกิดอะไรขึ้น */}
-                        {onOpenChat && a.display_name && (a.trade_id || a.username)
-                          ? <button type="button" onClick={() => openChatOf(a)} className="min-w-0 text-left font-medium hover:underline truncate" style={{ color: "var(--brand)" }} title={`เปิดประวัติแชทของ ${a.display_name}`}>{a.display_name}</button>
-                          : <span className="min-w-0 font-medium truncate" style={{ color: "var(--ink)" }} title={a.display_name || ""}>{a.display_name || "—"}</span>}
+                        <span className="min-w-0 flex items-center gap-1.5">
+                          {onOpenChat && a.display_name && (a.trade_id || a.username)
+                            ? <button type="button" onClick={() => openChatOf(a)} className="min-w-0 text-left font-medium hover:underline truncate" style={{ color: "var(--brand)" }} title={`เปิดประวัติแชทของ ${a.display_name}`}>{a.display_name}</button>
+                            : <span className="min-w-0 font-medium truncate" style={{ color: "var(--ink)" }} title={a.display_name || ""}>{a.display_name || "—"}</span>}
+                          {a.member_type && (
+                            <span className="shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
+                              style={{ background: (PLAN_TONE[a.member_type] || PLAN_TONE.free).bg, color: (PLAN_TONE[a.member_type] || PLAN_TONE.free).fg }}
+                              title="Plan ของสมาชิก">{memberTypeLabel(a.member_type)}</span>
+                          )}
+                        </span>
                         <span className="min-w-0 truncate" style={{ color: "var(--ink-2)" }} title={a.username}>{a.username}</span>
                         {canSeeNewTv && <span className="min-w-0 truncate text-xs" style={{ color: "var(--ink-3)" }} title={a.email || ""}>{a.email || "—"}</span>}
                         <span className="min-w-0">
@@ -1025,8 +1071,14 @@ export default function TvMembersTab({ active = true, embedded = false, onOpenCh
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="truncate text-base font-bold" style={{ color: "var(--ink)" }}>{a.display_name || a.username}</div>
-                  <div className="mt-1 inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold"
-                    style={{ background: STATUS_TONE[st.tone].bg, color: STATUS_TONE[st.tone].fg }}>{st.label}</div>
+                  <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                    <span className="inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                      style={{ background: STATUS_TONE[st.tone].bg, color: STATUS_TONE[st.tone].fg }}>{st.label}</span>
+                    {a.member_type && (
+                      <span className="inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                        style={{ background: (PLAN_TONE[a.member_type] || PLAN_TONE.free).bg, color: (PLAN_TONE[a.member_type] || PLAN_TONE.free).fg }}>{memberTypeLabel(a.member_type)}</span>
+                    )}
+                  </div>
                 </div>
                 <button onClick={() => setSheetRow(null)} className="shrink-0 p-1" style={{ color: "var(--ink-3)" }}><X size={20} /></button>
               </div>

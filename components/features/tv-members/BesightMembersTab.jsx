@@ -17,7 +17,7 @@ import {
   SectionTitle, StatCard, Button, Card, Dialog, SearchInput, FilterPill, Field, Input, Select, EmptyState,
 } from "@/components/ui";
 import {
-  Gauge, CheckCircle2, XCircle, Plus, Download, RefreshCw, Loader2, Pencil, Trash2, ChevronLeft, ChevronRight, ListTree,
+  Gauge, CheckCircle2, XCircle, Plus, Download, RefreshCw, Loader2, Pencil, Trash2, ChevronLeft, ChevronRight, ListTree, PartyPopper,
 } from "lucide-react";
 
 // Plan ของสมาชิก — เลื่อนขั้นตามยอด Lot ที่เทรดได้ในแต่ละรอบอายุ
@@ -105,6 +105,7 @@ export default function BesightMembersTab({ active = true }) {
   const [busyRow, setBusyRow] = useState(null);
   const [detailMember, setDetailMember] = useState(null);   // สมาชิกที่กำลังดูรายละเอียด (ครบทุกอินดิเคเตอร์)
   const [lotHistory, setLotHistory] = useState(null);       // { loading } | { months: [...] } | { error }
+  const [grantSuccess, setGrantSuccess] = useState(null);   // { username, script } — popup ยืนยันตอนเพิ่มสมาชิกสำเร็จ
   const { start: periodStart, end: periodEnd } = useMemo(() => currentMonthRange(), []);
 
   const brand = brands.find((b) => b.id === brandId) || null;
@@ -256,6 +257,7 @@ export default function BesightMembersTab({ active = true }) {
       return;
     }
     setAddOpen(false);
+    setGrantSuccess({ username: data.username || form.username.trim(), script: scriptName(form.pine_id) });
     loadMembers();
   }
 
@@ -556,6 +558,17 @@ export default function BesightMembersTab({ active = true }) {
                 </Select>
               </Field>
             </div>
+          </div>
+        )}
+      </Dialog>
+
+      {/* popup ยืนยันตอนเพิ่มสมาชิกสำเร็จ — เดิมปิดฟอร์มเงียบ ๆ ไม่บอกอะไรเลย */}
+      <Dialog open={!!grantSuccess} title="เพิ่มสมาชิกสำเร็จ" onClose={() => setGrantSuccess(null)}
+        footer={<Button variant="primary" onClick={() => setGrantSuccess(null)}>ตกลง</Button>}>
+        {grantSuccess && (
+          <div className="flex items-center gap-2 text-emerald-700">
+            <PartyPopper size={20} />
+            <span className="font-semibold">ให้สิทธิ์ {grantSuccess.username} ({grantSuccess.script}) แล้ว</span>
           </div>
         )}
       </Dialog>

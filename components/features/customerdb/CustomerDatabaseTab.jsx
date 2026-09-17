@@ -27,7 +27,7 @@ import { lsGet, lsSet } from "@/lib/utils/storage";
 import { readFunctionErrorMessage } from "@/lib/utils/errors";
 import { getCustomerDateRange } from "@/lib/customer-date-filter";
 import Spinner from "@/components/shared/Spinner";
-import { EmptyState, SearchInput, FilterPill } from "@/components/ui";
+import { EmptyState, SearchInput, FilterPill, Dialog, Button } from "@/components/ui";
 import { EditableCell } from "@/components/features/settings/SettingsTab";
 import { CHAT_STAGES } from "@/lib/constants/settings";
 
@@ -123,6 +123,7 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
   const [f, setF] = useState({ trade_id: "", username: "", phone: "", email: "", country: "", broker: "XM" });
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);   // {ok, text}
+  const [grantSuccess, setGrantSuccess] = useState(null);   // { username, items, fails } — popup ยืนยันตอนเพิ่มสิทธิ์ TV สำเร็จ
   // ให้ AI อ่านบทสนทนาแล้วเสนอว่าเลข/ข้อความไหนคืออะไร — เสนอเท่านั้น ไม่เติมลงช่องเองจนแอดมินกดรับ
   // regex แยกไม่ออกว่าเลขไหนคือเลขบัญชี เบอร์โทร หรือยอดเงิน แต่ AI อ่านบริบทได้
   const [aiBusy, setAiBusy] = useState(false);
@@ -271,7 +272,10 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
           : summ.length
             ? { ok: true, text: `✓ บันทึกข้อมูลลูกค้า + เพิ่มสิทธิ์: ${summ.join(", ")} · ไม่สำเร็จ: ${fails.join(" · ")}` }
             : { ok: false, text: `✓ บันทึกข้อมูลลูกค้าแล้ว · แต่เพิ่มสิทธิ์ TV ไม่สำเร็จ: ${fails.join(" · ") || "ลองใหม่"}` }
-      );      return;
+      );
+      // เดิมเห็นแค่แถบข้อความเล็ก ๆ ใต้ฟอร์ม — เพิ่ม popup ให้เห็นชัดว่าให้สิทธิ์สำเร็จจริง
+      if (summ.length) setGrantSuccess({ username: userTv, items: summ, fails });
+      return;
     }
 
     // เส้นทางเดิม — บันทึกฐานข้อมูลตรงๆ
@@ -486,6 +490,24 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
         {busy ? <Loader2 className="animate-spin" size={14} /> : <CheckCircle2 size={14} />} บันทึกข้อมูล
       </button>
       {msg && <div className={`text-[11px] whitespace-pre-line ${msg.ok ? "text-emerald-600" : "text-rose-600"}`}>{msg.text}</div>}
+
+      {/* เดิมเห็นแค่แถบข้อความเล็ก ๆ ใต้ฟอร์ม ปนกับข้อความสถานะระหว่างทำงาน — เพิ่ม popup ยืนยันชัดๆ ว่าให้สิทธิ์สำเร็จ */}
+      <Dialog open={!!grantSuccess} title="เพิ่มสิทธิ์สำเร็จ" onClose={() => setGrantSuccess(null)}
+        footer={<Button variant="primary" onClick={() => setGrantSuccess(null)}>ตกลง</Button>}>
+        {grantSuccess && (
+          <div className="space-y-2">
+            <div className="font-semibold text-emerald-700">🎉 ให้สิทธิ์ {grantSuccess.username} แล้ว</div>
+            <ul className="text-sm text-slate-600 list-disc pl-5 space-y-0.5">
+              {grantSuccess.items.map((it) => <li key={it}>{it}</li>)}
+            </ul>
+            {grantSuccess.fails?.length > 0 && (
+              <div className="text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
+                บางสคริปต์ไม่สำเร็จ: {grantSuccess.fails.join(" · ")}
+              </div>
+            )}
+          </div>
+        )}
+      </Dialog>
     </div>
   );
 }
