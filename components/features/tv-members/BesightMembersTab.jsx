@@ -499,6 +499,9 @@ export default function BesightMembersTab({ active = true }) {
               <Select value={form.member_type} onChange={(e) => setForm((f) => ({ ...f, member_type: e.target.value }))}>
                 <option value="">— ไม่ระบุ —</option>
                 {MEMBER_TYPES.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+                {/* ค่าจริงที่บันทึกคือ free เหมือน "Free" เป๊ะ — แค่ให้เลือกลัดตอนเพิ่มสมาชิกใหม่
+                    ไม่ต้องนึกแปลว่า "ลูกค้าเก่า" ในระบบคือ Free (ไม่ใส่ในฟอร์มแก้ไข เพราะซ้ำกับ Free) */}
+                <option value="free">ลูกค้าเก่า</option>
               </Select>
             </Field>
             <Field label="ช่องทาง">

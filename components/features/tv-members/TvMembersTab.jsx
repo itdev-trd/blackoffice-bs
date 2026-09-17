@@ -24,11 +24,15 @@ const PLAN_TONE = {
   premium: { bg: "rgb(245 158 11 / .16)", fg: "#b45309" },
 };
 
-function MemberTypeSelect({ value, onChange }) {
+// isAdd = ฟอร์ม "เพิ่มสมาชิกใหม่" — เพิ่มตัวเลือก "ลูกค้าเก่า" ไว้เลือกลัด (ค่าที่บันทึกจริงคือ free
+// เหมือนกัน แค่ให้แอดมินไม่ต้องนึกว่า "ลูกค้าเก่า = Free") ไม่ใส่ในฟอร์มแก้ไข เพราะหลังบันทึกแล้ว
+// สถานะจริงมีแค่ new/free/premium — ไม่มีแนวคิด "เก่า/ใหม่" ให้เลือกซ้ำอีก
+function MemberTypeSelect({ value, onChange, isAdd = false }) {
   return (
     <select value={value} onChange={(e) => onChange(e.target.value)} className="w-full mt-1 rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white">
       <option value="">เลือกประเภทสมาชิก</option>
       {MEMBER_TYPES.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+      {isAdd && <option value="free">ลูกค้าเก่า</option>}
     </select>
   );
 }
@@ -758,7 +762,7 @@ export default function TvMembersTab({ active = true, embedded = false, onOpenCh
           </div>
           <div>
             <label className="text-xs text-slate-500">ประเภทสมาชิก <span className="text-slate-400">(ไม่บังคับ)</span></label>
-            <MemberTypeSelect value={memberType} onChange={setMemberType} />
+            <MemberTypeSelect value={memberType} onChange={setMemberType} isAdd />
           </div>
           <div>
             <label className="text-xs text-slate-500">ช่องทางที่ติดต่อ <span className="text-slate-400">(ไม่บังคับ)</span></label>
