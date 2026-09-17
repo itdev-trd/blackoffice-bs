@@ -243,8 +243,18 @@ export default function BesightMembersTab({ active = true }) {
     if (!form.username.trim()) { setFormErr("ต้องมี USER TradingView"); return; }
     if (!form.pine_id) { setFormErr("ต้องเลือก Indicator"); return; }
     setSaving(true); setFormErr("");
+    // เช็คว่ามี username นี้อยู่จริงบน TradingView ก่อนยิงให้สิทธิ์ — เดิมข้ามขั้นนี้ไปเลย จึงเจอ
+    // TradingView ตอบ 422 "User not found" ห้วน ๆ ตอน grant ทั้งที่รู้ได้ตั้งแต่ก่อนยิงจริง
+    const { data: vu, error: vue } = await supabase.functions.invoke("tradingview", { body: { action: "validate_user", username: form.username.trim(), brand_id: brandId } });
+    if (vue || !vu?.ok) { setSaving(false); setFormErr("เช็ค username ไม่สำเร็จ: " + (vu?.error || (vue ? "ลองใหม่" : ""))); return; }
+    if (!vu.exists) {
+      setSaving(false);
+      setFormErr(`ไม่พบ user "${form.username.trim()}" บน TradingView — ตรวจตัวสะกด/ตัวพิมพ์เล็กใหญ่อีกครั้ง`);
+      return;
+    }
+    const grantUname = vu.username || form.username.trim();
     const { data, error } = await supabase.functions.invoke("tradingview", { body: {
-      action: "grant", username: form.username.trim(), display_name: form.display_name.trim() || null,
+      action: "grant", username: grantUname, display_name: form.display_name.trim() || null,
       email: form.email.trim() || null, trade_id: form.trade_id.trim() || null,
       phone: form.phone.trim() || null, country: form.country.trim() || null, telegram: form.telegram.trim() || null,
       contact_channel: form.contact_channel || null, member_type: form.member_type || null, broker: form.broker || "XM",
@@ -257,7 +267,7 @@ export default function BesightMembersTab({ active = true }) {
       return;
     }
     setAddOpen(false);
-    setGrantSuccess({ username: data.username || form.username.trim(), script: scriptName(form.pine_id) });
+    setGrantSuccess({ username: data.username || grantUname, script: scriptName(form.pine_id) });
     loadMembers();
   }
 

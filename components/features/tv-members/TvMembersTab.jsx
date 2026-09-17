@@ -370,8 +370,21 @@ export default function TvMembersTab({ active = true, embedded = false, onOpenCh
       return;
     }
     setVerifyFail(null);
-    // 2) ผ่านแล้ว → ให้สิทธิ์ทีละสคริปต์ (แต่ละตัวใช้วันหมดอายุของตัวเอง)
-    const summ = []; const fails = []; let realUser = uname.trim();
+    // 2) เช็คว่ามี username นี้อยู่จริงบน TradingView ก่อน — เดิมข้ามขั้นนี้ไปเลย
+    // จึงยิง grant ตรงๆ แล้วเจอ TradingView ตอบ 422 "User not found" ห้วน ๆ ทั้งที่รู้ได้ตั้งแต่ก่อนยิง
+    setMsg("กำลังเช็ค TradingView username...");
+    const { data: vu, error: vue } = await supabase.functions.invoke("tradingview", { body: { action: "validate_user", username: uname.trim(), brand_id: brandSel } });
+    if (vue || !vu?.ok) { setGranting(false); setMsg("✗ เช็ค username ไม่สำเร็จ: " + (vu?.error || (vue ? "ลองใหม่" : ""))); return; }
+    if (!vu.exists) {
+      setGranting(false);
+      setMsg(`✗ ไม่พบ user "${uname.trim()}" บน TradingView — ตรวจตัวสะกด/ตัวพิมพ์เล็กใหญ่อีกครั้ง (ให้ลูกค้ายืนยันชื่อผู้ใช้ที่ใช้ล็อกอิน TradingView จริง)`);
+      return;
+    }
+    // TradingView อาจสะกดต่างจากที่พิมพ์เล็กน้อย (ตัวพิมพ์ใหญ่/เล็ก) — ใช้ตัวสะกดจริงต่อจากนี้
+    if (vu.username && vu.username !== uname) setUname(vu.username);
+    // 3) ผ่านแล้ว → ให้สิทธิ์ทีละสคริปต์ (แต่ละตัวใช้วันหมดอายุของตัวเอง)
+    const grantUname = vu.username || uname.trim();
+    const summ = []; const fails = []; let realUser = grantUname;
     for (const pid of pineIds) {
       const d = getDur(pid);
       // โหมดปฏิทิน = ส่งวันหมดอายุ (สิ้นวันที่เลือก เวลาไทย) ตรงๆ ไม่แปลงเป็นจำนวนวัน (normalize พ.ศ.→ค.ศ.)
@@ -380,7 +393,7 @@ export default function TvMembersTab({ active = true, embedded = false, onOpenCh
       const name = scripts.find((s) => s.pine_id === pid)?.name || pid;
       setMsg(`✓ ไอดีเทรดผ่าน — กำลังเพิ่ม "${name}"...`);
       const { data, error } = await supabase.functions.invoke("tradingview", { body: {
-        action: "grant", username: uname.trim(), display_name: dname.trim() || null, email: demail.trim() || null,
+        action: "grant", username: grantUname, display_name: dname.trim() || null, email: demail.trim() || null,
         pine_ids: [pid], lifetime: d.mode === "lifetime", days: effDays, expiration: expIso, trade_id: tradeId.trim(),
         contact_channel: channel || null, member_type: memberType || null,
       } });
