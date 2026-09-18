@@ -451,6 +451,9 @@ html:not(.dark) .chat-bubble-me * { color: #FFFFFF; }
   .workspace-shell > aside { height: calc(100dvh - var(--update-banner-h)); top: var(--update-banner-h); }
 }
 @media (max-width: 639px) {
+  /* กล่องเด้งบนจอเล็กเป็นชีทติดขอบล่าง — ต้องเว้นแถบโฮมของ iPhone ไม่งั้นปุ่มแถวล่างสุด
+     (บันทึก/ยืนยัน) ไปอยู่ใต้ขีดโฮมจนกดไม่โดน โดยเฉพาะตอนเปิดจากไอคอนหน้าจอโฮม */
+  .ds-dialog { padding-bottom: env(safe-area-inset-bottom, 0px); }
   .ds-stat { padding: 12px; gap: 10px; }
   .ds-stat .ds-figure { font-size: 24px; }
   .ds-section-actions { flex-wrap: wrap; }
@@ -794,6 +797,12 @@ html.keyboard-open, html.keyboard-open body { overflow: hidden; overscroll-behav
    PWA เต็มจอ — เว้น safe area กันเนื้อหาชนแถบสถานะ/ติ่งจอ
    ===================================================================== */
 @media (display-mode: standalone), (display-mode: fullscreen) {
+  /* โหมดแอปหน้าจอโฮมไม่มีแถบเบราว์เซอร์ให้ลากรีเฟรช — ปล่อยให้ลากเกินขอบได้จะกลายเป็น
+     จออันเดอร์สีขาวโผล่ใต้เนื้อหา/แถบบนกระตุก ปิดการเด้งเกินขอบไปเลย */
+  html, body { overscroll-behavior-y: none; }
+  /* กดค้างบนปุ่ม/เมนูในโหมดแอปแล้วเด้งเมนู "คัดลอก/แชร์" ของ iOS ขึ้นมาทับ — ปิดไปเลย
+     (ข้อความปกติยังเลือก/คัดลอกได้ตามเดิม ปิดเฉพาะปุ่มกับลิงก์เมนู) */
+  button, a.nova-nav-link, .ds-btn { -webkit-touch-callout: none; }
   .app-header { padding-top: env(safe-area-inset-top); }
   /* ไม่ใส่ .chat-shell ที่นี่ — มันเรนเดอร์อยู่ใต้ .app-header เสมอ (ดู ChatInboxTab)
      .app-header กันชนแถบสถานะ/ติ่งจอไปแล้วชั้นหนึ่ง ถ้าใส่ซ้ำที่นี่อีกจะกลายเป็นเว้นสองชั้น

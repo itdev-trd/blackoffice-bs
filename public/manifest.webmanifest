@@ -1,15 +1,26 @@
 {
+  "id": "/",
   "name": "Besight",
   "short_name": "Besight",
   "description": "ระบบยิงโฆษณาอัตโนมัติ + ตอบแชทลูกค้า",
   "start_url": "/?src=pwa",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "orientation": "portrait-primary",
-  "background_color": "#F6F7F9",
-  "theme_color": "#0D1117",
+  "background_color": "#F4F7FB",
+  "theme_color": "#F4F7FB",
   "lang": "th",
+  "dir": "ltr",
   "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
     { "src": "/besight-logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ],
+  "shortcuts": [
+    { "name": "ตอบแชท", "short_name": "แชท", "url": "/inbox?src=pwa", "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "ภาพรวม", "short_name": "ภาพรวม", "url": "/overview?src=pwa", "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }] },
+    { "name": "จัดการลูกค้า", "short_name": "ลูกค้า", "url": "/customerdb?src=pwa", "icons": [{ "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" }] }
   ]
 }

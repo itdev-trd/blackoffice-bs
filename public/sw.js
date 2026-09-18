@@ -1,8 +1,8 @@
 // service worker — PWA + Web Push
 // เวอร์ชันนี้ตั้งใจให้ "เบา" ที่สุด เพราะแอปเป็น SPA ที่พึ่ง realtime/ข้อมูลสด
 // จึงใช้กลยุทธ์ network-first สำหรับ navigation (ไม่ค้าง cache เก่า) + cache แค่ shell ขั้นต่ำไว้เปิดตอนออฟไลน์
-const CACHE = "aiads-shell-v3";
-const SHELL = ["/", "/manifest.webmanifest", "/icon-192.png", "/icon-512.png"];
+const CACHE = "aiads-shell-v4";
+const SHELL = ["/", "/manifest.webmanifest", "/icon-192.png", "/icon-512.png", "/icon-maskable-512.png", "/apple-touch-icon.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).catch(() => {}));
