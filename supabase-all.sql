@@ -3815,6 +3815,220 @@ revoke all on function public.crm_deleted_tv_page(timestamptz, timestamptz, bigi
 grant execute on function public.crm_tradingview_page(timestamptz, timestamptz, bigint, int, text, text, text, bigint, text, bigint) to service_role;
 grant execute on function public.crm_deleted_tv_page(timestamptz, timestamptz, bigint, int) to service_role;
 
+-- ======================================================================
+-- FILE: supabase/migrations/20260914032000_tv_indicator_members.sql
+-- ======================================================================
+
+-- หน้า "จัดการสมาชิก Indicator ของ <แบรนด์>" — ตารางสมาชิกแบบละเอียดต่อแบรนด์เดียว (เช่น BeSight)
+-- เพิ่มคอลัมน์ที่หน้าจอนี้ต้องใช้แต่ tv_access ยังไม่มี + โควตา Lot ต่อเดือนของแบรนด์ + ตาราง cache ยอด Lot จริงจาก broker
+
+alter table public.tv_access add column if not exists phone text;
+alter table public.tv_access add column if not exists country text;
+alter table public.tv_access add column if not exists telegram text;
+comment on column public.tv_access.phone is 'เบอร์โทรลูกค้า — กรอกเองตอนเพิ่ม/แก้ไขสมาชิก (tv_access ไม่ได้ join กับ chat_customers)';
+comment on column public.tv_access.country is 'ประเทศลูกค้า — กรอกเอง เหมือน phone';
+comment on column public.tv_access.telegram is 'Telegram handle/ID ของลูกค้า — แยกจาก contact_channel ซึ่งเป็นแค่ช่องทางที่ติดต่อเข้ามา';
+
+-- โควตา Lot ที่สมาชิกต้องเทรดให้ถึงต่อเดือน ตั้งค่าได้ต่อแบรนด์ (การ์ด "Lot ที่ต้องจ่าย/เดือน")
+alter table public.tv_brands add column if not exists lot_quota_per_month numeric not null default 3;
+comment on column public.tv_brands.lot_quota_per_month is 'โควตา lot ต่อเดือนที่สมาชิกต้องเทรดให้ถึง เพื่อ "ผ่านเกณฑ์" — แก้ได้จากหน้าจัดการสมาชิก';
+
+-- แคชยอด lot จริงที่ดึงจาก broker (api.trdapi.com/webhook/check-lot) ต่อ trade_id ต่อช่วงเดือน
+-- ไม่ดึงสดทุกครั้งที่เปิดหน้า เพราะ API คืนยอดของทุกบัญชีใต้ IB มาทีเดียว (พารามิเตอร์ tradeid ไม่กรอง)
+-- แอดมินกด "ตรวจ Lot ทุกคน" เพื่อรีเฟรชค่าที่ตารางนี้แทน
+create table if not exists public.tv_lot_usage (
+  id bigint generated always as identity primary key,
+  trade_id text not null,
+  period_start date not null,
+  period_end date not null,
+  lots numeric not null default 0,
+  campaign_name text,
+  fetched_at timestamptz not null default now(),
+  unique (trade_id, period_start, period_end)
+);
+comment on table public.tv_lot_usage is 'แคชยอด lot จริงต่อ trade_id ต่อช่วงเดือน ดึงจาก broker ผ่าน edge function tradingview action=refresh_lots';
+
+alter table public.tv_lot_usage enable row level security;
+drop policy if exists "tv_lot_usage read" on public.tv_lot_usage;
+create policy "tv_lot_usage read" on public.tv_lot_usage for select to authenticated using (public.app_has_tab('tv_members'));
+-- เขียนได้เฉพาะ service role (edge function เท่านั้น) — ไม่มี policy insert/update/delete ให้ authenticated
+
+create index if not exists tv_lot_usage_period_idx on public.tv_lot_usage (period_start, period_end);
+
+-- ======================================================================
+-- FILE: supabase/migrations/20260914040000_crm_api_tradingview_contact_fields.sql
+-- ======================================================================
+
+-- เพิ่ม phone/country/telegram/แหล่งที่มา (member_type) ให้ CRM API /tradingview
+-- คอลัมน์เหล่านี้เพิ่งเพิ่มใน tv_access (migration tv_indicator_members) แต่ยังไม่เคยปล่อยออก API
+-- ต้อง drop ก่อน create เพราะเปลี่ยน RETURNS TABLE (เพิ่มคอลัมน์) ไม่ใช่แค่เปลี่ยน body
+
+drop function if exists public.crm_tradingview_page(timestamptz, timestamptz, bigint, int, text, text, text, bigint, text, bigint);
+
+create or replace function public.crm_tradingview_page(
+  p_since timestamptz default null,
+  p_after_at timestamptz default null,
+  p_after_id bigint default null,
+  p_limit int default 200,
+  p_username text default null,
+  p_trade_id text default null,
+  p_pine_id text default null,
+  p_brand_id bigint default null,
+  p_status text default null,
+  p_id bigint default null
+)
+returns table (
+  id bigint,
+  username text,
+  display_name text,
+  email text,
+  phone text,
+  country text,
+  telegram text,
+  trade_id text,
+  pine_id text,
+  indicator_name text,
+  script_key text,
+  brand_id bigint,
+  brand_name text,
+  lot text,
+  status text,
+  membership_type text,
+  member_type text,
+  channel text,
+  contact_channel text,
+  granted_at timestamptz,
+  last_granted_at timestamptz,
+  tv_granted_at timestamptz,
+  expiration timestamptz,
+  tv_expiration timestamptz,
+  tv_access_verified boolean,
+  tv_verified_at timestamptz,
+  created_at timestamptz,
+  updated_at timestamptz
+)
+language sql
+stable
+security definer
+set search_path to 'public'
+as $$
+  select
+    a.id, a.username, a.display_name, a.email, a.phone, a.country, a.telegram, a.trade_id, a.pine_id,
+    s.name, s.script_key, a.brand_id, b.name,
+    a.lot, a.status, a.membership_type, a.member_type, a.channel, a.contact_channel,
+    a.granted_at, a.last_granted_at, a.tv_granted_at,
+    a.expiration, a.tv_expiration, a.tv_access_verified, a.tv_verified_at,
+    a.created_at, a.updated_at
+  from public.tv_access a
+  left join public.tv_scripts s on s.pine_id = a.pine_id
+  left join public.tv_brands b on b.id = a.brand_id
+  where
+    case
+      when p_id is not null then a.id = p_id
+      else
+        (p_since is null or a.updated_at >= p_since)
+        and (p_after_at is null or (a.updated_at, a.id) > (p_after_at, p_after_id))
+        and (p_username is null or lower(a.username) = lower(p_username))
+        and (p_trade_id is null or a.trade_id = p_trade_id)
+        and (p_pine_id is null or a.pine_id = p_pine_id)
+        and (p_brand_id is null or a.brand_id = p_brand_id)
+        and (p_status is null or a.status = p_status)
+    end
+  order by a.updated_at asc, a.id asc
+  limit case when p_id is not null then 1 else greatest(1, least(coalesce(p_limit, 200), 1000)) + 1 end;
+$$;
+
+revoke all on function public.crm_tradingview_page(timestamptz, timestamptz, bigint, int, text, text, text, bigint, text, bigint) from public;
+grant execute on function public.crm_tradingview_page(timestamptz, timestamptz, bigint, int, text, text, text, bigint, text, bigint) to service_role;
+
+-- ======================================================================
+-- FILE: supabase/migrations/20260915100000_chat_customers_broker.sql
+-- ======================================================================
+
+-- เพิ่มป้ายกำกับ broker ให้ลูกค้าแต่ละคน (XM เป็นค่าเริ่มต้น/หลัก, Exness เป็นตัวเลือกรอง)
+-- แค่ป้ายกำกับที่แอดมินเลือกเองในหน้าตอบแชท ไม่ได้เช็คจริงกับฝั่ง broker (ระบบเช็คไอดีเทรดตอนนี้
+-- ผูกกับ XM เท่านั้น — ยังไม่มี endpoint เช็คของ Exness)
+alter table public.chat_customers
+  add column if not exists broker text not null default 'XM';
+
+alter table public.chat_customers
+  drop constraint if exists chat_customers_broker_check;
+alter table public.chat_customers
+  add constraint chat_customers_broker_check check (broker in ('XM', 'Exness'));
+
+comment on column public.chat_customers.broker is 'broker ที่แอดมินระบุเอง (XM หลัก / Exness รอง) — ป้ายกำกับเท่านั้น ไม่ได้เช็คจริง';
+
+-- ======================================================================
+-- FILE: supabase/migrations/20260916090000_tv_access_broker.sql
+-- ======================================================================
+
+-- broker ของบัญชีเทรด (XM หลัก / Exness รอง) — ป้ายกำกับที่แอดมินเลือกเอง เหมือน chat_customers.broker
+-- ค่าเก่าทั้งหมด (ก่อนมีคอลัมน์นี้) ถือว่าเป็น XM เพราะระบบผูกกับ XM มาตลอด
+alter table public.tv_access
+  add column if not exists broker text not null default 'XM';
+
+alter table public.tv_access
+  drop constraint if exists tv_access_broker_check;
+alter table public.tv_access
+  add constraint tv_access_broker_check check (broker in ('XM', 'Exness'));
+
+comment on column public.tv_access.broker is 'broker ที่แอดมินระบุเอง (XM หลัก / Exness รอง) — ป้ายกำกับเท่านั้น ไม่ได้เช็คจริง';
+
+-- ======================================================================
+-- FILE: supabase/migrations/20260916100000_tv_access_plan_tiers.sql
+-- ======================================================================
+
+-- plan ของสมาชิก Indicator (เดิมช่อง member_type เก็บ free/paid/promotion ซึ่งไม่ได้ใช้จริง)
+--   new     = ลูกค้าใหม่ อยู่ในช่วงทดลอง 1 เดือน
+--   free    = ผ่านช่วงทดลองแล้ว ต่ออายุได้ถ้าเทรดครบโควตา
+--   premium = เทรดครบโควตาติดกัน 3 รอบ (ตกโควตาเมื่อไหร่ลดกลับเป็น free)
+alter table public.tv_access drop constraint if exists tv_access_member_type_check;
+
+update public.tv_access
+set member_type = 'new'
+where member_type is null or member_type in ('paid', 'promotion');
+
+alter table public.tv_access
+  add constraint tv_access_member_type_check check (member_type in ('new', 'free', 'premium'));
+
+alter table public.tv_access
+  alter column member_type set default 'new';
+
+-- จำนวนรอบที่เทรดครบโควตาติดต่อกัน — ใช้ตัดสินเลื่อนขั้นเป็น premium (ครบ 3 รอบ)
+alter table public.tv_access
+  add column if not exists qualify_streak integer not null default 0;
+
+comment on column public.tv_access.member_type is 'plan: new (ทดลอง 1 เดือน) / free (ผ่านทดลองแล้ว) / premium (ครบโควตาติดกัน 3 รอบ)';
+comment on column public.tv_access.qualify_streak is 'จำนวนรอบติดต่อกันที่เทรดครบโควตา — ครบ 3 เลื่อนเป็น premium, ตกโควตารีเซ็ตเป็น 0';
+
+-- ======================================================================
+-- FILE: supabase/migrations/20260918090000_tv_lot_usage_excluded.sql
+-- ======================================================================
+
+-- lot ที่ broker ไม่นับให้ (สัญลักษณ์ไม่เข้าเงื่อนไข rebate) — ดึงจาก webhook check-lot-symbol-not-in-list
+-- เก็บไว้เพื่ออธิบายส่วนต่าง: ยอดในแอป BeSight/MT5 ของลูกค้า = lots + excluded_lots
+-- ส่วน lots คือก้อนที่ใช้นับโควตา (check-lot หักก้อนที่ไม่นับออกให้แล้ว)
+alter table public.tv_lot_usage add column if not exists excluded_lots numeric not null default 0;
+comment on column public.tv_lot_usage.excluded_lots is 'lot ที่ไม่ถูกนับเพราะสัญลักษณ์ไม่เข้าเงื่อนไข (check-lot-symbol-not-in-list)';
+
+-- ======================================================================
+-- FILE: supabase/migrations/20260918120000_tv_access_renew.sql
+-- ======================================================================
+
+-- ต่ออายุสิทธิ์: แอดมินกดต่อเองจากหน้าแชทได้ และสถานะต้องขึ้นว่า "ต่ออายุ" ไม่ใช่ "ลูกค้าใหม่"
+--   member_type = 'renew' → ป้าย Plan โชว์ "ต่ออายุ"
+--   renewed_at / renew_count → รู้ว่าต่อครั้งล่าสุดเมื่อไหร่ และต่อมาแล้วกี่ครั้ง
+alter table public.tv_access drop constraint if exists tv_access_member_type_check;
+alter table public.tv_access
+  add constraint tv_access_member_type_check check (member_type in ('new', 'free', 'premium', 'renew'));
+
+alter table public.tv_access add column if not exists renewed_at timestamptz;
+alter table public.tv_access add column if not exists renew_count integer not null default 0;
+
+comment on column public.tv_access.member_type is 'plan: new (ทดลอง 1 เดือน) / free (ผ่านทดลองแล้ว) / premium (ครบโควตาติดกัน 3 รอบ) / renew (ต่ออายุแล้ว)';
+comment on column public.tv_access.renewed_at is 'เวลาที่ต่ออายุครั้งล่าสุด (แอดมินกดปุ่มต่ออายุ)';
+comment on column public.tv_access.renew_count is 'จำนวนครั้งที่ต่ออายุ';
+
 -- ============================================================
 -- UTILITY / DIAGNOSTIC / MAINTENANCE SCRIPTS (run ad hoc, not part of the migration order)
 -- ============================================================

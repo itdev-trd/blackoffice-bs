@@ -1,17 +1,21 @@
 "use client";
 
 // จัดการสมาชิก Indicator ของแบรนด์เดียว (ค่าเริ่มต้น: BeSight) — ต่างจาก TvMembersTab.jsx ตรงที่
-// หน้านี้โฟกัสแบรนด์เดียว โชว์ข้อมูลติดต่อ (เบอร์/ประเทศ/Telegram) และยอด Lot ที่เทรดจริงเทียบโควตา/เดือน
+// หน้านี้โฟกัสแบรนด์เดียว โชว์ข้อมูลติดต่อ (เบอร์/ประเทศ/Telegram) และยอด Lot ที่เทรดจริงเทียบโควตาต่อรอบสิทธิ์
 //
 // "Lots" ดึงจาก broker (XM) ผ่าน edge function action "refresh_lots" (ปุ่ม "ตรวจ Lot ทุกคน")
-// แล้ว cache ไว้ในตาราง tv_lot_usage — ไม่ดึงสดทุกครั้งที่เปิดหน้า เพราะ API คืนยอดทุกบัญชีมาทีเดียว
-// ไม่กรองตาม trade_id (ยืนยันจากการทดสอบจริง) หน้านี้จึงอ่านค่าที่แคชไว้แทน จนกว่าจะกดรีเฟรช
+// แล้ว cache ไว้ในตาราง tv_lot_usage เพราะ API คืนยอดทุกบัญชีมาทีเดียว ไม่ต้องยิงรายคน
+// ช่วงที่นับคือรอบสิทธิ์ของแต่ละคน (วันเริ่มต้น → วันหมดอายุ) ไม่ใช่เดือนปฏิทิน
+// แต่ยอดของรอบที่ยังไม่หมดอายุเดินทุกวัน แคชค้างข้ามวันก็ไม่ตรงกับที่ลูกค้าเห็นในแอป BeSight แล้ว
+// (เคสจริง: แคช 0.60 ตอนดึกวันที่ 17 ก.ย. ขณะที่ broker เดินไปถึง 0.74) หน้านี้จึงตรวจสดให้เอง
+// เมื่อค่าที่แคชเก่าเกิน LOT_STALE_MS และโชว์เวลาที่ตรวจล่าสุดไว้ข้างปุ่มเสมอ
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { hasFullData } from "@/lib/constants/roles";
 import { readFunctionErrorMessage } from "@/lib/utils/errors";
 import { logActivity } from "@/lib/utils/activity";
+import { beToCe } from "@/lib/utils/date";
 import { TradeIdChecker } from "@/components/features/customerdb/CustomerDatabaseTab";
 import {
   SectionTitle, StatCard, Button, Card, Dialog, SearchInput, FilterPill, Field, Input, Select, EmptyState,
@@ -24,10 +28,11 @@ import {
 //   new     ทดลองใช้ 1 เดือน · ครบโควตา = ต่ออายุ + ขึ้นเป็น free
 //   free    ผ่านทดลองแล้ว · ครบโควตาติดกัน 3 รอบ = ขึ้นเป็น premium
 //   premium ตกโควตาเมื่อไหร่ = ไม่ต่ออายุ และลดกลับเป็น free
-const MEMBER_TYPES = [["new", "ลูกค้าใหม่"], ["free", "Free"], ["premium", "Premium"]];
+const MEMBER_TYPES = [["new", "ลูกค้าใหม่"], ["renew", "ต่ออายุ"], ["free", "Free"], ["premium", "Premium"]];
 const memberTypeLabel = (v) => MEMBER_TYPES.find(([key]) => key === v)?.[1] || "—";
 const PLAN_TONE = {
   new: "border-sky-200 bg-sky-50 text-sky-700",
+  renew: "border-emerald-200 bg-emerald-50 text-emerald-700",
   free: "border-slate-200 bg-slate-50 text-slate-600",
   premium: "border-amber-200 bg-amber-50 text-amber-700",
 };
@@ -67,16 +72,81 @@ function earliestOf(indicatorRows, field) {
   return Number.isFinite(min) ? new Date(min).toISOString() : null;
 }
 
-// เดือนปัจจุบัน (เวลาไทย) เป็นช่วงเริ่มต้นของการเช็ค Lot — ตรงกับที่แอดมินคุ้นเคย ("ปิดยอดรายเดือน")
-function currentMonthRange() {
-  const now = new Date(Date.now() + 7 * 3600 * 1000);
-  const y = now.getUTCFullYear(), m = now.getUTCMonth();
-  const start = new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10);
-  const end = new Date(Date.UTC(y, m + 1, 0)).toISOString().slice(0, 10);
+// วันที่ตามเวลาไทย — broker คิดยอดเป็นวันปฏิทิน ไม่ใช่ UTC
+const thDay = (ts) => {
+  if (!ts) return "";
+  const t = new Date(ts).getTime();
+  return Number.isFinite(t) ? new Date(t + 7 * 3600 * 1000).toISOString().slice(0, 10) : "";
+};
+const thNow = () => new Date(Date.now() + 7 * 3600 * 1000);
+const thMonthStart = () => { const n = thNow(); return new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), 1)).toISOString().slice(0, 10); };
+const thMonthEnd = () => { const n = thNow(); return new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth() + 1, 0)).toISOString().slice(0, 10); };
+const dayLabel = (d) => (d ? new Date(`${d}T00:00:00+07:00`).toLocaleDateString("th-TH", { day: "2-digit", month: "2-digit", year: "2-digit" }) : "—");
+
+// บวก/ลบเดือนแบบหนีบวันสิ้นเดือน (31 ม.ค. +1 เดือน = 28 ก.พ.)
+const addMonthsDay = (ymd, k) => {
+  const [y, m, d] = ymd.split("-").map(Number);
+  const t = new Date(Date.UTC(y, m - 1 + k, 1));
+  const lastDay = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), Math.min(d, lastDay))).toISOString().slice(0, 10);
+};
+
+// รอบที่ใช้นับ Lot = "รอบเดือน" ของสมาชิกคนนั้น ไม่ใช่เดือนปฏิทิน
+// ได้สิทธิ์ 10 ก.พ. → นับ 10 ก.พ.–10 มี.ค. · ต่ออายุถึง 10 เม.ย. → นับ 10 มี.ค.–10 เม.ย.
+// (ต้องตรงกับ lotCycleOf ใน edge function เป๊ะ ๆ ไม่งั้นอ่านแคชไม่เจอ)
+function lotCycleOf(grantDay, expiryDay, today) {
+  let start, end;
+  if (!expiryDay) {                                  // ตลอดชีพ — ยึดวันที่ได้สิทธิ์เป็นหมุด
+    start = grantDay;
+    for (let i = 0; i < 240 && addMonthsDay(start, 1) <= today; i++) start = addMonthsDay(start, 1);
+    end = addMonthsDay(start, 1);
+  } else if (expiryDay <= today) {                   // หมดอายุแล้ว — รอบสุดท้ายก่อนหมดอายุ
+    start = addMonthsDay(expiryDay, -1);
+    end = expiryDay;
+  } else {                                           // ถอยจากวันหมดอายุจนได้รอบที่ครอบวันนี้
+    let i = 1;
+    start = addMonthsDay(expiryDay, -1);
+    while (start > today && i < 240) { i++; start = addMonthsDay(expiryDay, -i); }
+    end = addMonthsDay(expiryDay, -(i - 1));
+  }
+  if (start < grantDay) start = grantDay;
+  if (end <= start) end = addMonthsDay(start, 1);
   return { start, end };
 }
 
+// ช่วงที่แอดมินเลือกให้นับ — ค่าเริ่มต้นคือรอบเดือนของแต่ละคน แต่เลือกช่วงเดียวกันทั้งตารางได้
+const LOT_MODES = [["cycle", "รอบเดือนของแต่ละคน"], ["this_month", "เดือนนี้"], ["last_month", "เดือนก่อน"], ["custom", "เลือกวันเอง"]];
+function fixedLotRange(mode, custom) {
+  const n = thNow();
+  const y = n.getUTCFullYear(), m = n.getUTCMonth();
+  const monthRange = (k) => ({
+    start: new Date(Date.UTC(y, m + k, 1)).toISOString().slice(0, 10),
+    end: new Date(Date.UTC(y, m + k + 1, 0)).toISOString().slice(0, 10),
+  });
+  if (mode === "this_month") return monthRange(0);
+  if (mode === "last_month") return monthRange(-1);
+  if (mode === "custom" && custom?.start && custom?.end && custom.end >= custom.start) return { start: custom.start, end: custom.end };
+  return null;
+}
+function lotPeriodOf(indicatorRows, mode = "cycle", custom = null) {
+  const fixed = fixedLotRange(mode, custom);
+  if (fixed) return fixed;
+  let grant = "", expiry = null, lifetime = false;
+  for (const r of indicatorRows) {
+    const g = thDay(r.granted_at) || thDay(r.created_at);
+    if (g && (!grant || g < grant)) grant = g;
+    const e = thDay(r.expiration);
+    if (!e) lifetime = true;                          // มีใบตลอดชีพ = ถือว่าตลอดชีพ
+    else if (!expiry || e > expiry) expiry = e;
+  }
+  if (!grant) grant = thMonthStart();
+  return lotCycleOf(grant, lifetime ? null : expiry, thDay(new Date()));
+}
+const lotKeyOf = (m) => `${String(m.trade_id || "").trim()}|${m.lot_period.start}|${m.lot_period.end}`;
+
 const PAGE_SIZE = 10;
+// ยอด Lot ที่แคชไว้เกินเท่านี้ถือว่าเก่า — ตรวจสดให้ใหม่ตอนเปิดหน้า
+const LOT_STALE_MS = 30 * 60 * 1000;
 const emptyForm = { username: "", display_name: "", email: "", trade_id: "", phone: "", country: "", telegram: "", contact_channel: "", member_type: "new", broker: "XM", pine_id: "", days: 30, lifetime: false };
 
 export default function BesightMembersTab({ active = true }) {
@@ -84,7 +154,10 @@ export default function BesightMembersTab({ active = true }) {
   const [brandId, setBrandId] = useState(null);
   const [scripts, setScripts] = useState([]);
   const [rows, setRows] = useState([]);
-  const [lotUsage, setLotUsage] = useState(new Map()); // trade_id -> { lots, campaign_name, fetched_at }
+  const [lotUsage, setLotUsage] = useState(new Map()); // trade_id -> { lots, excluded_lots, campaign_name, fetched_at }
+  const [lotCacheReady, setLotCacheReady] = useState(false);
+  const [lotMode, setLotMode] = useState("cycle");          // ช่วงที่แอดมินเลือกให้นับ Lot
+  const [lotCustom, setLotCustom] = useState({ start: "", end: "" });
   const [loading, setLoading] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [q, setQ] = useState("");
@@ -106,7 +179,6 @@ export default function BesightMembersTab({ active = true }) {
   const [detailMember, setDetailMember] = useState(null);   // สมาชิกที่กำลังดูรายละเอียด (ครบทุกอินดิเคเตอร์)
   const [lotHistory, setLotHistory] = useState(null);       // { loading } | { months: [...] } | { error }
   const [grantSuccess, setGrantSuccess] = useState(null);   // { username, script } — popup ยืนยันตอนเพิ่มสมาชิกสำเร็จ
-  const { start: periodStart, end: periodEnd } = useMemo(() => currentMonthRange(), []);
 
   const brand = brands.find((b) => b.id === brandId) || null;
 
@@ -130,16 +202,51 @@ export default function BesightMembersTab({ active = true }) {
 
   async function loadMembers() {
     if (!brandId) { setRows([]); setScripts([]); return; }
-    const [{ data: sc }, { data: ac }, { data: lu }] = await Promise.all([
+    // tv_access ต้องแบ่งหน้าเอง — ทะลุ 1000 แถวแล้วสมาชิกท้าย ๆ จะหายเงียบ ๆ (ตอนนี้ 884 แถว)
+    const [{ data: sc }, ac] = await Promise.all([
       supabase.from("tv_scripts").select("pine_id, name").eq("brand_id", brandId).order("name"),
-      supabase.from("tv_access").select("*").eq("brand_id", brandId).order("granted_at", { ascending: false }),
-      supabase.from("tv_lot_usage").select("trade_id, lots, campaign_name, fetched_at").eq("period_start", periodStart).eq("period_end", periodEnd),
+      (async () => {
+        const all = [];
+        for (let from = 0; ; from += 1000) {
+          const { data, error } = await supabase.from("tv_access").select("*").eq("brand_id", brandId)
+            .order("granted_at", { ascending: false }).order("id").range(from, from + 999);
+          if (error || !data?.length) break;
+          all.push(...data);
+          if (data.length < 1000) break;
+        }
+        return all;
+      })(),
     ]);
     setScripts(sc || []);
     setRows(ac || []);
-    setLotUsage(new Map((lu || []).map((r) => [String(r.trade_id), r])));
+    // แคช Lot คนละช่วงกันแล้ว (รอบสิทธิ์ของใครของมัน) จึงดึงแถวของรอบที่ยังเกี่ยวข้องมาจับคู่เอง
+    // ไม่กรองด้วย .in(trade_id) เพราะสมาชิกหลายร้อยคนจะทำให้ URL ยาวเกิน — กรองด้วยวันสิ้นสุดรอบพอ
+    // และต้องแบ่งหน้าเอง เพราะ PostgREST คืนสูงสุด 1000 แถวต่อครั้ง (สมาชิก × รอบย้อนหลังเกินได้ง่าย)
+    let earliest = fixedLotRange(lotMode, lotCustom)?.start || thMonthStart();
+    for (const r of ac || []) {
+      const s0 = thDay(r.granted_at) || thDay(r.created_at);
+      if (s0 && s0 < earliest) earliest = s0;
+    }
+    const lu = [];
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await supabase.from("tv_lot_usage")
+        .select("trade_id, period_start, period_end, lots, excluded_lots, campaign_name, fetched_at")
+        .gte("period_end", earliest).order("id").range(from, from + 999);
+      if (error || !data?.length) break;
+      lu.push(...data);
+      if (data.length < 1000) break;
+    }
+    setLotUsage(new Map(lu.map((r) => [`${r.trade_id}|${r.period_start}|${r.period_end}`, r])));
+    setLotCacheReady(true);
   }
-  useEffect(() => { loadMembers(); setPage(1); /* eslint-disable-next-line */ }, [brandId]);
+  useEffect(() => { setLotCacheReady(false); loadMembers(); setPage(1); /* eslint-disable-next-line */ }, [brandId]);
+  // เปลี่ยนช่วงที่เลือกให้นับ = อ่านแคชของช่วงใหม่ (ถ้าไม่มีก็จะตรวจสดให้เองด้านล่าง)
+  useEffect(() => {
+    if (!brandId) return;
+    setLotCacheReady(false);
+    loadMembers();
+    // eslint-disable-next-line
+  }, [lotMode, lotCustom.start, lotCustom.end]);
   useEffect(() => {
     if (!brandId) return;
     const ch = supabase.channel(`besight-members-${brandId}`)
@@ -170,7 +277,9 @@ export default function BesightMembersTab({ active = true }) {
 
   const quota = Number(brand?.lot_quota_per_month) || 0;
   const scriptName = (pineId) => scripts.find((s) => s.pine_id === pineId)?.name || pineId;
-  const lotsOf = (tradeId) => (tradeId ? lotUsage.get(String(tradeId))?.lots ?? 0 : 0);
+  const lotInfoOf = (m) => (m?.trade_id ? lotUsage.get(lotKeyOf(m)) || null : null);
+  const lotsOf = (m) => Number(lotInfoOf(m)?.lots ?? 0) || 0;
+  const excludedLotsOf = (m) => Number(lotInfoOf(m)?.excluded_lots ?? 0) || 0;
 
   // จัดกลุ่ม tv_access ทีละแถว (หนึ่งแถวต่ออินดิเคเตอร์) ให้เหลือหนึ่งแถวต่อสมาชิกจริง
   const members = useMemo(() => {
@@ -183,7 +292,7 @@ export default function BesightMembersTab({ active = true }) {
     return [...byUsername.entries()].map(([key, indicators]) => {
       const primary = pickPrimaryIndicator(indicators);
       return {
-        key, primary, indicators,
+        key, primary, indicators, lot_period: lotPeriodOf(indicators, lotMode, lotCustom),
         username: primary.username, display_name: primary.display_name, email: primary.email,
         phone: primary.phone, country: primary.country, telegram: primary.telegram,
         trade_id: primary.trade_id, member_type: primary.member_type, contact_channel: primary.contact_channel,
@@ -192,7 +301,7 @@ export default function BesightMembersTab({ active = true }) {
         created_at: earliestOf(indicators, "created_at") || primary.created_at,
       };
     });
-  }, [rows]);
+  }, [rows, lotMode, lotCustom]);
 
   const filtered = members.filter((m) => {
     if (memberTypeFilter && m.member_type !== memberTypeFilter) return false;
@@ -204,7 +313,22 @@ export default function BesightMembersTab({ active = true }) {
     }
     return true;
   });
-  const passedCount = members.filter((m) => lotsOf(m.trade_id) >= quota && quota > 0).length;
+  const { lotFetchedAt, lotStale } = useMemo(() => {
+    let latest = 0, missing = 0, withTradeId = 0;
+    for (const m of members) {
+      if (!m.trade_id) continue;
+      withTradeId++;
+      const info = lotUsage.get(lotKeyOf(m));
+      if (!info) { missing++; continue; }
+      const t = info.fetched_at ? new Date(info.fetched_at).getTime() : 0;
+      if (t > latest) latest = t;
+    }
+    const stale = withTradeId > 0 && (missing > 0 || !latest || Date.now() - latest > LOT_STALE_MS);
+    return { lotFetchedAt: latest || null, lotStale: stale };
+    // eslint-disable-next-line
+  }, [members, lotUsage]);
+
+  const passedCount = members.filter((m) => quota > 0 && lotsOf(m) >= quota).length;
   const notPassedCount = members.length - passedCount;
   const passedPct = members.length ? Math.round((passedCount / members.length) * 100) : 0;
 
@@ -224,18 +348,41 @@ export default function BesightMembersTab({ active = true }) {
     load();
   }
 
-  async function refreshLots() {
+  async function refreshLots({ auto = false } = {}) {
     setRefreshingLots(true);
     setLotMsg("");
+    const fixed = fixedLotRange(lotMode, lotCustom);
     const { data, error } = await supabase.functions.invoke("tradingview", { body: {
-      action: "refresh_lots", period_start: periodStart, period_end: periodEnd, brand_id: brandId,
+      action: "refresh_lots", brand_id: brandId,
+      ...(fixed ? { period_start: fixed.start, period_end: fixed.end } : {}),
     } });
     setRefreshingLots(false);
-    if (error || !data?.ok) { setLotMsg(data?.error || (await readFunctionErrorMessage(error)) || "ตรวจ Lot ไม่สำเร็จ"); return; }
-    setLotMsg(`ตรวจแล้ว ${data.checked} คน — พบยอด Lot ${data.matched} คน`);
-    logActivity("refresh_tv_lots", { brand_id: brandId, checked: data.checked, matched: data.matched });
+    if (error || !data?.ok) {
+      const msg = data?.error || (await readFunctionErrorMessage(error)) || "ตรวจ Lot ไม่สำเร็จ";
+      setLotMsg(auto ? `ตรวจ Lot อัตโนมัติไม่สำเร็จ: ${msg}` : msg);
+      return;
+    }
+    setLotMsg(
+      `ตรวจแล้ว ${data.checked} คน (${data.periods} รอบสิทธิ์) — พบยอด Lot ${data.matched} คน` +
+      (data.settled ? ` · ข้ามรอบที่ปิดแล้ว ${data.settled} คน` : "") +
+      (data.failed_periods ? ` · ยิงไม่ผ่าน ${data.failed_periods} รอบ` : "")
+    );
+    if (!auto) logActivity("refresh_tv_lots", { brand_id: brandId, checked: data.checked, matched: data.matched });
     loadMembers();
   }
+
+  // ตรวจสดให้เองถ้าค่าที่แคชเก่า/ยังไม่เคยตรวจรอบนี้ — กันเคสแอดมินเปิดหน้าแล้วเห็นยอดของเมื่อวาน
+  // ยิงครั้งเดียวต่อแบรนด์/วัน (ถ้าล้มก็ไม่วนยิงซ้ำ ให้กดปุ่มเอง)
+  const autoLotKeyRef = useRef("");
+  useEffect(() => {
+    if (!active || !brandId || !isAdmin || !lotCacheReady || refreshingLots || !lotStale) return;
+    if (lotMode === "custom" && !fixedLotRange(lotMode, lotCustom)) return;   // ยังกรอกวันไม่ครบ
+    const key = `${brandId}:${lotMode}:${lotCustom.start}:${lotCustom.end}:${thDay(new Date())}`;
+    if (autoLotKeyRef.current === key) return;
+    autoLotKeyRef.current = key;
+    refreshLots({ auto: true });
+    // eslint-disable-next-line
+  }, [active, brandId, isAdmin, lotCacheReady, lotStale, lotMode, lotCustom.start, lotCustom.end]);
 
   function openAdd() { setForm({ ...emptyForm, pine_id: scripts[0]?.pine_id || "" }); setFormErr(""); setAddOpen(true); }
 
@@ -313,12 +460,13 @@ export default function BesightMembersTab({ active = true }) {
   }
 
   function exportCsv() {
-    const head = ["สมาชิก", "อีเมล", "Plan", "เบอร์โทร", "ประเทศ", "Broker", "Trade ID", "TradingView", "Telegram", "Indicator", "Lots ใช้ไป", "Lots โควตา", "สถานะสิทธิ์", "วันเริ่มต้น", "วันหมดอายุ", "วันที่เข้าร่วม", "ช่องทาง"];
+    const head = ["สมาชิก", "อีเมล", "Plan", "เบอร์โทร", "ประเทศ", "Broker", "Trade ID", "TradingView", "Telegram", "Indicator", "ช่วงที่นับ Lot", "Lots ใช้ไป", "Lots ที่ไม่นับ", "Lots โควตา", "สถานะสิทธิ์", "วันเริ่มต้น", "วันหมดอายุ", "วันที่เข้าร่วม", "ช่องทาง"];
     const lines = [head, ...filtered.map((m) => [
       m.display_name || "", m.email || "", memberTypeLabel(m.member_type), m.phone || "", m.country || "",
       m.broker, m.trade_id || "", m.username || "", m.telegram || "",
       m.indicators.map((r) => scriptName(r.pine_id)).join(" · "),
-      lotsOf(m.trade_id), quota, statusInfo(m.primary).label,
+      `${m.lot_period.start} ถึง ${m.lot_period.end}`,
+      lotsOf(m), excludedLotsOf(m), quota, statusInfo(m.primary).label,
       m.granted_at ? new Date(m.granted_at).toLocaleDateString("th-TH") : "",
       m.primary.expiration ? new Date(m.primary.expiration).toLocaleDateString("th-TH") : "ตลอดชีพ",
       m.created_at ? new Date(m.created_at).toLocaleDateString("th-TH") : "",
@@ -328,7 +476,7 @@ export default function BesightMembersTab({ active = true }) {
     const blob = new Blob([`﻿${csv}`], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const el = document.createElement("a");
-    el.href = url; el.download = `สมาชิก-${brand?.name || "indicator"}-${periodStart}.csv`; el.click();
+    el.href = url; el.download = `สมาชิก-${brand?.name || "indicator"}-${thDay(new Date())}.csv`; el.click();
     URL.revokeObjectURL(url);
   }
 
@@ -337,7 +485,7 @@ export default function BesightMembersTab({ active = true }) {
       <SectionTitle
         eyebrow="TRADINGVIEW"
         title={`จัดการสมาชิก Indicator ของ ${brand?.name || "..."}`}
-        subtitle="ดูแลสิทธิ์ อินดิเคเตอร์ ข้อมูลติดต่อ และยอด Lot ที่เทรดจริงเทียบกับโควตา/เดือน"
+        subtitle="ดูแลสิทธิ์ อินดิเคเตอร์ ข้อมูลติดต่อ และยอด Lot ที่เทรดจริงในรอบสิทธิ์ (วันเริ่มต้น → วันหมดอายุ) เทียบกับโควตา"
         right={brands.length > 1 && (
           <Select value={brandId ?? ""} onChange={(e) => setBrandId(Number(e.target.value))} className="w-44">
             {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
@@ -348,7 +496,7 @@ export default function BesightMembersTab({ active = true }) {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="ds-card p-4 sm:p-5 flex flex-col gap-3">
           <div className="flex items-center justify-between gap-2">
-            <div className="text-[13px] text-slate-500 font-medium">Lot ที่ต้องจ่าย / เดือน (ตั้งค่าได้)</div>
+            <div className="text-[13px] text-slate-500 font-medium">Lot ที่ต้องจ่าย / รอบสิทธิ์ (ตั้งค่าได้)</div>
             <span className="rounded-control p-1.5 shrink-0 bg-brand-50 text-brand-600"><Gauge size={16} /></span>
           </div>
           {isAdmin ? (
@@ -360,7 +508,7 @@ export default function BesightMembersTab({ active = true }) {
             <div className="ds-figure text-[26px] sm:text-[28px]">{quota.toFixed(2)}</div>
           )}
         </div>
-        <StatCard icon={CheckCircle2} tone="green" label="สมาชิกที่ผ่านเกณฑ์เดือนนี้" value={passedCount} sub={`${passedPct}%`} />
+        <StatCard icon={CheckCircle2} tone="green" label="สมาชิกที่ผ่านเกณฑ์ในรอบสิทธิ์" value={passedCount} sub={`${passedPct}%`} />
         <StatCard icon={XCircle} tone="red" label="สมาชิกที่ยังไม่ผ่านเกณฑ์" value={notPassedCount} />
       </div>
 
@@ -372,14 +520,45 @@ export default function BesightMembersTab({ active = true }) {
         title={`สมาชิก (${filtered.length})`}
         right={
           <div className="flex flex-wrap items-center gap-2">
-            <Button size="sm" variant="secondary" icon={RefreshCw} loading={refreshingLots} onClick={refreshLots}>ตรวจ Lot ทุกคน</Button>
+            <Button size="sm" variant="secondary" icon={RefreshCw} loading={refreshingLots} onClick={() => refreshLots()}>ตรวจ Lot ทุกคน</Button>
             <Button size="sm" variant="secondary" icon={Download} onClick={exportCsv}>ส่งออก</Button>
             <Button size="sm" variant="primary" icon={Plus} onClick={openAdd}>เพิ่มสมาชิก</Button>
           </div>
         }
         bodyClassName="p-4 sm:p-5 space-y-3"
       >
-        {lotMsg && <div className="text-xs text-slate-500">{lotMsg}</div>}
+        {/* เลือกช่วงที่จะนับ Lot — ค่าเริ่มต้นคือรอบเดือนของแต่ละคน (วันที่ได้สิทธิ์ → ครบเดือน)
+            เลือกเป็นเดือนปฏิทินหรือกำหนดวันเองได้ เวลาแอดมินอยากเทียบยอดช่วงอื่น */}
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-slate-500">ช่วงที่นับ Lot</span>
+          <Select value={lotMode} onChange={(e) => setLotMode(e.target.value)} className="w-48">
+            {LOT_MODES.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+          </Select>
+          {lotMode === "custom" && (
+            <>
+              <Input type="date" value={lotCustom.start} onChange={(e) => setLotCustom((c) => ({ ...c, start: beToCe(e.target.value) }))} className="w-40" />
+              <span className="text-slate-400">ถึง</span>
+              <Input type="date" value={lotCustom.end} onChange={(e) => setLotCustom((c) => ({ ...c, end: beToCe(e.target.value) }))} className="w-40" />
+            </>
+          )}
+          {lotMode !== "cycle" && fixedLotRange(lotMode, lotCustom) && (
+            <span className="text-slate-400">
+              {dayLabel(fixedLotRange(lotMode, lotCustom).start)}–{dayLabel(fixedLotRange(lotMode, lotCustom).end)} (ทุกคนใช้ช่วงเดียวกัน)
+            </span>
+          )}
+        </div>
+        <div className="text-xs flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span className={lotStale && !refreshingLots ? "text-amber-600" : "text-slate-500"}>
+            {refreshingLots
+              ? "กำลังตรวจยอด Lot สดจาก broker…"
+              : lotMode === "custom" && !fixedLotRange(lotMode, lotCustom)
+                ? "เลือกวันเริ่มและวันสิ้นสุดให้ครบก่อน"
+                : lotFetchedAt
+                  ? `ยอด Lot ณ ${new Date(lotFetchedAt).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}${lotStale ? " (เก่าแล้ว — กด “ตรวจ Lot ทุกคน”)" : ""}`
+                  : "ยังไม่เคยตรวจยอด Lot ของช่วงนี้"}
+          </span>
+          {lotMsg && <span className="text-slate-500">{lotMsg}</span>}
+        </div>
         <div className="flex flex-wrap items-center gap-2">
           <SearchInput placeholder="ค้นหาชื่อ, อีเมล, Trade ID, TradingView, Telegram..." value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} className="flex-1 min-w-[220px]" />
           <FilterPill active={!memberTypeFilter} onClick={() => { setMemberTypeFilter(""); setPage(1); }}>ทุก Plan</FilterPill>
@@ -409,7 +588,8 @@ export default function BesightMembersTab({ active = true }) {
               <tbody>
                 {pageRows.map((m) => {
                   const st = statusInfo(m.primary);
-                  const lots = lotsOf(m.trade_id);
+                  const lots = lotsOf(m);
+                  const excluded = excludedLotsOf(m);
                   const passed = quota > 0 && lots >= quota;
                   const extraCount = m.indicators.length - 1;
                   return (
@@ -439,6 +619,14 @@ export default function BesightMembersTab({ active = true }) {
                       <td className="px-4 py-2.5 whitespace-nowrap">
                         <span className={passed ? "text-emerald-700 font-semibold" : "text-rose-600 font-semibold"}>{lots.toFixed(2)}</span>
                         <span className="text-slate-400"> / {quota.toFixed(2)}</span>
+                        <div className="text-2xs text-slate-400" title={`นับ Lot ${m.lot_period.start} ถึง ${m.lot_period.end}${lotMode === "cycle" ? " (รอบเดือนของสมาชิกคนนี้ นับจากวันที่ได้สิทธิ์/ต่ออายุ)" : " (ช่วงที่แอดมินเลือก)"}`}>
+                          {dayLabel(m.lot_period.start)}–{dayLabel(m.lot_period.end)}
+                          {excluded > 0 && (
+                            <span title="lot ที่ broker ไม่นับเพราะเทรดสัญลักษณ์ที่ไม่เข้าเงื่อนไข rebate — ยอดในแอป BeSight/MT5 ของลูกค้าจะมากกว่าช่องนี้อยู่เท่านี้">
+                              {" · "}+{excluded.toFixed(2)} ไม่นับ
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-2.5 whitespace-nowrap">
                         <span className={`text-2xs font-semibold px-2 py-0.5 rounded-full border ${st.tone}`}>{st.label}</span>
@@ -595,8 +783,11 @@ export default function BesightMembersTab({ active = true }) {
             {/* ประวัติ Lot ย้อนหลัง 5 เดือน — ดูได้ว่าเดือนไหนผ่านโควตาบ้าง (ใช้ตัดสินต่ออายุ/เลื่อนขั้น) */}
             <div className="rounded-xl border border-slate-200 p-3">
               <div className="flex items-center justify-between gap-2 mb-2">
-                <div className="text-[13px] font-semibold text-slate-700">ประวัติ Lot ย้อนหลัง 5 เดือน</div>
-                <span className="text-2xs text-slate-400">โควตา {quota.toFixed(2)} / เดือน</span>
+                <div className="text-[13px] font-semibold text-slate-700">
+                  ประวัติ Lot ย้อนหลัง 5 เดือน
+                  <span className="ml-1 text-2xs font-normal text-slate-400">(แยกตามเดือนปฏิทิน ไม่ใช่รอบสิทธิ์)</span>
+                </div>
+                <span className="text-2xs text-slate-400">โควตา {quota.toFixed(2)} / รอบ</span>
               </div>
               {!detailMember.trade_id ? (
                 <div className="text-xs text-slate-400">ยังไม่มี Trade ID — ดูยอด Lot ไม่ได้</div>
@@ -607,11 +798,20 @@ export default function BesightMembersTab({ active = true }) {
               ) : (
                 <div className="grid grid-cols-5 gap-1.5">
                   {(lotHistory?.months || []).map((mo) => {
-                    const passed = quota > 0 && mo.lots >= quota;
+                    const failed = mo.ok === false;
+                    const passed = !failed && quota > 0 && mo.lots >= quota;
+                    const excluded = Number(mo.excluded_lots) || 0;
                     return (
                       <div key={mo.start} className={`rounded-lg border px-2 py-1.5 text-center ${passed ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-slate-50"}`}>
                         <div className="text-2xs text-slate-500">{new Date(`${mo.start}T00:00:00+07:00`).toLocaleDateString("th-TH", { month: "short", year: "2-digit" })}</div>
-                        <div className={`text-sm font-semibold ${passed ? "text-emerald-700" : "text-slate-600"}`}>{Number(mo.lots).toFixed(2)}</div>
+                        {failed ? (
+                          <div className="text-sm font-semibold text-slate-400" title={mo.error || "ดึงจาก broker ไม่สำเร็จ"}>—</div>
+                        ) : (
+                          <div className={`text-sm font-semibold ${passed ? "text-emerald-700" : "text-slate-600"}`}>{Number(mo.lots).toFixed(2)}</div>
+                        )}
+                        {!failed && excluded > 0 && (
+                          <div className="text-[10px] text-slate-400" title="lot ที่ไม่เข้าเงื่อนไข rebate">+{excluded.toFixed(2)}</div>
+                        )}
                       </div>
                     );
                   })}

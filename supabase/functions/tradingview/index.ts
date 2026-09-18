@@ -53,9 +53,9 @@ function normalizeContactChannel(value: unknown): string | null {
   const key = String(value ?? "").trim().toLowerCase();
   return CONTACT_CHANNELS.includes(key) ? key : null;
 }
-// plan ของสมาชิก (new = ทดลอง 1 เดือน · free = ผ่านทดลองแล้ว · premium = ครบโควตาติดกัน 3 รอบ)
-// — รับเฉพาะค่าที่ check constraint ของ tv_access ยอม
-const MEMBER_TYPES = ["new", "free", "premium"];
+// plan ของสมาชิก (new = ทดลอง 1 เดือน · free = ผ่านทดลองแล้ว · premium = ครบโควตาติดกัน 3 รอบ
+// · renew = ต่ออายุแล้ว) — รับเฉพาะค่าที่ check constraint ของ tv_access ยอม
+const MEMBER_TYPES = ["new", "free", "premium", "renew"];
 function normalizeMemberType(value: unknown): string | null {
   const key = String(value ?? "").trim().toLowerCase();
   return MEMBER_TYPES.includes(key) ? key : null;
@@ -238,20 +238,124 @@ async function verifyTvAccessRow(
   return { ok: true, found, ...(error ? { error } : {}), ...(tvGrantedAt !== undefined ? { tv_granted_at: tvGrantedAt } : {}), verified_at: nowIso };
 }
 
-// ดึงยอด lot จริงจาก broker (XM) มาทั้งก้อน — ใช้ใน refresh_lots (ปุ่มแอดมิน)
-// คืนเป็น Map<login, lots> ดิบ ๆ ไม่ยุ่งกับ DB (ผู้เรียกเอาไปจับคู่กับ trade_id เอง)
-async function fetchBrokerLots(periodStart: string, periodEnd: string): Promise<Map<string, { lots: number; campaign_name: string | null }>> {
-  const url = `https://ai.besight.net/webhook/check-lot?date_from=${encodeURIComponent(periodStart)}&date_to=${encodeURIComponent(periodEnd)}`;
-  const r = await fetch(url, { signal: AbortSignal.timeout(20000) });
-  const j = await r.json().catch(() => null);
-  const rows = Array.isArray(j) ? j : [];
-  const lotByLogin = new Map<string, { lots: number; campaign_name: string | null }>();
-  for (const row of rows as any[]) {
-    const login = String(row?.loginId ?? row?.login_id ?? row?.tradeid ?? "").trim();
-    if (!login) continue;
-    lotByLogin.set(login, { lots: Number(row?.lots) || 0, campaign_name: row?.campaignName ? String(row.campaignName) : null });
+// ---- ยอด lot จริงจาก broker (XM) ผ่าน webhook ai.besight.net ----
+// ตรวจกับของจริงแล้ว (ก.ย. 2569): check-lot คืนยอดที่ "นับได้" แล้ว — ผลรวมของ check-lot (527.27)
+// บวกกับ check-lot-symbol-not-in-list (164.77) เท่ากับ check-lot-campaign (692.03) เป๊ะ ๆ
+// แปลว่า lot ของสัญลักษณ์ที่ไม่เข้าเงื่อนไขถูกหักออกจาก check-lot ให้แล้ว จึงเอาก้อนที่ไม่นับมาโชว์คู่กัน
+// เพื่ออธิบายลูกค้าได้ว่าทำไมยอดในแอป BeSight/MT5 มากกว่ายอดที่ใช้นับโควตา
+// ช่วงวันที่นับปลายทั้งสองข้าง (date_from และ date_to รวมอยู่ในผล — ทดสอบยืนยันแล้ว)
+const BROKER_LOT_BASE = "https://ai.besight.net/webhook";
+
+// วันที่ตามเวลาไทย (broker คิดวันแบบวันปฏิทิน ไม่ใช่ UTC) — คืน YYYY-MM-DD
+const thDay = (ts: unknown) => {
+  if (!ts) return "";
+  const t = new Date(String(ts)).getTime();
+  if (!Number.isFinite(t)) return "";
+  return new Date(t + 7 * 3600 * 1000).toISOString().slice(0, 10);
+};
+const thNow = () => new Date(Date.now() + 7 * 3600 * 1000);
+const thMonthStart = () => { const n = thNow(); return new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), 1)).toISOString().slice(0, 10); };
+const thMonthEnd = () => { const n = thNow(); return new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth() + 1, 0)).toISOString().slice(0, 10); };
+
+// บวก/ลบเดือนจากวันที่ YYYY-MM-DD แบบหนีบวันสิ้นเดือน (31 ม.ค. +1 เดือน = 28 ก.พ.)
+const addMonthsDay = (ymd: string, k: number) => {
+  const [y, m, d] = ymd.split("-").map(Number);
+  const t = new Date(Date.UTC(y, m - 1 + k, 1));
+  const lastDay = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), Math.min(d, lastDay))).toISOString().slice(0, 10);
+};
+
+// รอบที่ใช้นับ lot = "รอบเดือน" ของสมาชิกคนนั้น ไม่ใช่เดือนปฏิทิน
+// ได้สิทธิ์ 10 ก.พ. → นับ 10 ก.พ.–10 มี.ค. · ต่ออายุถึง 10 เม.ย. → นับ 10 มี.ค.–10 เม.ย.
+// วิธีคิด: ถอยจากวันหมดอายุทีละ 1 เดือนจนได้รอบที่ครอบ "วันนี้" (รองรับต่ออายุหลายเดือนในครั้งเดียว
+// และต่ออายุช้ากว่ากำหนด เพราะหมุดคือวันหมดอายุจริง ไม่ใช่วันที่ได้สิทธิ์ครั้งแรก)
+//   หมดอายุไปแล้ว → ใช้รอบสุดท้ายก่อนหมดอายุ (ยอดนิ่งแล้ว)
+//   ตลอดชีพ       → ยึดวันที่ได้สิทธิ์เป็นหมุด เลื่อนไปรอบที่ครอบวันนี้
+// หมายเหตุ: วันหัว-ท้ายรอบนับรวมทั้งคู่ (broker นับปลายทั้งสองข้าง) ตามที่ตกลงกันว่า "10 มี.ค. ถึง 10 เม.ย."
+function lotCycleOf(grantDay: string, expiryDay: string | null, today: string): { start: string; end: string } {
+  const floorTo = (anchor: string) => {
+    let s = anchor;
+    for (let i = 0; i < 240 && addMonthsDay(s, 1) <= today; i++) s = addMonthsDay(s, 1);
+    return s;
+  };
+  let start: string, end: string;
+  if (!expiryDay) {
+    start = floorTo(grantDay);
+    end = addMonthsDay(start, 1);
+  } else if (expiryDay <= today) {
+    start = addMonthsDay(expiryDay, -1);
+    end = expiryDay;
+  } else {
+    let i = 1;
+    start = addMonthsDay(expiryDay, -1);
+    while (start > today && i < 240) { i++; start = addMonthsDay(expiryDay, -i); }
+    end = addMonthsDay(expiryDay, -(i - 1));
   }
-  return lotByLogin;
+  if (start < grantDay) start = grantDay;            // รอบแรกเริ่มนับตั้งแต่วันที่ได้สิทธิ์
+  if (end <= start) end = addMonthsDay(start, 1);    // กันข้อมูลวันที่เพี้ยน
+  return { start, end };
+}
+
+const brokerLoginOf = (row: any) => String(row?.loginId ?? row?.login_id ?? row?.tradeid ?? row?.trade_id ?? "").trim();
+// broker ส่ง lots มาเป็น string ("0.7400") — กัน comma และค่าเพี้ยนไว้ด้วย
+const brokerLotsOf = (v: unknown) => {
+  const n = Number(String(v ?? "").replace(/,/g, "").trim());
+  return Number.isFinite(n) ? n : 0;
+};
+
+// ยิง webhook แล้วบังคับให้ได้ array เสมอ — ถ้า HTTP ไม่ 2xx หรือ body ไม่ใช่ JSON array ต้อง throw
+// ไม่ใช่คืน [] เงียบ ๆ เพราะผู้เรียกจะแปลว่า "ทุกคนเทรด 0 lot" แล้วเขียนทับแคชเป็น 0 ทั้งตาราง
+async function brokerLotRows(path: string, params: Record<string, string>): Promise<any[]> {
+  const qs = new URLSearchParams(params).toString();
+  const r = await fetch(`${BROKER_LOT_BASE}/${path}?${qs}`, { signal: AbortSignal.timeout(25000) });
+  const text = await r.text();
+  if (!r.ok) throw new Error(`${path} ตอบ HTTP ${r.status}: ${text.slice(0, 200)}`);
+  // body ว่าง + HTTP 200 = "ไม่มีข้อมูลในช่วงนี้" (n8n ตอบแบบนี้จริงเมื่อ query ไม่เจอแถว) ไม่ใช่ error
+  if (!text.trim()) return [];
+  let parsed: unknown = null;
+  try { parsed = JSON.parse(text); } catch { throw new Error(`${path} ตอบไม่ใช่ JSON: ${text.slice(0, 200)}`); }
+  if (Array.isArray(parsed)) return parsed;
+  if (parsed && typeof parsed === "object") {
+    const wrapped = (parsed as any).data ?? (parsed as any).rows ?? (parsed as any).result;
+    if (Array.isArray(wrapped)) return wrapped;
+    if (brokerLoginOf(parsed)) return [parsed];          // คืนมาแถวเดียวแบบไม่ห่อ array
+  }
+  throw new Error(`${path} ตอบรูปแบบที่อ่านไม่ได้: ${text.slice(0, 200)}`);
+}
+
+type BrokerLot = { lots: number; campaign_name: string | null; excluded_lots: number };
+
+// คืน Map<login, ยอด lot> ดิบ ๆ ไม่ยุ่งกับ DB (ผู้เรียกเอาไปจับคู่กับ trade_id เอง)
+// tradeId: ใส่เพื่อกรองเฉพาะบัญชีเดียว (พารามิเตอร์ tradeid ใช้ได้จริง ยืนยันแล้ว) ไม่ใส่ = ทุกบัญชีใต้ IB
+async function fetchBrokerLots(periodStart: string, periodEnd: string, tradeId?: string): Promise<Map<string, BrokerLot>> {
+  const params: Record<string, string> = { date_from: periodStart, date_to: periodEnd };
+  if (tradeId) params.tradeid = tradeId;
+  const [counted, notCounted] = await Promise.all([
+    brokerLotRows("check-lot", params),
+    // ก้อน "ไม่นับ" เป็นข้อมูลเสริม ถ้าล้มก็ยังต้องได้ยอดหลัก
+    brokerLotRows("check-lot-symbol-not-in-list", params).catch(() => [] as any[]),
+  ]);
+  const byLogin = new Map<string, BrokerLot>();
+  const slot = (login: string) => {
+    const cur = byLogin.get(login) ?? { lots: 0, campaign_name: null, excluded_lots: 0 };
+    byLogin.set(login, cur);
+    return cur;
+  };
+  for (const row of counted) {
+    const login = brokerLoginOf(row);
+    if (!login || (tradeId && login !== tradeId)) continue;
+    const cur = slot(login);
+    // broker แยกแถวตาม campaign — บัญชีเดียวอาจมีหลายแถว ต้อง "บวก" ไม่ใช่ทับ (ของเดิมทับจนยอดหาย)
+    cur.lots += brokerLotsOf(row?.lots);
+    if (!cur.campaign_name && row?.campaignName) cur.campaign_name = String(row.campaignName);
+  }
+  for (const row of notCounted) {
+    const login = brokerLoginOf(row);
+    if (!login || (tradeId && login !== tradeId)) continue;
+    // แถวนี้แยกตาม instrument ด้วย คนเดียวมีได้หลายแถวแน่นอน
+    slot(login).excluded_lots += brokerLotsOf(row?.lots);
+  }
+  return byLogin;
 }
 
 Deno.serve(async (req) => {
@@ -673,12 +777,16 @@ Deno.serve(async (req) => {
       return json({ ok: true, exists: !!res?.username, username: res?.username || null });
     }
 
+    // renew: true = "ต่ออายุ" (ปุ่มต่ออายุหน้าแชท) — ต่างจากการให้สิทธิ์ใหม่ 2 อย่าง
+    //   1) วันหมดอายุใหม่นับต่อจากวันหมดอายุเดิมที่ยังไม่ถึง (ไม่ใช่นับจากวันนี้ ซึ่งจะทำให้ลูกค้าเสียวันที่เหลือ)
+    //   2) plan เปลี่ยนเป็น "ต่ออายุ" (renew) ไม่ใช่ "ลูกค้าใหม่" และบันทึกเวลา/จำนวนครั้งที่ต่อ
     if (action === "grant") {
       const username = String(body?.username || "").trim();
       const pineIds: string[] = Array.isArray(body?.pine_ids) ? body.pine_ids.map(String) : [];
       if (!username || !pineIds.length) return json({ ok: false, error: "ต้องมี username และเลือกสคริปต์อย่างน้อย 1" });
       const lifetime = body?.lifetime === true;
       const days = Number(body?.days) || 0;
+      const renew = body?.renew === true;
       // ถ้าส่ง expiration มาตรงๆ (โหมดเลือกจากปฏิทิน) ใช้เลย ไม่คิดจากจำนวนวัน (กันวันเพี้ยนเพราะปัดเศษเวลา)
       const expiration = lifetime ? null
         : (body?.expiration ? new Date(String(body.expiration)).toISOString()
@@ -697,36 +805,57 @@ Deno.serve(async (req) => {
         try {
           const brand_id = await pineBrandId(pine_id);         // แบรนด์ของสคริปต์นี้ → ใช้คุกกี้ของแบรนด์นั้น
           const cookie = await getBrandCookie(brand_id);
-          const res = await callTv({ action: "grant", username, pine_id, expiration }, cookie, { actor: auth.permission?.email ?? null, brand_id });
+          // แถวเดิม (ถ้ามี) — ต้องรู้ก่อนยิง TradingView เพราะการต่ออายุต้องต่อจากวันหมดอายุเดิม
+          const existingOf = async (user: string) => (await db.from("tv_access")
+            .select("id, expiration, renew_count, member_type").eq("username", user).eq("pine_id", pine_id).maybeSingle()).data;
+          let existing = await existingOf(username);
+          let expForPine = expiration;
+          if (renew && !lifetime && !body?.expiration) {
+            const prev = existing?.expiration ? new Date(String(existing.expiration)).getTime() : 0;
+            const base = prev > Date.now() ? prev : Date.now();   // ยังไม่หมดอายุ = ต่อท้ายวันเดิม · หมดแล้ว = นับจากวันนี้
+            expForPine = new Date(base + Math.max(1, days) * 86400000).toISOString();
+          }
+          const res = await callTv({ action: "grant", username, pine_id, expiration: expForPine }, cookie, { actor: auth.permission?.email ?? null, brand_id });
           if (!res?.ok) { results.push({ pine_id, ok: false, error: res?.error || `n8n ตอบ: ${JSON.stringify(res).slice(0, 250)}` }); continue; }
           realUser = res.username || username;
+          // TradingView อาจคืน username คนละตัวพิมพ์ — แถวเดิมอยู่ใต้ชื่อที่ปลายทางใช้
+          if (realUser !== username) existing = (await existingOf(realUser)) ?? existing;
 
           // TradingView ตอบ "exists" = มีสิทธิ์อยู่แล้ว และ /pine_perm/add/ จะไม่แก้วันหมดอายุให้
           // ถ้าไม่ยิง extend ต่อ การ "ต่ออายุ" จะไม่มีผลอะไรเลย แต่ระบบเดิมรายงานว่าสำเร็จ
           // (เจอจริง: Besight One STR 62 รายหมดอายุ 3–7 ก.ย. ทั้งที่ในระบบขึ้น active ถึง 8 ต.ค.)
           let extended = false;
           if (res?.already === true) {
-            const ext = await callTv({ action: "extend", username: realUser, pine_id, expiration }, cookie, { actor: auth.permission?.email ?? null, brand_id });
+            const ext = await callTv({ action: "extend", username: realUser, pine_id, expiration: expForPine }, cookie, { actor: auth.permission?.email ?? null, brand_id });
             if (!ext?.ok) {
               results.push({ pine_id, ok: false, already: true, error: `มีสิทธิ์อยู่แล้วแต่ต่ออายุไม่สำเร็จ: ${ext?.error || "ไม่ทราบสาเหตุ"}` });
               continue;
             }
             extended = true;
           }
-          // มีแถวเดิมอยู่แล้วไหม → ถ้ามี = "แก้ไข" (ไม่ทับคนเพิ่ม/วันเพิ่มเดิม แต่บันทึกคนแก้+เวลาแก้)
-          //                       ถ้าไม่มี = "เพิ่มใหม่" (บันทึกคนเพิ่ม/วันเพิ่ม)
-          const { data: existing } = await db.from("tv_access").select("id").eq("username", realUser).eq("pine_id", pine_id).maybeSingle();
+          // มีแถวเดิมอยู่แล้ว = "แก้ไข" (ไม่ทับคนเพิ่ม/วันเพิ่มเดิม แต่บันทึกคนแก้+เวลาแก้)
+          //                    ไม่มี = "เพิ่มใหม่" (บันทึกคนเพิ่ม/วันเพิ่ม)
           const payload: Record<string, unknown> = {
             username: realUser, pine_id, brand_id, display_name: body?.display_name || null,
             email: body?.email || null,
-            expiration, lot: body?.lot || null, trade_id: body?.trade_id || null,
+            expiration: expForPine, lot: body?.lot || null, trade_id: body?.trade_id || null,
             status: "active", last_granted_at: nowIso, last_synced_at: nowIso, last_error: null, updated_at: nowIso,
           };
+          // ต่ออายุมักส่งมาแค่ user + จำนวนวัน — ห้ามล้าง trade_id/ชื่อ/อีเมลเดิมทิ้ง
+          if (renew) {
+            if (!body?.trade_id) delete payload.trade_id;
+            if (!body?.display_name) delete payload.display_name;
+            if (!body?.email) delete payload.email;
+          }
           // ต่ออายุ/เพิ่มสคริปต์ซ้ำมักไม่ส่งช่องทางมาด้วย — ใส่เฉพาะตอนที่ส่งมาจริง จะได้ไม่ล้างค่าเดิมทิ้ง
           const grantChannel = normalizeContactChannel(body?.contact_channel);
           if (grantChannel) payload.contact_channel = grantChannel;
-          const grantMemberType = normalizeMemberType(body?.member_type);
+          const grantMemberType = normalizeMemberType(body?.member_type) || (renew ? "renew" : null);
           if (grantMemberType) payload.member_type = grantMemberType;
+          if (renew) {
+            payload.renewed_at = nowIso;
+            payload.renew_count = (Number(existing?.renew_count) || 0) + 1;
+          }
           if ("broker" in (body ?? {})) payload.broker = normalizeBroker(body?.broker);
           // เบอร์/ประเทศ/Telegram — ใส่เฉพาะตอนส่งมาจริง เหตุผลเดียวกับ channel/member_type ด้านบน
           if (body?.phone) payload.phone = String(body.phone).trim();
@@ -742,7 +871,7 @@ Deno.serve(async (req) => {
           if (savedRowError || !savedRow) throw new Error(savedRowError?.message || "บันทึกสมาชิกแล้วแต่หาแถวเพื่อตรวจสิทธิ์ไม่พบ");
           // ให้สิทธิ์/ต่ออายุสำเร็จแล้วเช็กกับ TradingView ทันที ไม่ต้องรอ cron รอบเที่ยงคืน
           const verification = await verifyTvAccessRow(db, savedRow, cookie);
-          results.push({ pine_id, ok: true, extended, verification });
+          results.push({ pine_id, ok: true, extended, renewed: renew, expiration: expForPine, verification });
         } catch (e) {
           results.push({ pine_id, ok: false, error: String(e instanceof Error ? e.message : e) });
         }
@@ -785,63 +914,125 @@ Deno.serve(async (req) => {
       return json({ ok: true, found: verification?.found === true, verified_at: verification?.verified_at || nowIso, verification });
     }
 
-    // ---- ดึงยอด lot จริงจาก broker (XM) มา cache ต่อ trade_id/ช่วงเดือน — ปุ่ม "ตรวจ Lot ทุกคน" ----
-    // check-lot คืนยอดของ "ทุกบัญชีใต้ IB เรา" มาในก้อนเดียวเสมอ (พารามิเตอร์ tradeid ไม่มีผลกรอง —
-    // ทดสอบจริงแล้วว่าใส่เลขอะไรก็คืนชุดเดียวกัน) จึงดึงมาครั้งเดียวแล้วจับคู่กับ trade_id ของสมาชิก
-    // แต่ละคนเอง ไม่ต้องยิงทีละคน (105 คน = 105 request ถ้าทำแบบนั้น)
+    // ---- ดึงยอด lot จริงจาก broker (XM) มา cache ต่อ trade_id/รอบเดือน — ปุ่ม "ตรวจ Lot ทุกคน" ----
+    // ช่วงที่นับ = "รอบเดือน" ของสมาชิกแต่ละคน ไม่ใช่เดือนปฏิทิน (ดู lotCycleOf ด้านบน)
+    //   ได้สิทธิ์ 10 ก.พ. → 10 ก.พ.–10 มี.ค. · ต่ออายุถึง 10 เม.ย. → 10 มี.ค.–10 เม.ย.
+    // กติกาต้องตรงกับ lotPeriodOf() ในหน้าเว็บเป๊ะ ๆ ไม่งั้นอ่านแคชไม่เจอ
+    // ส่ง period_start/period_end มาด้วย = บังคับใช้ช่วงนั้นกับทุกคน (ปุ่มเลือกช่วงในหน้าเว็บ)
+    // broker ยิงทีละช่วง ไม่ใช่ทีละคน — คนที่ช่วงเหมือนกันรวมยิงครั้งเดียว
     if (action === "refresh_lots") {
       if (!isAdmin) return json({ ok: false, error: "เฉพาะแอดมิน" }, 403);
-      const periodStart = String(body?.period_start || "").trim();
-      const periodEnd = String(body?.period_end || "").trim();
-      if (!periodStart || !periodEnd) return json({ ok: false, error: "ต้องระบุช่วงวันที่ (period_start, period_end)" });
-
-      let lotByLogin: Map<string, { lots: number; campaign_name: string | null }>;
-      try {
-        lotByLogin = await fetchBrokerLots(periodStart, periodEnd);
-      } catch (e) {
-        return json({ ok: false, error: `ดึงข้อมูล Lot จาก broker ไม่สำเร็จ: ${String(e instanceof Error ? e.message : e)}` });
-      }
-      console.log(`[refresh_lots] raw response: ${lotByLogin.size} logins`);
-
-      // เฉพาะสมาชิกที่มี trade_id (จำกัดตามแบรนด์ถ้าระบุมา)
-      let q = db.from("tv_access").select("trade_id").not("trade_id", "is", null);
       const brandId = Number(body?.brand_id) || null;
-      if (brandId) q = q.eq("brand_id", brandId);
-      const { data: members, error: membersErr } = await q;
-      if (membersErr) return json({ ok: false, error: membersErr.message });
-      const tradeIds = [...new Set((members ?? []).map((m: any) => String(m.trade_id).trim()).filter(Boolean))];
+      // override: ระบุช่วงมาตรง ๆ = บังคับให้ทุกคนใช้ช่วงเดียวกัน (ใช้ตรวจย้อนหลัง/ดีบัก)
+      const forcedStart = String(body?.period_start || "").trim();
+      const forcedEnd = String(body?.period_end || "").trim();
+
+      // แบ่งหน้าเอง — ตอนนี้ 884 แถวและโตขึ้นเรื่อย ๆ ถ้าชน 1000 แถวของ PostgREST สมาชิกท้าย ๆ จะหายเงียบ ๆ
+      const members: any[] = [];
+      for (let from = 0; ; from += 1000) {
+        let q = db.from("tv_access").select("trade_id, granted_at, created_at, expiration").not("trade_id", "is", null);
+        if (brandId) q = q.eq("brand_id", brandId);
+        const { data: page, error: membersErr } = await q.order("id").range(from, from + 999);
+        if (membersErr) return json({ ok: false, error: membersErr.message });
+        members.push(...(page ?? []));
+        if (!page || page.length < 1000) break;
+      }
+
+      const today = thDay(new Date().toISOString());
+      // สมาชิกคนเดียวมีได้หลายอินดิเคเตอร์ — รวมเป็นวันที่ได้สิทธิ์เก่าสุด + วันหมดอายุใหม่สุด
+      // (ถ้ามีใบใดเป็นตลอดชีพ ถือว่าตลอดชีพ)
+      const spanByTrade = new Map<string, { grant: string; expiry: string | null; lifetime: boolean }>();
+      for (const m of members) {
+        const tid = String((m as any).trade_id ?? "").trim();
+        if (!tid) continue;
+        const grant = thDay((m as any).granted_at) || thDay((m as any).created_at) || thMonthStart();
+        const expiry = thDay((m as any).expiration) || null;
+        const cur = spanByTrade.get(tid);
+        spanByTrade.set(tid, {
+          grant: cur && cur.grant < grant ? cur.grant : grant,
+          expiry: !cur?.expiry ? expiry : (!expiry ? cur.expiry : (cur.expiry > expiry ? cur.expiry : expiry)),
+          lifetime: (cur?.lifetime ?? false) || !expiry,
+        });
+      }
+      const periodByTrade = new Map<string, { start: string; end: string }>();
+      for (const [tid, span] of spanByTrade) {
+        if (forcedStart && forcedEnd) { periodByTrade.set(tid, { start: forcedStart, end: forcedEnd }); continue; }
+        periodByTrade.set(tid, lotCycleOf(span.grant, span.lifetime ? null : span.expiry, today));
+      }
+
+      // รอบที่ "ปิดแล้ว" (หมดอายุไปแล้ว + เคยตรวจหลังวันหมดอายุ) ยอดนิ่งถาวร ไม่ต้องยิง broker ซ้ำ
+      // ทำให้การตรวจรอบหลัง ๆ เหลือยิงแค่รอบที่ยังเดินอยู่ — force: true คือบังคับตรวจใหม่ทั้งหมด
+      const force = body?.force === true;
+      let earliestStart = today;
+      for (const p of periodByTrade.values()) if (p.start < earliestStart) earliestStart = p.start;
+      const cachedAt = new Map<string, string>();
+      // แบ่งหน้าเอง — PostgREST คืนสูงสุด 1000 แถว/ครั้ง (สมาชิก × รอบย้อนหลัง เกินได้ง่าย)
+      for (let from = 0; ; from += 1000) {
+        const { data: page } = await db.from("tv_lot_usage")
+          .select("trade_id, period_start, period_end, fetched_at").gte("period_end", earliestStart)
+          .order("id").range(from, from + 999);
+        for (const r of page ?? []) cachedAt.set(`${r.trade_id}|${r.period_start}|${r.period_end}`, String(r.fetched_at));
+        if (!page || page.length < 1000) break;
+      }
+
+      const groups = new Map<string, string[]>();
+      let settled = 0;
+      for (const [tid, p] of periodByTrade) {
+        const key = `${p.start}|${p.end}`;
+        if (!force && p.end < today) {
+          const at = cachedAt.get(`${tid}|${key}`);
+          if (at && thDay(at) > p.end) { settled++; continue; }
+        }
+        const list = groups.get(key) ?? [];
+        list.push(tid);
+        groups.set(key, list);
+      }
 
       const nowIso = new Date().toISOString();
-      const upserts = tradeIds.map((tid) => {
-        const hit = lotByLogin.get(tid);
-        return {
-          trade_id: tid, period_start: periodStart, period_end: periodEnd,
-          lots: hit?.lots ?? 0, campaign_name: hit?.campaign_name ?? null, fetched_at: nowIso,
-        };
-      });
-      const unmatchedTradeIds = tradeIds.filter((tid) => !lotByLogin.has(tid));
-      console.log(
-        `[refresh_lots] trade_id match: ${tradeIds.length - unmatchedTradeIds.length}/${tradeIds.length} matched. ` +
-          `sample trade_id (ตาราง): ${JSON.stringify(tradeIds.slice(0, 5))}. ` +
-          `sample loginId (broker): ${JSON.stringify([...lotByLogin.keys()].slice(0, 5))}. ` +
-          `unmatched trade_id ตัวอย่าง: ${JSON.stringify(unmatchedTradeIds.slice(0, 10))}`
-      );
-      if (upserts.length) {
-        const { error } = await db.from("tv_lot_usage").upsert(upserts, { onConflict: "trade_id,period_start,period_end" });
+      const entries = [...groups.entries()];
+      const upserts: any[] = [];
+      const failures: { period: string; members: number; error: string }[] = [];
+      let cursor = 0;
+      // ยิงพร้อมกัน 6 ช่วง กัน n8n ของ broker รับไม่ทัน — ช่วงเยอะได้ (วัดจริง: 589 คน = 181 ช่วง)
+      // แต่ webhook ตอบเร็ว (~0.3 วิ/ครั้ง) รวมแล้วอยู่ในหลักสิบวินาที
+      await Promise.all(Array.from({ length: Math.min(6, entries.length) }, async () => {
+        while (cursor < entries.length) {
+          const [key, tids] = entries[cursor++];
+          const [start, end] = key.split("|");
+          try {
+            const lotByLogin = await fetchBrokerLots(start, end, tids.length === 1 ? tids[0] : undefined);
+            for (const tid of tids) {
+              const hit = lotByLogin.get(tid);
+              upserts.push({
+                trade_id: tid, period_start: start, period_end: end,
+                lots: hit?.lots ?? 0, excluded_lots: hit?.excluded_lots ?? 0,
+                campaign_name: hit?.campaign_name ?? null, fetched_at: nowIso,
+              });
+            }
+          } catch (e) {
+            // ช่วงที่ยิงไม่ผ่านต้องไม่เขียนแคชทับ (ไม่งั้นยอดเดิมกลายเป็น 0)
+            failures.push({ period: key, members: tids.length, error: String(e instanceof Error ? e.message : e) });
+          }
+        }
+      }));
+
+      for (let i = 0; i < upserts.length; i += 200) {
+        const { error } = await db.from("tv_lot_usage").upsert(upserts.slice(i, i + 200), { onConflict: "trade_id,period_start,period_end" });
         if (error) return json({ ok: false, error: error.message });
       }
+      if (!upserts.length && failures.length && !settled) {
+        return json({ ok: false, error: `ดึงข้อมูล Lot จาก broker ไม่สำเร็จ: ${failures[0].error}` });
+      }
+      console.log(`[refresh_lots] ${upserts.length} คน / ${entries.length} ช่วงสิทธิ์ · ข้ามรอบที่ปิดแล้ว ${settled} คน · ล้มเหลว ${failures.length} ช่วง`);
       return json({
         ok: true,
         checked: upserts.length,
         matched: upserts.filter((u) => u.lots > 0).length,
+        periods: entries.length,
+        settled,
+        failed_periods: failures.length,
         fetched_at: nowIso,
-        debug: {
-          raw_rows: lotByLogin.size,
-          sample_login_ids: [...lotByLogin.keys()].slice(0, 5),
-          sample_trade_ids: tradeIds.slice(0, 5),
-          unmatched_trade_ids_sample: unmatchedTradeIds.slice(0, 10),
-          unmatched_count: unmatchedTradeIds.length,
-        },
+        ...(failures.length ? { failures: failures.slice(0, 3) } : {}),
       });
     }
 
@@ -866,21 +1057,18 @@ Deno.serve(async (req) => {
 
       const rows = await Promise.all(periods.map(async (p) => {
         try {
-          const url = `https://ai.besight.net/webhook/check-lot?date_from=${p.start}&date_to=${p.end}&tradeid=${encodeURIComponent(tradeId)}`;
-          const r = await fetch(url, { signal: AbortSignal.timeout(20000) });
-          const j = await r.json().catch(() => null);
-          const list = Array.isArray(j) ? j : [];
-          const hit = list.find((x: any) => String(x?.loginId ?? x?.login_id ?? x?.tradeid ?? "").trim() === tradeId);
-          return { ...p, lots: Number(hit?.lots) || 0, campaign_name: hit?.campaignName ? String(hit.campaignName) : null, ok: true };
+          const hit = (await fetchBrokerLots(p.start, p.end, tradeId)).get(tradeId);
+          return { ...p, lots: hit?.lots ?? 0, excluded_lots: hit?.excluded_lots ?? 0, campaign_name: hit?.campaign_name ?? null, ok: true };
         } catch (e) {
-          return { ...p, lots: 0, campaign_name: null, ok: false, error: String(e instanceof Error ? e.message : e) };
+          // เดือนที่ยิงไม่สำเร็จต้องบอกว่าไม่สำเร็จ ไม่ใช่โชว์ 0 (แยกไม่ออกจาก "ไม่ได้เทรด") และไม่ cache ทับของเดิม
+          return { ...p, lots: 0, excluded_lots: 0, campaign_name: null, ok: false, error: String(e instanceof Error ? e.message : e) };
         }
       }));
 
       const fetchedAt = new Date().toISOString();
       const upserts = rows.filter((r) => r.ok).map((r) => ({
         trade_id: tradeId, period_start: r.start, period_end: r.end,
-        lots: r.lots, campaign_name: r.campaign_name, fetched_at: fetchedAt,
+        lots: r.lots, excluded_lots: r.excluded_lots, campaign_name: r.campaign_name, fetched_at: fetchedAt,
       }));
       if (upserts.length) await db.from("tv_lot_usage").upsert(upserts, { onConflict: "trade_id,period_start,period_end" });
 

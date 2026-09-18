@@ -284,6 +284,49 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
     setMsg(r.ok ? { ok: true, text: "บันทึกแล้ว ✓ (ป้อนโดยแอดมิน — AI จะไม่แก้)" } : { ok: false, text: "บันทึกไม่สำเร็จ: " + r.error });
   }
 
+  // ต่ออายุสิทธิ์ที่มีอยู่แล้ว — คนละเรื่องกับ "เพิ่มสิทธิ์ให้ลูกค้าใหม่" จึงไม่เช็คไอดีเทรดซ้ำ
+  // และไม่แตะข้อมูลลูกค้า · วันหมดอายุใหม่ต่อจากวันเดิมที่ยังไม่ถึง (edge function คิดให้)
+  // · plan ของสมาชิกเปลี่ยนเป็น "ต่ออายุ" ไม่ใช่ "ลูกค้าใหม่"
+  async function renew() {
+    if (busy) return;
+    const userTv = f.username.trim();
+    if (!userTv) { setMsg({ ok: false, text: "ต้องมี user TradingView ก่อนจะต่ออายุ" }); return; }
+    if (!pineIds.length) { setMsg({ ok: false, text: "เลือก Indicator ที่จะต่ออายุอย่างน้อย 1 อัน" }); return; }
+    for (const pid of pineIds) {
+      const d = getDur(pid);
+      if (d.mode === "date" && (!d.expDate || d.expDate < todayTH)) {
+        setMsg({ ok: false, text: `เลือกวันหมดอายุของ "${scripts.find((s) => s.pine_id === pid)?.name || pid}" ให้ถูกต้องก่อน` });
+        return;
+      }
+    }
+    setBusy(true); setMsg({ ok: true, text: "กำลังต่ออายุสิทธิ์..." });
+    const summ = []; const fails = [];
+    for (const pid of pineIds) {
+      const d = getDur(pid);
+      const expIso = d.mode === "date" && d.expDate ? new Date(`${beToCe(d.expDate)}T23:59:59+07:00`).toISOString() : null;
+      const name = scripts.find((s) => s.pine_id === pid)?.name || pid;
+      setMsg({ ok: true, text: `กำลังต่ออายุ "${name}"...` });
+      const { data: g, error: ge } = await supabase.functions.invoke("tradingview", { body: {
+        action: "grant", renew: true, member_type: "renew", username: userTv,
+        pine_ids: [pid], lifetime: d.mode === "lifetime", days: d.mode === "days" ? (Number(d.days) || 30) : 0,
+        expiration: expIso, trade_id: f.trade_id.trim() || null,
+      } });
+      if (ge || !g?.ok) { fails.push(`${name}: ${g?.error || g?.results?.[0]?.error || "ลองใหม่"}`); continue; }
+      const newExp = g.results?.find((r) => r.ok)?.expiration || g.expiration;
+      summ.push(`${name} → ${d.mode === "lifetime" ? "ตลอดชีพ" : newExp ? `หมดอายุ ${new Date(newExp).toLocaleDateString("th-TH")}` : durLabel(d)}`);
+    }
+    if (summ.length) logActivity("tv_renew_from_chat", { id: row.id, username: userTv });
+    setBusy(false);
+    setMsg(
+      summ.length && !fails.length
+        ? { ok: true, text: `✓ ต่ออายุแล้ว: ${summ.join(", ")}` }
+        : summ.length
+          ? { ok: true, text: `✓ ต่ออายุ: ${summ.join(", ")} · ไม่สำเร็จ: ${fails.join(" · ")}` }
+          : { ok: false, text: `ต่ออายุไม่สำเร็จ: ${fails.join(" · ") || "ลองใหม่"}` }
+    );
+    if (summ.length) setGrantSuccess({ username: userTv, items: summ, fails, renewed: true });
+  }
+
   const inp = (k, label, ph) => (
     <div className="min-w-0">
       <label className="text-[11px] text-slate-400">{label}</label>
@@ -486,17 +529,26 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
         </div>
       )}
 
-      <button onClick={save} disabled={busy} className="w-full rounded-lg bg-emerald-700 text-white px-3 py-2 text-sm font-semibold hover:bg-emerald-800 disabled:opacity-50 flex items-center justify-center gap-1.5">
-        {busy ? <Loader2 className="animate-spin" size={14} /> : <CheckCircle2 size={14} />} บันทึกข้อมูล
-      </button>
+      <div className="flex gap-1.5">
+        <button onClick={save} disabled={busy} className="flex-1 rounded-lg bg-emerald-700 text-white px-3 py-2 text-sm font-semibold hover:bg-emerald-800 disabled:opacity-50 flex items-center justify-center gap-1.5">
+          {busy ? <Loader2 className="animate-spin" size={14} /> : <CheckCircle2 size={14} />} บันทึกข้อมูล
+        </button>
+        {/* ต่ออายุลูกค้าเดิมได้จากหน้าแชทเลย ไม่ต้องไปหน้าสมาชิก Indicator — สถานะจะขึ้นว่า "ต่ออายุ" */}
+        {tvOn && (
+          <button onClick={renew} disabled={busy} title="ต่ออายุสิทธิ์ของ Indicator ที่เลือก — วันหมดอายุใหม่ต่อจากวันเดิมที่ยังไม่ถึง"
+            className="shrink-0 rounded-lg border border-emerald-700 text-emerald-700 px-3 py-2 text-sm font-semibold hover:bg-emerald-50 disabled:opacity-50 flex items-center justify-center gap-1.5">
+            <RefreshCw size={14} /> ต่ออายุ
+          </button>
+        )}
+      </div>
       {msg && <div className={`text-[11px] whitespace-pre-line ${msg.ok ? "text-emerald-600" : "text-rose-600"}`}>{msg.text}</div>}
 
       {/* เดิมเห็นแค่แถบข้อความเล็ก ๆ ใต้ฟอร์ม ปนกับข้อความสถานะระหว่างทำงาน — เพิ่ม popup ยืนยันชัดๆ ว่าให้สิทธิ์สำเร็จ */}
-      <Dialog open={!!grantSuccess} title="เพิ่มสิทธิ์สำเร็จ" onClose={() => setGrantSuccess(null)}
+      <Dialog open={!!grantSuccess} title={grantSuccess?.renewed ? "ต่ออายุสำเร็จ" : "เพิ่มสิทธิ์สำเร็จ"} onClose={() => setGrantSuccess(null)}
         footer={<Button variant="primary" onClick={() => setGrantSuccess(null)}>ตกลง</Button>}>
         {grantSuccess && (
           <div className="space-y-2">
-            <div className="font-semibold text-emerald-700">🎉 ให้สิทธิ์ {grantSuccess.username} แล้ว</div>
+            <div className="font-semibold text-emerald-700">🎉 {grantSuccess.renewed ? "ต่ออายุให้" : "ให้สิทธิ์"} {grantSuccess.username} แล้ว</div>
             <ul className="text-sm text-slate-600 list-disc pl-5 space-y-0.5">
               {grantSuccess.items.map((it) => <li key={it}>{it}</li>)}
             </ul>

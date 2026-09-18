@@ -16,7 +16,7 @@ const channelLabel = (v) => CONTACT_CHANNELS.find(([key]) => key === v)?.[1] || 
 
 // Plan ของสมาชิก — key ต้องตรงกับ check constraint ของ tv_access.member_type (ดู BesightMembersTab.jsx)
 //   new = ทดลองใช้ 1 เดือน · free = ผ่านทดลองแล้ว · premium = ครบโควตาติดกัน 3 รอบ
-const MEMBER_TYPES = [["new", "ลูกค้าใหม่"], ["free", "Free"], ["premium", "Premium"]];
+const MEMBER_TYPES = [["new", "ลูกค้าใหม่"], ["renew", "ต่ออายุ"], ["free", "Free"], ["premium", "Premium"]];
 const memberTypeLabel = (v) => MEMBER_TYPES.find(([key]) => key === v)?.[1] || "";
 const PLAN_TONE = {
   new: { bg: "rgb(56 189 248 / .13)", fg: "#0369a1" },
