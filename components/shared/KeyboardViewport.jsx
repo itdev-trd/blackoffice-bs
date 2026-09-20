@@ -34,6 +34,15 @@ export default function KeyboardViewport() {
     const root = document.documentElement;
     let raf = 0;
 
+    // จอเบี้ยวไปทางซ้าย: iOS เลื่อน "layout viewport" ตามช่องที่โฟกัส/ตอนสลับหน้า แล้วค้างอยู่อย่างนั้น
+    // ผู้ใช้เห็นหน้าเลื่อนไปทางซ้าย ขอบขวาโดนตัด และต้องรีเฟรชถึงหาย (รายงานจากหน้าตอบแชทบน iPhone)
+    // ถ้าไม่ได้ซูมอยู่ให้ดึงกลับชิดซ้ายเอง — เช็ก scale ก่อนเสมอ เพราะถ้าผู้ใช้ซูมอ่านอยู่จริง
+    // การดึงกลับคือการแย่งเลื่อนจอกับผู้ใช้ (หน้านี้ทุกหน้าออกแบบให้พอดีจอ ไม่มีที่ไหนต้องเลื่อนแนวนอน)
+    const unshift = () => {
+      if ((vv.scale || 1) > 1.01) return;
+      if (window.scrollX !== 0 || vv.offsetLeft > 0) window.scrollTo(0, window.scrollY);
+    };
+
     const apply = () => {
       raf = 0;
       // ปัดเศษลงกัน sub-pixel ทำให้เกิดเส้นขอบ 1px โผล่ใต้กล่อง
@@ -52,6 +61,7 @@ export default function KeyboardViewport() {
       // กล่องเต็มจอ (fixed) ต้องเกาะค่านี้ ไม่งั้นทั้งกล่องหลุดขึ้นไปเหนือจอตอนคีย์บอร์ดเปิด
       root.style.setProperty("--app-vv-top", `${Math.round(vv.offsetTop)}px`);
       root.classList.toggle("keyboard-open", keyboardOpen && fixedScreenActive);
+      unshift();
     };
 
     const schedule = () => {
@@ -62,11 +72,19 @@ export default function KeyboardViewport() {
     vv.addEventListener("resize", schedule);
     vv.addEventListener("scroll", schedule);
     window.addEventListener("orientationchange", schedule);
+    // ดึงกลับทันทีที่หน้าเลื่อนแนวนอน ไม่ต้องรอ visualViewport ขยับ (บางทีมันไม่ขยับเลย)
+    // + ตอนกลับเข้าแอปจากพื้นหลัง (bfcache/สลับแอป) ซึ่งเป็นจังหวะที่ค้างเบี้ยวบ่อยที่สุด
+    window.addEventListener("scroll", unshift, { passive: true });
+    window.addEventListener("pageshow", unshift);
+    document.addEventListener("visibilitychange", unshift);
     return () => {
       if (raf) cancelAnimationFrame(raf);
       vv.removeEventListener("resize", schedule);
       vv.removeEventListener("scroll", schedule);
       window.removeEventListener("orientationchange", schedule);
+      window.removeEventListener("scroll", unshift);
+      window.removeEventListener("pageshow", unshift);
+      document.removeEventListener("visibilitychange", unshift);
       root.style.removeProperty("--app-vh");
       root.style.removeProperty("--app-vv-top");
       root.classList.remove("keyboard-open");
