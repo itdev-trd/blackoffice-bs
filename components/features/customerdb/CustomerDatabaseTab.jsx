@@ -124,6 +124,12 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);   // {ok, text}
   const [grantSuccess, setGrantSuccess] = useState(null);   // { username, items, fails } — popup ยืนยันตอนเพิ่มสิทธิ์ TV สำเร็จ
+  // บัญชี TradingView ที่ลูกค้ารายนี้มีสิทธิ์อยู่แล้ว (ถ้ามี) — หาโดยจับคู่ trade_id ก่อน (นิ่งกว่า)
+  // แล้วค่อย fallback username · ใช้ตอนลูกค้าเปลี่ยนชื่อ TradingView หรือเปลี่ยนบัญชีเทรด จะได้แก้ของเดิม
+  // (revoke ชื่อเก่า + grant ชื่อใหม่ในสคริปต์เดิม) แทนที่จะไปสร้างสิทธิ์ใหม่ซ้อนทับ
+  const [linkedTv, setLinkedTv] = useState(null);   // null | { indicators, username, trade_id }
+  const [tvUpdateBusy, setTvUpdateBusy] = useState(false);
+  const [tvUpdateMsg, setTvUpdateMsg] = useState(null);   // {ok, text}
   // ให้ AI อ่านบทสนทนาแล้วเสนอว่าเลข/ข้อความไหนคืออะไร — เสนอเท่านั้น ไม่เติมลงช่องเองจนแอดมินกดรับ
   // regex แยกไม่ออกว่าเลขไหนคือเลขบัญชี เบอร์โทร หรือยอดเงิน แต่ AI อ่านบริบทได้
   const [aiBusy, setAiBusy] = useState(false);
@@ -193,6 +199,72 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
     return () => { stop = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tvOn, row?.page_id]);
+
+  // ตรวจว่าลูกค้ารายนี้มีสิทธิ์ TradingView อยู่แล้วไหม (จับคู่ด้วย trade_id/username เดิมของแชท)
+  // ใช้ค่าจาก "row" ตรงๆ ไม่ใช่ f ที่แอดมินกำลังพิมพ์แก้ — กันไม่ให้ค้นหาเพี้ยนตามที่พิมพ์อยู่
+  async function loadLinkedTv() {
+    if (!tvOn) { setLinkedTv(null); return; }
+    const tradeId = String(row?.trade_id || "").trim();
+    const username = String(row?.username || "").trim();
+    if (!tradeId && !username) { setLinkedTv(null); return; }
+    let q = supabase.from("tv_access").select("id, pine_id, username, trade_id, expiration, status");
+    q = tradeId ? q.eq("trade_id", tradeId) : q.ilike("username", username);
+    const { data } = await q;
+    const indicators = data || [];
+    if (!indicators.length) { setLinkedTv(null); return; }
+    // เอาชื่อ/ไอดีเทรดจากแถวแรกมาโชว์ — ทุกแถวของคนเดียวกันควรตรงกันเสมอ (อัปเดตพร้อมกันทุกครั้ง)
+    setLinkedTv({ indicators, username: indicators[0].username, trade_id: indicators[0].trade_id });
+  }
+  useEffect(() => { loadLinkedTv(); setTvUpdateMsg(null); /* eslint-disable-next-line */ }, [tvOn, row?.id, row?.trade_id, row?.username]);
+
+  // ลูกค้าเปลี่ยนชื่อ TradingView หรือเปลี่ยนบัญชีเทรด — แก้ของเดิมทุกอินดิเคเตอร์พร้อมกัน
+  // (เปลี่ยนชื่อ = ถอนสิทธิ์ชื่อเก่าบน TradingView แล้วให้สิทธิ์ชื่อใหม่ในสคริปต์เดิม วันหมดอายุเท่าเดิม
+  //  เปลี่ยนไอดีเทรด = แก้แค่ในฐานข้อมูล ไม่ยุ่งกับ TradingView) คนละเรื่องกับ "เพิ่มสิทธิ์ให้ลูกค้าใหม่"
+  // จึงไม่บังคับเลือกสคริปต์/วันหมดอายุเหมือนปุ่ม "บันทึกข้อมูล" ด้านบน
+  async function updateExistingTv() {
+    if (!linkedTv || tvUpdateBusy) return;
+    const newUsername = f.username.trim();
+    const newTradeId = f.trade_id.trim();
+    if (!newUsername) { setTvUpdateMsg({ ok: false, text: "User TradingView ห้ามว่าง" }); return; }
+    const usernameChanged = newUsername.toLowerCase() !== String(linkedTv.username || "").trim().toLowerCase();
+    const tradeIdChanged = newTradeId !== String(linkedTv.trade_id || "").trim();
+    if (!usernameChanged && !tradeIdChanged) { setTvUpdateMsg({ ok: false, text: "ยังไม่ได้แก้ User TradingView หรือไอดีเทรดเลย" }); return; }
+
+    setTvUpdateBusy(true); setTvUpdateMsg(null);
+    // เปลี่ยนไอดีเทรดต้องเช็คผ่านก่อน กันพิมพ์ผิดแล้วไปติดอยู่กับบัญชีที่ไม่มีจริง
+    if (tradeIdChanged && newTradeId) {
+      setTvUpdateMsg({ ok: true, text: "กำลังเช็คไอดีเทรดใหม่..." });
+      const { data: vt, error: ve } = await supabase.functions.invoke("verify-trade-id", { body: { trade_id: newTradeId } });
+      if (ve || !vt?.ok) { setTvUpdateBusy(false); setTvUpdateMsg({ ok: false, text: "เช็คไอดีเทรดไม่สำเร็จ: " + (vt?.error || "ลองใหม่") }); return; }
+      if (!vt.pass) { setTvUpdateBusy(false); setTvUpdateMsg({ ok: false, text: `ไอดีเทรด "${newTradeId}" ไม่ผ่าน — ยังไม่แก้` }); return; }
+    }
+
+    setTvUpdateMsg({ ok: true, text: usernameChanged ? "กำลังถอนสิทธิ์ user เดิม + ให้สิทธิ์ user ใหม่..." : "กำลังแก้ไอดีเทรด..." });
+    let okCount = 0; const fails = [];
+    for (const ind of linkedTv.indicators) {
+      const { data, error } = await supabase.functions.invoke("tradingview", { body: {
+        action: "update_member", id: ind.id,
+        ...(usernameChanged ? { username: newUsername } : {}),
+        ...(tradeIdChanged ? { trade_id: newTradeId } : {}),
+      } });
+      if (error || !data?.ok) fails.push(data?.error || (await readFunctionErrorMessage(error)) || "ไม่ทราบสาเหตุ");
+      else okCount++;
+    }
+    // แก้สำเร็จอย่างน้อย 1 อินดิเคเตอร์ → เขียนลง chat_customers ให้ตรงกันด้วย (ล็อกไม่ให้ AI แก้ทับ)
+    if (okCount > 0) await saveLeadFields();
+    setTvUpdateBusy(false);
+    setTvUpdateMsg(
+      fails.length === 0
+        ? { ok: true, text: `✓ อัปเดตสำเร็จทั้ง ${okCount} อินดิเคเตอร์` }
+        : okCount > 0
+          ? { ok: true, text: `✓ อัปเดตแล้ว ${okCount} อินดิเคเตอร์ · ไม่สำเร็จ ${fails.length}: ${fails[0]}` }
+          : { ok: false, text: `อัปเดตไม่สำเร็จ: ${fails[0]}` }
+    );
+    if (okCount > 0) {
+      logActivity("tv_update_account_from_chat", { id: row.id, from_username: linkedTv.username, to_username: newUsername, from_trade_id: linkedTv.trade_id, to_trade_id: newTradeId });
+      loadLinkedTv();
+    }
+  }
 
   // บันทึกลงฐานข้อมูลลูกค้า (save-lead-fields) — ใช้ซ้ำหลายเส้นทาง
   async function saveLeadFields(extraMsg) {
@@ -485,6 +557,26 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
           </div>
         </div>
       </div>
+
+      {/* ลูกค้ารายนี้มีสิทธิ์ TradingView อยู่แล้ว — เปลี่ยนชื่อ TV/ย้ายบัญชีเทรดจากตรงนี้ได้เลย
+          ไม่ต้องไปหน้าจัดการสมาชิก Indicator แก้ "User TradingView"/"ไอดีเทรด" ด้านบนแล้วกดปุ่มนี้ */}
+      {tvOn && linkedTv && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50/40 p-2.5 space-y-1.5">
+          <div className="text-[11px] font-semibold text-amber-800 flex items-center gap-1">
+            <RefreshCw size={12} /> มีสิทธิ์ TradingView อยู่แล้ว ({linkedTv.indicators.length} อินดิเคเตอร์)
+          </div>
+          <div className="text-[10.5px] text-slate-500">
+            ปัจจุบัน: user <span className="font-mono font-semibold text-slate-700">{linkedTv.username}</span>
+            {linkedTv.trade_id && <> · ไอดีเทรด <span className="font-mono font-semibold text-slate-700">{linkedTv.trade_id}</span></>}
+            — ลูกค้าเปลี่ยนชื่อ TV หรือเปลี่ยนบัญชีเทรด ให้แก้ในช่อง &quot;User TradingView&quot;/&quot;ไอดีเทรด&quot; ด้านบนแล้วกดปุ่มนี้
+          </div>
+          <button type="button" onClick={updateExistingTv} disabled={tvUpdateBusy}
+            className="w-full rounded-lg border border-amber-400 bg-white text-amber-800 px-3 py-1.5 text-xs font-semibold hover:bg-amber-100 disabled:opacity-50 flex items-center justify-center gap-1.5">
+            {tvUpdateBusy ? <Loader2 className="animate-spin" size={13} /> : <RefreshCw size={13} />} อัปเดตชื่อ/บัญชีเทรดของสิทธิ์เดิม
+          </button>
+          {tvUpdateMsg && <div className={`text-[11px] ${tvUpdateMsg.ok ? "text-emerald-600" : "text-rose-600"}`}>{tvUpdateMsg.text}</div>}
+        </div>
+      )}
 
       {/* ตัวเลือก TV (เหมือนหน้าจัดการสมาชิก TV) — เห็นเฉพาะแอดมินจนกว่าจะปล่อย */}
       {tvOn && (
