@@ -113,7 +113,11 @@ Deno.serve(async (req) => {
   const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...corsHeaders, "content-type": "application/json" } });
   try {
     const body = await req.json().catch(() => ({}));
-    const action = body?.action === "status" ? "status" : body?.action === "sync_comments" ? "sync_comments" : "subscribe";
+    const action = body?.action === "status" ? "status"
+      : body?.action === "sync_comments" ? "sync_comments"
+      : body?.action === "discover" ? "discover"
+      : body?.action === "connect_page" ? "connect_page"
+      : "subscribe";
     // allowService = เรียกจาก cron/สคริปต์หลังบ้านได้ด้วย (ผูก webhook ซ้ำหลังเปลี่ยน Meta app / ตรวจสุขภาพ)
     const auth = await authorizeRequest(req, action === "sync_comments"
       ? { tab: "inbox", allowService: true }
@@ -140,6 +144,70 @@ Deno.serve(async (req) => {
     const token = await getMetaToken();
     if (!token) throw new Error("ยังไม่ได้ตั้งค่า Meta access token");
     const base = `https://graph.facebook.com/${GRAPH_VERSION}`;
+
+    // ---- discover: "เพจไหนที่ token นี้มองเห็นบ้าง" ใช้แสดงในปุ่ม "เพิ่มการเชื่อมต่อเพจ" ----
+    // ต้อง forceRefresh เสมอเพราะแอดมินกดปุ่มนี้ก็ต่อเมื่อคาดว่ามีเพจใหม่ (เพิ่งมอบสิทธิ์ในฝั่ง Meta มา)
+    // เพจจะโผล่ที่นี่ได้ก็ต่อเมื่อถูกมอบสิทธิ์ให้ token/System User ที่ตั้งไว้ในหน้าตั้งค่า Meta ก่อนแล้ว
+    // (ฝั่งนี้ดึงได้แค่เพจที่ token มองเห็นเท่านั้น เพิ่มเพจที่ Meta มองไม่เห็นให้ไม่ได้)
+    if (action === "discover") {
+      const pagesData = await getMetaPages(base, token, { forceRefresh: true });
+      if (pagesData?.error) throw new Error(pagesData.error.message || "ดึงรายชื่อเพจไม่สำเร็จ (ต้องมีสิทธิ์ pages_show_list/pages_messaging)");
+      const pages = (pagesData?.data ?? []).filter((p: any) => p.access_token);
+      const { data: existing } = await admin.from("page_lead_config").select("page_id");
+      const connectedIds = new Set((existing ?? []).map((r: any) => String(r.page_id)));
+      const seen = new Set<string>();
+      const list = pages.filter((p: any) => {
+        const id = String(p.id);
+        if (seen.has(id)) return false;   // token คนละแบรนด์เห็นเพจเดียวกันซ้ำได้ (Business หลายอันแชร์เพจ)
+        seen.add(id);
+        return true;
+      }).map((p: any) => ({
+        id: String(p.id), name: p.name || String(p.id),
+        picture: p.picture?.data?.url || null,
+        has_instagram: !!p.instagram_business_account?.id,
+        connected: connectedIds.has(String(p.id)),
+      }));
+      return json({ ok: true, action, pages: list });
+    }
+
+    // ---- connect_page: เชื่อมเพจเดียวที่แอดมินเลือกจากรายการ discover ----
+    // ลงทะเบียนเข้า page_lead_config (ให้โผล่ในหน้าตอบแชท/ตั้งค่าอื่น ๆ ทันที) + ผูก webhook เฉพาะเพจนี้
+    // ไม่ยุ่งกับเพจอื่นเลย ต่างจาก action "subscribe" ที่วน subscribe ทุกเพจที่ token เห็น
+    if (action === "connect_page") {
+      const pageId = String(body?.page_id || "").trim();
+      if (!pageId) return json({ ok: false, error: "ต้องระบุ page_id" });
+      let pagesData = await getMetaPages(base, token, {});
+      let page = (pagesData?.data ?? []).find((p: any) => String(p.id) === pageId);
+      if (!page) {
+        // อาจเป็นเพจที่เพิ่งได้สิทธิ์มาหลังแคชล่าสุด — ลองดึงสดอีกครั้งก่อนบอกว่าไม่พบ
+        pagesData = await getMetaPages(base, token, { forceRefresh: true, mustIncludePageId: pageId });
+        page = (pagesData?.data ?? []).find((p: any) => String(p.id) === pageId);
+      }
+      if (!page) return json({ ok: false, error: "ไม่พบเพจนี้ในสิทธิ์ของ token — ต้องมอบสิทธิ์เพจนี้ให้ระบบในฝั่ง Meta Business ก่อน แล้วกด \"ตรวจหาเพจใหม่\" อีกครั้ง" });
+      if (!page.access_token) return json({ ok: false, error: "เพจนี้ไม่มี page access token — เช็คสิทธิ์ pages_messaging ของ token" });
+
+      const { error: upsertError } = await admin.from("page_lead_config")
+        .upsert({ page_id: pageId, page_name: page.name || pageId }, { onConflict: "page_id", ignoreDuplicates: true });
+      if (upsertError) return json({ ok: false, error: `เชื่อมเพจไม่สำเร็จ: ${upsertError.message}` });
+
+      const fields = COMMENTS_ENABLED ? `${BASE_FIELDS},feed` : BASE_FIELDS;
+      const subscribeResult = await fetchJson(`${base}/${pageId}/subscribed_apps?subscribed_fields=${encodeURIComponent(fields)}&access_token=${page.access_token}`, { method: "POST" }, admin);
+      // ผูกแอปกับ object "page"/"instagram" ที่ระดับแอป (callback_url) ด้วย — จำเป็นแม้เพจจะ subscribed_apps แล้ว
+      // ถ้ายังไม่เคยทำมาก่อน (ไม่ผ่าน = ยังไม่มีเหตุด่วน เพจก็ถูกลงทะเบียนแล้ว ให้แจ้งเตือนแทนการล้มทั้งก้อน)
+      let appWebhookWarning: string | null = null;
+      try {
+        const appResult = await ensureAppPageWebhook(base, token, admin);
+        if (!appResult.success) appWebhookWarning = appResult.page?.error || appResult.instagram?.error || "ผูก webhook ระดับแอปไม่สำเร็จ";
+      } catch (e) {
+        appWebhookWarning = String(e instanceof Error ? e.message : e);
+      }
+      return json({
+        ok: subscribeResult?.success === true,
+        action, page_id: pageId, page: page.name,
+        error: subscribeResult?.error?.error_user_msg || subscribeResult?.error?.message || null,
+        app_webhook_warning: appWebhookWarning,
+      });
+    }
 
     const pagesData = await getMetaPages(base, token, { forceRefresh: action === "subscribe" });
     if (pagesData?.error) throw new Error(pagesData.error.message || "ดึงรายชื่อเพจไม่สำเร็จ (ต้องมีสิทธิ์ pages_show_list/pages_messaging)");
