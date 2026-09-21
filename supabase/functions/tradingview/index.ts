@@ -1036,6 +1036,47 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ---- ยอด Lot ของสมาชิกคนเดียวในช่วงที่ระบุ (หน้ารายละเอียดสมาชิก เลือกช่วงวันเองได้) ----
+    // ต่างจาก refresh_lots ตรงที่ยิงเฉพาะ trade_id เดียว จึงเบาพอจะกดดูสด ๆ ระหว่างเปิดดูรายละเอียด
+    if (action === "lot_range") {
+      const tradeId = String(body?.trade_id || "").trim();
+      const start = String(body?.period_start || "").trim();
+      const end = String(body?.period_end || "").trim();
+      if (!tradeId) return json({ ok: false, error: "ต้องระบุ trade_id" });
+      if (!start || !end) return json({ ok: false, error: "ต้องระบุช่วงวันที่ (period_start, period_end)" });
+      if (end < start) return json({ ok: false, error: "วันสิ้นสุดต้องไม่ก่อนวันเริ่มต้น" });
+      try {
+        const hit = (await fetchBrokerLots(start, end, tradeId)).get(tradeId);
+        const fetchedAt = new Date().toISOString();
+        const row = {
+          trade_id: tradeId, period_start: start, period_end: end,
+          lots: hit?.lots ?? 0, excluded_lots: hit?.excluded_lots ?? 0,
+          campaign_name: hit?.campaign_name ?? null, fetched_at: fetchedAt,
+        };
+        await db.from("tv_lot_usage").upsert(row, { onConflict: "trade_id,period_start,period_end" });
+        return json({ ok: true, ...row });
+      } catch (e) {
+        return json({ ok: false, error: `ดึงยอด Lot จาก broker ไม่สำเร็จ: ${String(e instanceof Error ? e.message : e)}` });
+      }
+    }
+
+    // ---- ตั้งโควตา Lot เฉพาะราย (ทับค่ากลางของแบรนด์) ----
+    // เขียนลงทุกใบอินดิเคเตอร์ของสมาชิกคนนั้น เพราะโควตาเป็นของ "คน" ไม่ใช่ของใบสิทธิ์
+    if (action === "set_lot_quota") {
+      if (!isAdmin) return json({ ok: false, error: "เฉพาะแอดมิน" }, 403);
+      const username = String(body?.username || "").trim();
+      if (!username) return json({ ok: false, error: "ต้องระบุ username" });
+      const raw = body?.lot_quota;
+      const quota = raw === null || raw === "" || raw === undefined ? null : Number(raw);
+      if (quota !== null && (!Number.isFinite(quota) || quota < 0)) return json({ ok: false, error: "โควตาต้องเป็นตัวเลขไม่ติดลบ" });
+      let q = db.from("tv_access").update({ lot_quota_override: quota, updated_at: new Date().toISOString() }).eq("username", username);
+      const brandId = Number(body?.brand_id) || null;
+      if (brandId) q = q.eq("brand_id", brandId);
+      const { error } = await q;
+      if (error) return json({ ok: false, error: error.message });
+      return json({ ok: true, username, lot_quota_override: quota });
+    }
+
     // ---- ประวัติ Lot ย้อนหลังรายเดือนของสมาชิกคนเดียว (ใช้ในหน้ารายละเอียดสมาชิก Indicator) ----
     // ยิง broker แยกทีละเดือนพร้อมกัน แล้ว cache ลง tv_lot_usage ไปด้วย ประวัติจะได้สะสมขึ้นเรื่อย ๆ
     // (broker เก็บย้อนหลังไม่ครบทุกเดือน เดือนที่ไม่มีข้อมูลจะได้ 0 ซึ่งแยกไม่ออกจาก "ไม่ได้เทรด" อยู่แล้ว)

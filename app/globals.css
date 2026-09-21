@@ -462,6 +462,8 @@ html:not(.dark) .chat-bubble-me * { color: #FFFFFF; }
 @media (min-width: 640px) {
   .ds-dialog-backdrop { align-items: center; padding: 20px; }
   .ds-dialog { border-radius: 14px; }
+  /* กล่องรายละเอียดที่มีหลายคอลัมน์ (เช่น โปรไฟล์สมาชิก Indicator) — 480px แคบเกินจะอ่านรู้เรื่อง */
+  .ds-dialog.ds-dialog-wide { width: min(100%, 880px); }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }

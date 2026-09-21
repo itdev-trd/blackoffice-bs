@@ -5,7 +5,8 @@
 //
 // "Lots" ดึงจาก broker (XM) ผ่าน edge function action "refresh_lots" (ปุ่ม "ตรวจ Lot ทุกคน")
 // แล้ว cache ไว้ในตาราง tv_lot_usage เพราะ API คืนยอดทุกบัญชีมาทีเดียว ไม่ต้องยิงรายคน
-// ช่วงที่นับคือรอบสิทธิ์ของแต่ละคน (วันเริ่มต้น → วันหมดอายุ) ไม่ใช่เดือนปฏิทิน
+// ช่วงที่นับตั้งต้นเป็น "เดือนปฏิทิน" (ใช้ปิดยอดกันเป็นเดือน) สลับเป็นรอบเดือนรายคน/เลือกวันเองได้
+// ส่วนหน้ารายละเอียดรายคน (กดที่ชื่อ) ตั้งต้นเป็นรอบเดือนของคนนั้นและเลือกช่วงแยกได้อีกที
 // แต่ยอดของรอบที่ยังไม่หมดอายุเดินทุกวัน แคชค้างข้ามวันก็ไม่ตรงกับที่ลูกค้าเห็นในแอป BeSight แล้ว
 // (เคสจริง: แคช 0.60 ตอนดึกวันที่ 17 ก.ย. ขณะที่ broker เดินไปถึง 0.74) หน้านี้จึงตรวจสดให้เอง
 // เมื่อค่าที่แคชเก่าเกิน LOT_STALE_MS และโชว์เวลาที่ตรวจล่าสุดไว้ข้างปุ่มเสมอ
@@ -114,8 +115,9 @@ function lotCycleOf(grantDay, expiryDay, today) {
   return { start, end };
 }
 
-// ช่วงที่แอดมินเลือกให้นับ — ค่าเริ่มต้นคือรอบเดือนของแต่ละคน แต่เลือกช่วงเดียวกันทั้งตารางได้
-const LOT_MODES = [["cycle", "รอบเดือนของแต่ละคน"], ["this_month", "เดือนนี้"], ["last_month", "เดือนก่อน"], ["custom", "เลือกวันเอง"]];
+// ช่วงที่แอดมินเลือกให้นับ — ตารางหลักตั้งต้นที่ "เดือนปฏิทิน" เพราะใช้ปิดยอดกันเป็นเดือน
+// ส่วนรอบเดือนของแต่ละคน (นับจากวันที่ได้สิทธิ์/ต่ออายุ) ยังเลือกได้ และเป็นค่าตั้งต้นในหน้ารายละเอียดรายคน
+const LOT_MODES = [["this_month", "เดือนนี้ (ปฏิทิน)"], ["last_month", "เดือนก่อน"], ["cycle", "รอบเดือนของแต่ละคน"], ["custom", "เลือกวันเอง"]];
 function fixedLotRange(mode, custom) {
   const n = thNow();
   const y = n.getUTCFullYear(), m = n.getUTCMonth();
@@ -144,6 +146,19 @@ function lotPeriodOf(indicatorRows, mode = "cycle", custom = null) {
 }
 const lotKeyOf = (m) => `${String(m.trade_id || "").trim()}|${m.lot_period.start}|${m.lot_period.end}`;
 
+// แถวข้อมูล "หัวข้อ — ค่า" ในกล่องรายละเอียดสมาชิก
+function InfoRow({ label, value, valueClass = "" }) {
+  return (
+    <div className="flex items-start justify-between gap-3 py-1.5 border-b border-slate-100 last:border-0">
+      <span className="text-xs text-slate-500 shrink-0">{label}</span>
+      <span className={`text-xs text-right break-all ${valueClass || "text-slate-800"}`}>{value || value === 0 ? value : "—"}</span>
+    </div>
+  );
+}
+
+// ช่วงที่ใช้นับ Lot ในหน้ารายละเอียดรายคน — ตั้งต้นที่ "รอบเดือนของสมาชิก" (นับจากวันที่ได้สิทธิ์/ต่ออายุ)
+const DETAIL_LOT_MODES = [["cycle", "รอบเดือนของสมาชิก"], ["this_month", "เดือนนี้ (ปฏิทิน)"], ["last_month", "เดือนก่อน"], ["custom", "เลือกวันเอง"]];
+
 const PAGE_SIZE = 10;
 // ยอด Lot ที่แคชไว้เกินเท่านี้ถือว่าเก่า — ตรวจสดให้ใหม่ตอนเปิดหน้า
 const LOT_STALE_MS = 30 * 60 * 1000;
@@ -156,7 +171,7 @@ export default function BesightMembersTab({ active = true }) {
   const [rows, setRows] = useState([]);
   const [lotUsage, setLotUsage] = useState(new Map()); // trade_id -> { lots, excluded_lots, campaign_name, fetched_at }
   const [lotCacheReady, setLotCacheReady] = useState(false);
-  const [lotMode, setLotMode] = useState("cycle");          // ช่วงที่แอดมินเลือกให้นับ Lot
+  const [lotMode, setLotMode] = useState("this_month");     // ช่วงที่แอดมินเลือกให้นับ Lot (ตั้งต้น = เดือนปฏิทิน)
   const [lotCustom, setLotCustom] = useState({ start: "", end: "" });
   const [loading, setLoading] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -178,6 +193,11 @@ export default function BesightMembersTab({ active = true }) {
   const [busyRow, setBusyRow] = useState(null);
   const [detailMember, setDetailMember] = useState(null);   // สมาชิกที่กำลังดูรายละเอียด (ครบทุกอินดิเคเตอร์)
   const [lotHistory, setLotHistory] = useState(null);       // { loading } | { months: [...] } | { error }
+  const [detailRange, setDetailRange] = useState({ mode: "cycle", start: "", end: "" });   // ช่วงที่เลือกดูในกล่องรายละเอียด
+  const [detailLot, setDetailLot] = useState(null);         // { loading } | { lots, excluded_lots, fetched_at } | { error }
+  const [quotaMemberDraft, setQuotaMemberDraft] = useState("");   // โควตาเฉพาะรายที่กำลังแก้
+  const [quotaMemberSaving, setQuotaMemberSaving] = useState(false);
+  const [extendBusy, setExtendBusy] = useState(null);       // id ของใบสิทธิ์ที่กำลังต่ออายุ
   const [grantSuccess, setGrantSuccess] = useState(null);   // { username, script } — popup ยืนยันตอนเพิ่มสมาชิกสำเร็จ
 
   const brand = brands.find((b) => b.id === brandId) || null;
@@ -275,11 +295,81 @@ export default function BesightMembersTab({ active = true }) {
     return () => { stop = true; };
   }, [detailMember?.key, detailMember?.trade_id]);
 
+  // เปิดกล่องรายละเอียด — รีเซ็ตช่วงที่เลือกกับช่องโควตาให้ตรงกับคนที่กดทุกครั้ง
+  function openDetail(m) {
+    setDetailMember(m);
+    setDetailRange({ mode: "cycle", start: "", end: "" });
+    setQuotaMemberDraft(m?.lot_quota_override ? String(m.lot_quota_override) : "");
+    setDetailLot(null);
+  }
+
   const quota = Number(brand?.lot_quota_per_month) || 0;
+  // โควตาของสมาชิกคนนั้น = ค่าเฉพาะรายถ้าตั้งไว้ ไม่งั้นใช้ค่ากลางของแบรนด์
+  const quotaOf = (m) => {
+    const override = Number(m?.lot_quota_override);
+    return Number.isFinite(override) && override > 0 ? override : quota;
+  };
   const scriptName = (pineId) => scripts.find((s) => s.pine_id === pineId)?.name || pineId;
   const lotInfoOf = (m) => (m?.trade_id ? lotUsage.get(lotKeyOf(m)) || null : null);
   const lotsOf = (m) => Number(lotInfoOf(m)?.lots ?? 0) || 0;
   const excludedLotsOf = (m) => Number(lotInfoOf(m)?.excluded_lots ?? 0) || 0;
+
+  // ช่วงที่กล่องรายละเอียดกำลังนับอยู่ (คิดด้วยกติกาเดียวกับตารางหลัก แค่เลือกแยกของใครของมันได้)
+  const detailPeriod = useMemo(() => {
+    if (!detailMember) return null;
+    if (detailRange.mode === "custom" && !fixedLotRange("custom", detailRange)) return null;   // ยังกรอกวันไม่ครบ
+    return lotPeriodOf(detailMember.indicators, detailRange.mode, detailRange);
+    // eslint-disable-next-line
+  }, [detailMember, detailRange.mode, detailRange.start, detailRange.end]);
+
+  // ยอด Lot ของช่วงที่เลือก — ยิง broker เฉพาะ trade_id เดียว จึงดึงสดได้ทุกครั้งที่เปลี่ยนช่วง
+  useEffect(() => {
+    if (!detailMember) { setDetailLot(null); return; }
+    if (!detailMember.trade_id) { setDetailLot({ error: "ยังไม่มี Trade ID — ดูยอด Lot ไม่ได้" }); return; }
+    if (!detailPeriod) { setDetailLot({ error: "เลือกวันเริ่มและวันสิ้นสุดให้ครบก่อน" }); return; }
+    let stop = false;
+    setDetailLot({ loading: true });
+    (async () => {
+      const { data, error } = await supabase.functions.invoke("tradingview", { body: {
+        action: "lot_range", trade_id: detailMember.trade_id, period_start: detailPeriod.start, period_end: detailPeriod.end,
+      } });
+      if (stop) return;
+      if (error || !data?.ok) { setDetailLot({ error: data?.error || (await readFunctionErrorMessage(error)) || "ดึงยอด Lot ไม่สำเร็จ" }); return; }
+      setDetailLot(data);
+    })();
+    return () => { stop = true; };
+    // eslint-disable-next-line
+  }, [detailMember?.key, detailMember?.trade_id, detailPeriod?.start, detailPeriod?.end]);
+
+  // โควตาเฉพาะราย — เขียนลงทุกใบสิทธิ์ของคนนั้น (โควตาเป็นของ "คน" ไม่ใช่ของใบ)
+  async function saveMemberQuota() {
+    if (!detailMember) return;
+    const raw = quotaMemberDraft.trim();
+    if (raw && !(Number(raw) > 0)) { alert("โควตาต้องเป็นตัวเลขมากกว่า 0 (เว้นว่าง = ใช้ค่ากลางของแบรนด์)"); return; }
+    setQuotaMemberSaving(true);
+    const { data, error } = await supabase.functions.invoke("tradingview", { body: {
+      action: "set_lot_quota", username: detailMember.username, brand_id: brandId, lot_quota: raw === "" ? null : Number(raw),
+    } });
+    setQuotaMemberSaving(false);
+    if (error || !data?.ok) { alert(data?.error || (await readFunctionErrorMessage(error)) || "บันทึกโควตาไม่สำเร็จ"); return; }
+    setDetailMember((cur) => (cur ? { ...cur, lot_quota_override: data.lot_quota_override } : cur));
+    logActivity("set_member_lot_quota", { username: detailMember.username, lot_quota: data.lot_quota_override });
+    loadMembers();
+  }
+
+  // ต่ออายุใบสิทธิ์เดียวจากกล่องรายละเอียด — นับต่อจากวันหมดอายุเดิมที่ยังไม่ถึง (edge function คิดให้)
+  async function extendIndicator(r, days = 30) {
+    setExtendBusy(r.id);
+    const { data, error } = await supabase.functions.invoke("tradingview", { body: {
+      action: "grant", renew: true, member_type: "renew", username: r.username, pine_ids: [r.pine_id], lifetime: false, days,
+    } });
+    setExtendBusy(null);
+    if (error || !data?.ok) { alert(data?.error || (await readFunctionErrorMessage(error)) || "ต่ออายุไม่สำเร็จ"); return; }
+    const newExp = data.results?.find((x) => x.ok)?.expiration || null;
+    setDetailMember((cur) => (cur ? { ...cur, indicators: cur.indicators.map((x) => (x.id === r.id ? { ...x, expiration: newExp ?? x.expiration, member_type: "renew", status: "active" } : x)) } : cur));
+    logActivity("tv_extend_from_detail", { username: r.username, pine_id: r.pine_id, days });
+    loadMembers();
+  }
 
   // จัดกลุ่ม tv_access ทีละแถว (หนึ่งแถวต่ออินดิเคเตอร์) ให้เหลือหนึ่งแถวต่อสมาชิกจริง
   const members = useMemo(() => {
@@ -293,6 +383,7 @@ export default function BesightMembersTab({ active = true }) {
       const primary = pickPrimaryIndicator(indicators);
       return {
         key, primary, indicators, lot_period: lotPeriodOf(indicators, lotMode, lotCustom),
+        lot_quota_override: indicators.map((r) => Number(r.lot_quota_override)).find((v) => Number.isFinite(v) && v > 0) ?? null,
         username: primary.username, display_name: primary.display_name, email: primary.email,
         phone: primary.phone, country: primary.country, telegram: primary.telegram,
         trade_id: primary.trade_id, member_type: primary.member_type, contact_channel: primary.contact_channel,
@@ -328,7 +419,7 @@ export default function BesightMembersTab({ active = true }) {
     // eslint-disable-next-line
   }, [members, lotUsage]);
 
-  const passedCount = members.filter((m) => quota > 0 && lotsOf(m) >= quota).length;
+  const passedCount = members.filter((m) => quotaOf(m) > 0 && lotsOf(m) >= quotaOf(m)).length;
   const notPassedCount = members.length - passedCount;
   const passedPct = members.length ? Math.round((passedCount / members.length) * 100) : 0;
 
@@ -485,7 +576,7 @@ export default function BesightMembersTab({ active = true }) {
       <SectionTitle
         eyebrow="TRADINGVIEW"
         title={`จัดการสมาชิก Indicator ของ ${brand?.name || "..."}`}
-        subtitle="ดูแลสิทธิ์ อินดิเคเตอร์ ข้อมูลติดต่อ และยอด Lot ที่เทรดจริงในรอบสิทธิ์ (วันเริ่มต้น → วันหมดอายุ) เทียบกับโควตา"
+        subtitle="ดูแลสิทธิ์ อินดิเคเตอร์ ข้อมูลติดต่อ และยอด Lot ที่เทรดจริงเทียบกับโควตา — เลือกช่วงที่นับได้ (ตั้งต้นเป็นเดือนปฏิทิน)"
         right={brands.length > 1 && (
           <Select value={brandId ?? ""} onChange={(e) => setBrandId(Number(e.target.value))} className="w-44">
             {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
@@ -496,7 +587,7 @@ export default function BesightMembersTab({ active = true }) {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="ds-card p-4 sm:p-5 flex flex-col gap-3">
           <div className="flex items-center justify-between gap-2">
-            <div className="text-[13px] text-slate-500 font-medium">Lot ที่ต้องจ่าย / รอบสิทธิ์ (ตั้งค่าได้)</div>
+            <div className="text-[13px] text-slate-500 font-medium">Lot ที่ต้องจ่าย / เดือน (ตั้งค่าได้)</div>
             <span className="rounded-control p-1.5 shrink-0 bg-brand-50 text-brand-600"><Gauge size={16} /></span>
           </div>
           {isAdmin ? (
@@ -508,7 +599,7 @@ export default function BesightMembersTab({ active = true }) {
             <div className="ds-figure text-[26px] sm:text-[28px]">{quota.toFixed(2)}</div>
           )}
         </div>
-        <StatCard icon={CheckCircle2} tone="green" label="สมาชิกที่ผ่านเกณฑ์ในรอบสิทธิ์" value={passedCount} sub={`${passedPct}%`} />
+        <StatCard icon={CheckCircle2} tone="green" label="สมาชิกที่ผ่านเกณฑ์ (ช่วงที่เลือก)" value={passedCount} sub={`${passedPct}%`} />
         <StatCard icon={XCircle} tone="red" label="สมาชิกที่ยังไม่ผ่านเกณฑ์" value={notPassedCount} />
       </div>
 
@@ -590,13 +681,16 @@ export default function BesightMembersTab({ active = true }) {
                   const st = statusInfo(m.primary);
                   const lots = lotsOf(m);
                   const excluded = excludedLotsOf(m);
-                  const passed = quota > 0 && lots >= quota;
+                  const memberQuota = quotaOf(m);
+                  const passed = memberQuota > 0 && lots >= memberQuota;
                   const extraCount = m.indicators.length - 1;
                   return (
                     <tr key={m.key} className="border-b border-slate-50 hover:bg-slate-50/60">
                       <td className="px-4 py-2.5 whitespace-nowrap">
-                        <div className="font-medium text-slate-800">{m.display_name || m.username}</div>
-                        {m.email && <div className="text-2xs text-slate-400">{m.email}</div>}
+                        <button onClick={() => openDetail(m)} className="text-left group">
+                          <div className="font-medium text-slate-800 group-hover:text-brand-600 group-hover:underline">{m.display_name || m.username}</div>
+                          {m.email && <div className="text-2xs text-slate-400">{m.email}</div>}
+                        </button>
                       </td>
                       <td className="px-4 py-2.5 whitespace-nowrap">
                         <span className={`text-2xs font-semibold px-2 py-0.5 rounded-full border ${PLAN_TONE[m.member_type] || PLAN_TONE.free}`}>{memberTypeLabel(m.member_type)}</span>
@@ -609,7 +703,7 @@ export default function BesightMembersTab({ active = true }) {
                       <td className="px-4 py-2.5 whitespace-nowrap text-slate-600">{m.telegram || "—"}</td>
                       <td className="px-4 py-2.5 whitespace-nowrap">
                         {extraCount > 0 ? (
-                          <button onClick={() => setDetailMember(m)} className="inline-flex items-center gap-1 text-brand-600 hover:underline">
+                          <button onClick={() => openDetail(m)} className="inline-flex items-center gap-1 text-brand-600 hover:underline">
                             {scriptName(m.primary.pine_id)} <span className="text-2xs text-slate-400">+{extraCount} ตัว</span>
                           </button>
                         ) : (
@@ -618,7 +712,7 @@ export default function BesightMembersTab({ active = true }) {
                       </td>
                       <td className="px-4 py-2.5 whitespace-nowrap">
                         <span className={passed ? "text-emerald-700 font-semibold" : "text-rose-600 font-semibold"}>{lots.toFixed(2)}</span>
-                        <span className="text-slate-400"> / {quota.toFixed(2)}</span>
+                        <span className="text-slate-400" title={m.lot_quota_override ? "โควตาเฉพาะรายของสมาชิกคนนี้" : undefined}> / {memberQuota.toFixed(2)}{m.lot_quota_override ? "*" : ""}</span>
                         <div className="text-2xs text-slate-400" title={`นับ Lot ${m.lot_period.start} ถึง ${m.lot_period.end}${lotMode === "cycle" ? " (รอบเดือนของสมาชิกคนนี้ นับจากวันที่ได้สิทธิ์/ต่ออายุ)" : " (ช่วงที่แอดมินเลือก)"}`}>
                           {dayLabel(m.lot_period.start)}–{dayLabel(m.lot_period.end)}
                           {excluded > 0 && (
@@ -637,7 +731,7 @@ export default function BesightMembersTab({ active = true }) {
                       <td className="px-4 py-2.5 whitespace-nowrap text-slate-500">{channelLabel(m.contact_channel)}</td>
                       <td className="px-4 py-2.5 whitespace-nowrap text-right">
                         <div className="inline-flex items-center gap-1">
-                          <button onClick={() => setDetailMember(m)} className="p-1.5 rounded-lg text-slate-400 hover:text-brand-600 hover:bg-brand-50" title="ดูรายละเอียด/อินดิเคเตอร์ทั้งหมด"><ListTree size={14} /></button>
+                          <button onClick={() => openDetail(m)} className="p-1.5 rounded-lg text-slate-400 hover:text-brand-600 hover:bg-brand-50" title="ดูรายละเอียด/อินดิเคเตอร์ทั้งหมด"><ListTree size={14} /></button>
                           <button onClick={() => openEdit(m)} className="p-1.5 rounded-lg text-slate-400 hover:text-brand-600 hover:bg-brand-50" title="แก้ไข"><Pencil size={14} /></button>
                           {m.indicators.length === 1 && (
                             <button onClick={() => revoke(m.primary)} disabled={busyRow === m.primary.id} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 disabled:opacity-50" title="ถอนสิทธิ์">
@@ -774,74 +868,185 @@ export default function BesightMembersTab({ active = true }) {
         )}
       </Dialog>
 
-      {/* รายละเอียดสมาชิก — โผล่เฉพาะตอนกด "ดูรายละเอียด" ในตาราง เห็นครบทุกอินดิเคเตอร์ของคนคนเดียวกัน
-          (ตารางหลักโชว์แค่ตัว "หลัก" ตัวเดียวต่อแถว กันไม่ให้คนเดียวโผล่ซ้ำหลายบรรทัด) */}
-      <Dialog open={!!detailMember} title={detailMember ? `อินดิเคเตอร์ของ ${detailMember.display_name || detailMember.username}` : ""} onClose={() => setDetailMember(null)}
-        footer={<Button variant="secondary" onClick={() => setDetailMember(null)}>ปิด</Button>}>
-        {detailMember && (
-          <div className="space-y-3">
-            {/* ประวัติ Lot ย้อนหลัง 5 เดือน — ดูได้ว่าเดือนไหนผ่านโควตาบ้าง (ใช้ตัดสินต่ออายุ/เลื่อนขั้น) */}
-            <div className="rounded-xl border border-slate-200 p-3">
-              <div className="flex items-center justify-between gap-2 mb-2">
-                <div className="text-[13px] font-semibold text-slate-700">
-                  ประวัติ Lot ย้อนหลัง 5 เดือน
-                  <span className="ml-1 text-2xs font-normal text-slate-400">(แยกตามเดือนปฏิทิน ไม่ใช่รอบสิทธิ์)</span>
-                </div>
-                <span className="text-2xs text-slate-400">โควตา {quota.toFixed(2)} / รอบ</span>
+      {/* รายละเอียดสมาชิก — กดที่ชื่อในตาราง (หรือไอคอนขวาสุด) เห็นข้อมูลติดต่อ ยอด Lot ตามช่วงที่เลือก
+          และใบสิทธิ์ทุกอินดิเคเตอร์ของคนคนเดียวกันในที่เดียว (ตารางหลักโชว์แค่ใบ "หลัก" ใบเดียวต่อแถว) */}
+      <Dialog
+        className="ds-dialog-wide"
+        open={!!detailMember}
+        title={detailMember ? (detailMember.display_name || detailMember.username) : ""}
+        description={detailMember ? [detailMember.email, detailMember.username].filter(Boolean).join(" · ") : ""}
+        onClose={() => setDetailMember(null)}
+        footer={<Button variant="secondary" onClick={() => setDetailMember(null)}>ปิด</Button>}
+      >
+        {detailMember && (() => {
+          const memberQuota = quotaOf(detailMember);
+          const lots = Number(detailLot?.lots) || 0;
+          const excluded = Number(detailLot?.excluded_lots) || 0;
+          const passed = memberQuota > 0 && lots >= memberQuota;
+          const pct = memberQuota > 0 ? Math.min(100, (lots / memberQuota) * 100) : 0;
+          const activeCount = detailMember.indicators.filter((r) => r.status === "active").length;
+          return (
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={`text-2xs font-semibold px-2 py-0.5 rounded-full border ${PLAN_TONE[detailMember.member_type] || PLAN_TONE.free}`}>{memberTypeLabel(detailMember.member_type)}</span>
+                <span className={`text-2xs font-semibold px-2 py-0.5 rounded-full border ${statusInfo(detailMember.primary).tone}`}>{statusInfo(detailMember.primary).label}</span>
+                <span className="text-2xs text-slate-400">อินดิเคเตอร์ {activeCount}/{detailMember.indicators.length} ใบที่ยังใช้ได้</span>
+                {Number(detailMember.primary.renew_count) > 0 && (
+                  <span className="text-2xs text-slate-400">· ต่ออายุมาแล้ว {detailMember.primary.renew_count} ครั้ง</span>
+                )}
               </div>
-              {!detailMember.trade_id ? (
-                <div className="text-xs text-slate-400">ยังไม่มี Trade ID — ดูยอด Lot ไม่ได้</div>
-              ) : lotHistory?.loading ? (
-                <div className="flex items-center gap-2 text-xs text-slate-500"><Loader2 size={13} className="animate-spin" /> กำลังดึงจาก broker…</div>
-              ) : lotHistory?.error ? (
-                <div className="text-xs text-rose-600">{lotHistory.error}</div>
-              ) : (
-                <div className="grid grid-cols-5 gap-1.5">
-                  {(lotHistory?.months || []).map((mo) => {
-                    const failed = mo.ok === false;
-                    const passed = !failed && quota > 0 && mo.lots >= quota;
-                    const excluded = Number(mo.excluded_lots) || 0;
-                    return (
-                      <div key={mo.start} className={`rounded-lg border px-2 py-1.5 text-center ${passed ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-slate-50"}`}>
-                        <div className="text-2xs text-slate-500">{new Date(`${mo.start}T00:00:00+07:00`).toLocaleDateString("th-TH", { month: "short", year: "2-digit" })}</div>
-                        {failed ? (
-                          <div className="text-sm font-semibold text-slate-400" title={mo.error || "ดึงจาก broker ไม่สำเร็จ"}>—</div>
-                        ) : (
-                          <div className={`text-sm font-semibold ${passed ? "text-emerald-700" : "text-slate-600"}`}>{Number(mo.lots).toFixed(2)}</div>
-                        )}
-                        {!failed && excluded > 0 && (
-                          <div className="text-[10px] text-slate-400" title="lot ที่ไม่เข้าเงื่อนไข rebate">+{excluded.toFixed(2)}</div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
 
-            {detailMember.indicators.map((r) => {
-              const st = statusInfo(r);
-              return (
-                <div key={r.id} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 p-3">
-                  <div className="min-w-0">
-                    <div className="font-medium text-slate-800">{scriptName(r.pine_id)}</div>
-                    <div className="text-2xs text-slate-500 mt-0.5">
-                      หมดอายุ: {r.expiration ? new Date(r.expiration).toLocaleDateString("th-TH") : "ตลอดชีพ"}
-                      {" · "}เริ่ม: {r.granted_at ? new Date(r.granted_at).toLocaleDateString("th-TH") : "—"}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className={`text-2xs font-semibold px-2 py-0.5 rounded-full border ${st.tone}`}>{st.label}</span>
-                    <button onClick={() => revoke(r)} disabled={busyRow === r.id} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 disabled:opacity-50" title="ถอนสิทธิ์อินดิเคเตอร์นี้">
-                      {busyRow === r.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                    </button>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="rounded-xl border border-slate-200 p-3">
+                  <div className="text-[13px] font-semibold text-slate-700 mb-1">ข้อมูลสมาชิก</div>
+                  <InfoRow label="Trade ID" value={detailMember.trade_id} />
+                  <InfoRow label="Broker" value={detailMember.broker} />
+                  <InfoRow label="TradingView" value={detailMember.username} />
+                  <InfoRow label="อีเมล" value={detailMember.email} />
+                  <InfoRow label="ประเทศ" value={detailMember.country} />
+                  <InfoRow label="เบอร์โทร" value={detailMember.phone} />
+                </div>
+                <div className="rounded-xl border border-slate-200 p-3">
+                  <div className="text-[13px] font-semibold text-slate-700 mb-1">ช่องทางและวันที่</div>
+                  <InfoRow label="ช่องทางที่ติดต่อมา" value={channelLabel(detailMember.contact_channel)} />
+                  <InfoRow label="Telegram" value={detailMember.telegram} />
+                  <InfoRow label="วันที่เข้าร่วม" value={detailMember.created_at ? new Date(detailMember.created_at).toLocaleDateString("th-TH") : null} />
+                  <InfoRow label="วันเริ่มต้นสิทธิ์" value={detailMember.granted_at ? new Date(detailMember.granted_at).toLocaleDateString("th-TH") : null} />
+                  <InfoRow label="วันหมดอายุ" value={detailMember.primary.expiration ? new Date(detailMember.primary.expiration).toLocaleDateString("th-TH") : "ตลอดชีพ"} />
+                  <InfoRow label="ต่ออายุล่าสุด" value={detailMember.primary.renewed_at ? new Date(detailMember.primary.renewed_at).toLocaleDateString("th-TH") : null} />
+                </div>
+              </div>
+
+              {/* ยอด Lot ตามช่วงที่เลือก — ตั้งต้นเป็นรอบเดือนของสมาชิกคนนี้ เลือกเป็นเดือนปฏิทินหรือกำหนดวันเองได้ */}
+              <div className="rounded-xl border border-slate-200 p-3 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-[13px] font-semibold text-slate-700">ยอด Lot ในช่วงที่เลือก</div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Select value={detailRange.mode} onChange={(e) => setDetailRange((r) => ({ ...r, mode: e.target.value }))} className="w-44">
+                      {DETAIL_LOT_MODES.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+                    </Select>
+                    {detailRange.mode === "custom" && (
+                      <>
+                        <Input type="date" value={detailRange.start} onChange={(e) => setDetailRange((r) => ({ ...r, start: beToCe(e.target.value) }))} className="w-36" />
+                        <span className="text-xs text-slate-400">ถึง</span>
+                        <Input type="date" value={detailRange.end} onChange={(e) => setDetailRange((r) => ({ ...r, end: beToCe(e.target.value) }))} className="w-36" />
+                      </>
+                    )}
+                    <Button size="sm" variant="secondary" icon={RefreshCw} loading={!!detailLot?.loading}
+                      onClick={() => setDetailRange((r) => ({ ...r }))}>ดึงใหม่</Button>
                   </div>
                 </div>
-              );
-            })}
-            {detailMember.indicators.length === 0 && <div className="text-sm text-slate-400 text-center py-4">ถอนสิทธิ์ครบทุกอินดิเคเตอร์แล้ว</div>}
-          </div>
-        )}
+                {detailPeriod && (
+                  <div className="text-2xs text-slate-400">
+                    นับ {dayLabel(detailPeriod.start)} – {dayLabel(detailPeriod.end)}
+                    {detailRange.mode === "cycle" ? " (รอบเดือนของสมาชิก นับจากวันที่ได้สิทธิ์/ต่ออายุ)" : ""}
+                    {detailLot?.fetched_at ? ` · ข้อมูล ณ ${new Date(detailLot.fetched_at).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}` : ""}
+                  </div>
+                )}
+                {detailLot?.error ? (
+                  <div className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2">{detailLot.error}</div>
+                ) : (
+                  <>
+                    <div className="flex items-end gap-2">
+                      <span className={`text-2xl font-semibold ${passed ? "text-emerald-700" : "text-slate-800"}`}>
+                        {detailLot?.loading ? "…" : lots.toFixed(2)}
+                      </span>
+                      <span className="text-sm text-slate-400 pb-0.5">/ {memberQuota.toFixed(2)} Lots</span>
+                      {!detailLot?.loading && (
+                        <span className={`ml-1 mb-1 text-2xs font-semibold px-2 py-0.5 rounded-full border ${passed ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-rose-200 bg-rose-50 text-rose-600"}`}>
+                          {passed ? "ผ่านเกณฑ์" : "ยังไม่ผ่าน"}
+                        </span>
+                      )}
+                    </div>
+                    <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+                      <div className={`h-full rounded-full transition-all ${passed ? "bg-emerald-500" : "bg-rose-400"}`} style={{ width: `${pct}%` }} />
+                    </div>
+                    {excluded > 0 && (
+                      <div className="text-2xs text-slate-400" title="lot ที่ broker ไม่นับเพราะเทรดสัญลักษณ์ที่ไม่เข้าเงื่อนไข rebate">
+                        +{excluded.toFixed(2)} lot ที่ไม่นับ (สัญลักษณ์ไม่เข้าเงื่อนไข) · ยอดในแอปของลูกค้าจะมากกว่านี้เท่านั้น
+                      </div>
+                    )}
+                  </>
+                )}
+                {isAdmin && (
+                  <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-slate-500">โควตาเฉพาะคนนี้</span>
+                    <Input type="number" min={0} step="0.01" value={quotaMemberDraft} placeholder={`ค่ากลาง ${quota.toFixed(2)}`}
+                      onChange={(e) => setQuotaMemberDraft(e.target.value)} className="w-28" />
+                    <Button size="sm" variant="secondary" loading={quotaMemberSaving} onClick={saveMemberQuota}>บันทึก</Button>
+                    <span className="text-2xs text-slate-400">เว้นว่าง = ใช้ค่ากลางของแบรนด์</span>
+                  </div>
+                )}
+              </div>
+
+              {/* ใบสิทธิ์อินดิเคเตอร์ — ต่ออายุ/ถอนสิทธิ์ทีละใบได้จากตรงนี้ */}
+              <div className="rounded-xl border border-slate-200 p-3 space-y-2">
+                <div className="text-[13px] font-semibold text-slate-700">สิทธิ์อินดิเคเตอร์ ({detailMember.indicators.length})</div>
+                {detailMember.indicators.map((r) => {
+                  const st = statusInfo(r);
+                  return (
+                    <div key={r.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 px-3 py-2">
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium text-slate-800">{scriptName(r.pine_id)}</div>
+                        <div className="text-2xs text-slate-500 mt-0.5">
+                          หมดอายุ: {r.expiration ? new Date(r.expiration).toLocaleDateString("th-TH") : "ตลอดชีพ"}
+                          {" · "}เริ่ม: {r.granted_at ? new Date(r.granted_at).toLocaleDateString("th-TH") : "—"}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className={`text-2xs font-semibold px-2 py-0.5 rounded-full border ${st.tone}`}>{st.label}</span>
+                        <Button size="sm" variant="secondary" loading={extendBusy === r.id} onClick={() => extendIndicator(r, 30)}>ต่ออายุ 30 วัน</Button>
+                        <button onClick={() => revoke(r)} disabled={busyRow === r.id} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 disabled:opacity-50" title="ถอนสิทธิ์อินดิเคเตอร์นี้">
+                          {busyRow === r.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+                {detailMember.indicators.length === 0 && <div className="text-sm text-slate-400 text-center py-3">ถอนสิทธิ์ครบทุกอินดิเคเตอร์แล้ว</div>}
+              </div>
+
+              {/* ประวัติ Lot ย้อนหลัง 5 เดือน — ดูได้ว่าเดือนไหนผ่านโควตาบ้าง (ใช้ตัดสินต่ออายุ/เลื่อนขั้น) */}
+              <div className="rounded-xl border border-slate-200 p-3">
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <div className="text-[13px] font-semibold text-slate-700">
+                    ประวัติ Lot ย้อนหลัง 5 เดือน
+                    <span className="ml-1 text-2xs font-normal text-slate-400">(แยกตามเดือนปฏิทิน)</span>
+                  </div>
+                  <span className="text-2xs text-slate-400">โควตา {memberQuota.toFixed(2)} / เดือน</span>
+                </div>
+                {!detailMember.trade_id ? (
+                  <div className="text-xs text-slate-400">ยังไม่มี Trade ID — ดูยอด Lot ไม่ได้</div>
+                ) : lotHistory?.loading ? (
+                  <div className="flex items-center gap-2 text-xs text-slate-500"><Loader2 size={13} className="animate-spin" /> กำลังดึงจาก broker…</div>
+                ) : lotHistory?.error ? (
+                  <div className="text-xs text-rose-600">{lotHistory.error}</div>
+                ) : (
+                  <div className="grid grid-cols-5 gap-1.5">
+                    {(lotHistory?.months || []).map((mo) => {
+                      const failed = mo.ok === false;
+                      const monthPassed = !failed && memberQuota > 0 && mo.lots >= memberQuota;
+                      const monthExcluded = Number(mo.excluded_lots) || 0;
+                      return (
+                        <div key={mo.start} className={`rounded-lg border px-2 py-1.5 text-center ${monthPassed ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-slate-50"}`}>
+                          <div className="text-2xs text-slate-500">{new Date(`${mo.start}T00:00:00+07:00`).toLocaleDateString("th-TH", { month: "short", year: "2-digit" })}</div>
+                          {failed ? (
+                            <div className="text-sm font-semibold text-slate-400" title={mo.error || "ดึงจาก broker ไม่สำเร็จ"}>—</div>
+                          ) : (
+                            <div className={`text-sm font-semibold ${monthPassed ? "text-emerald-700" : "text-slate-600"}`}>{Number(mo.lots).toFixed(2)}</div>
+                          )}
+                          {!failed && monthExcluded > 0 && (
+                            <div className="text-[10px] text-slate-400" title="lot ที่ไม่เข้าเงื่อนไข rebate">+{monthExcluded.toFixed(2)}</div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
       </Dialog>
     </div>
   );
