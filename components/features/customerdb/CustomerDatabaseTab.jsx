@@ -128,6 +128,10 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
   // แล้วค่อย fallback username · ใช้ตอนลูกค้าเปลี่ยนชื่อ TradingView หรือเปลี่ยนบัญชีเทรด จะได้แก้ของเดิม
   // (revoke ชื่อเก่า + grant ชื่อใหม่ในสคริปต์เดิม) แทนที่จะไปสร้างสิทธิ์ใหม่ซ้อนทับ
   const [linkedTv, setLinkedTv] = useState(null);   // null | { indicators, username, trade_id }
+  // ช่องกรอกของกล่อง "เปลี่ยนชื่อ/บัญชีเทรด" แยกออกมาต่างหาก ไม่ใช้ร่วมกับ f (ช่องของ "ข้อมูลลูกค้า"/
+  // "เพิ่มสิทธิ์ TradingView" ด้านล่าง) — กันสับสนว่ากำลังจะ "เปลี่ยนของเดิม" หรือ "เพิ่มสิทธิ์ใหม่" กันแน่
+  const [tvEditUsername, setTvEditUsername] = useState("");
+  const [tvEditTradeId, setTvEditTradeId] = useState("");
   const [tvUpdateBusy, setTvUpdateBusy] = useState(false);
   const [tvUpdateMsg, setTvUpdateMsg] = useState(null);   // {ok, text}
   // ให้ AI อ่านบทสนทนาแล้วเสนอว่าเลข/ข้อความไหนคืออะไร — เสนอเท่านั้น ไม่เติมลงช่องเองจนแอดมินกดรับ
@@ -206,14 +210,16 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
     if (!tvOn) { setLinkedTv(null); return; }
     const tradeId = String(row?.trade_id || "").trim();
     const username = String(row?.username || "").trim();
-    if (!tradeId && !username) { setLinkedTv(null); return; }
+    if (!tradeId && !username) { setLinkedTv(null); setTvEditUsername(""); setTvEditTradeId(""); return; }
     let q = supabase.from("tv_access").select("id, pine_id, username, trade_id, expiration, status");
     q = tradeId ? q.eq("trade_id", tradeId) : q.ilike("username", username);
     const { data } = await q;
     const indicators = data || [];
-    if (!indicators.length) { setLinkedTv(null); return; }
+    if (!indicators.length) { setLinkedTv(null); setTvEditUsername(""); setTvEditTradeId(""); return; }
     // เอาชื่อ/ไอดีเทรดจากแถวแรกมาโชว์ — ทุกแถวของคนเดียวกันควรตรงกันเสมอ (อัปเดตพร้อมกันทุกครั้ง)
     setLinkedTv({ indicators, username: indicators[0].username, trade_id: indicators[0].trade_id });
+    setTvEditUsername(indicators[0].username || "");
+    setTvEditTradeId(indicators[0].trade_id || "");
   }
   useEffect(() => { loadLinkedTv(); setTvUpdateMsg(null); /* eslint-disable-next-line */ }, [tvOn, row?.id, row?.trade_id, row?.username]);
 
@@ -223,8 +229,8 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
   // จึงไม่บังคับเลือกสคริปต์/วันหมดอายุเหมือนปุ่ม "บันทึกข้อมูล" ด้านบน
   async function updateExistingTv() {
     if (!linkedTv || tvUpdateBusy) return;
-    const newUsername = f.username.trim();
-    const newTradeId = f.trade_id.trim();
+    const newUsername = tvEditUsername.trim();
+    const newTradeId = tvEditTradeId.trim();
     if (!newUsername) { setTvUpdateMsg({ ok: false, text: "User TradingView ห้ามว่าง" }); return; }
     const usernameChanged = newUsername.toLowerCase() !== String(linkedTv.username || "").trim().toLowerCase();
     const tradeIdChanged = newTradeId !== String(linkedTv.trade_id || "").trim();
@@ -251,7 +257,8 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
       else okCount++;
     }
     // แก้สำเร็จอย่างน้อย 1 อินดิเคเตอร์ → เขียนลง chat_customers ให้ตรงกันด้วย (ล็อกไม่ให้ AI แก้ทับ)
-    if (okCount > 0) await saveLeadFields();
+    // ส่งค่าใหม่ตรงๆ แทนที่จะพึ่ง f (ช่องนี้แยกออกมาต่างหากแล้ว ไม่งั้นจะ sync ค่าเก่าทับ)
+    if (okCount > 0) await saveLeadFields({ trade_id: newTradeId, username: newUsername });
     setTvUpdateBusy(false);
     setTvUpdateMsg(
       fails.length === 0
@@ -267,11 +274,17 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
   }
 
   // บันทึกลงฐานข้อมูลลูกค้า (save-lead-fields) — ใช้ซ้ำหลายเส้นทาง
-  async function saveLeadFields(extraMsg) {
-    const { data, error } = await supabase.functions.invoke("save-lead-fields", { body: { id: row.id, ...f } });
+  // overrides: ใช้ตอนกล่อง "เปลี่ยนชื่อ TV/บัญชีเทรด" เรียก — ต้องส่งค่าใหม่ตรงๆ เพราะช่องนั้นแยกจาก f
+  // (ไม่งั้นจะ sync ค่าเก่าใน f ทับค่าที่เพิ่งเปลี่ยนไปบน TradingView)
+  async function saveLeadFields(overrides) {
+    const payload = { id: row.id, ...f, ...(overrides || {}) };
+    const { data, error } = await supabase.functions.invoke("save-lead-fields", { body: payload });
     if (error || !data?.ok) return { ok: false, error: data?.error || error?.message || "อาจยังไม่ได้ deploy save-lead-fields" };
     logActivity("save_lead_fields", { id: row.id, customer_name: row?.customer_name });
     onSaved?.({ trade_id: data.trade_id, username: data.username, phone: data.phone, email: data.email, country: data.country ?? row?.country, broker: data.broker ?? row?.broker, manual_data: true, classified_by: "manual", needs_ai: false, needs_verify: false, manual_data_by: data.manual_data_by, manual_data_at: data.manual_data_at });
+    // sync ช่อง "ไอดีเทรด"/"User TradingView" ด้านบนให้ตรงกับของจริงทันที ไม่ต้องรอ row prop เปลี่ยนแล้ว
+    // useEffect ด้านบนค่อย resync ให้ (ซึ่งบางที parent ไม่ได้ re-render ทันที)
+    if (overrides) setF((cur) => ({ ...cur, ...overrides }));
     return { ok: true };
   }
 
@@ -558,21 +571,36 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
         </div>
       </div>
 
-      {/* ลูกค้ารายนี้มีสิทธิ์ TradingView อยู่แล้ว — เปลี่ยนชื่อ TV/ย้ายบัญชีเทรดจากตรงนี้ได้เลย
-          ไม่ต้องไปหน้าจัดการสมาชิก Indicator แก้ "User TradingView"/"ไอดีเทรด" ด้านบนแล้วกดปุ่มนี้ */}
+      {/* ลูกค้ารายนี้มีสิทธิ์ TradingView อยู่แล้ว — เปลี่ยนชื่อ TV/ย้ายบัญชีเทรดจากตรงนี้ได้เลย โดยไม่ต้อง
+          ไปหน้าจัดการสมาชิก Indicator ก็ไม่ต้องกดเลือกสคริปต์เหมือน "เพิ่มสิทธิ์ TradingView" ด้านล่าง
+          — มีช่องกรอกและปุ่มของตัวเอง แยกจากฟอร์ม "ข้อมูลลูกค้า"/"เพิ่มสิทธิ์" ทั้งหมด กันสับสนว่ากำลัง
+          "แก้ของเดิม" หรือ "เพิ่มสิทธิ์ใหม่" อยู่ */}
       {tvOn && linkedTv && (
-        <div className="rounded-lg border border-amber-300 bg-amber-50/40 p-2.5 space-y-1.5">
+        <div className="rounded-lg border border-amber-300 bg-amber-50/40 p-2.5 space-y-2">
           <div className="text-[11px] font-semibold text-amber-800 flex items-center gap-1">
-            <RefreshCw size={12} /> มีสิทธิ์ TradingView อยู่แล้ว ({linkedTv.indicators.length} อินดิเคเตอร์)
+            <RefreshCw size={12} /> เปลี่ยนชื่อ TV / บัญชีเทรด (มีสิทธิ์อยู่แล้ว {linkedTv.indicators.length} อินดิเคเตอร์)
           </div>
-          <div className="text-[10.5px] text-slate-500">
-            ปัจจุบัน: user <span className="font-mono font-semibold text-slate-700">{linkedTv.username}</span>
-            {linkedTv.trade_id && <> · ไอดีเทรด <span className="font-mono font-semibold text-slate-700">{linkedTv.trade_id}</span></>}
-            — ลูกค้าเปลี่ยนชื่อ TV หรือเปลี่ยนบัญชีเทรด ให้แก้ในช่อง &quot;User TradingView&quot;/&quot;ไอดีเทรด&quot; ด้านบนแล้วกดปุ่มนี้
+          <div className="grid grid-cols-2 gap-2">
+            <div className="min-w-0">
+              <label className="text-[11px] text-slate-400">User TradingView</label>
+              <input value={tvEditUsername} onChange={(e) => setTvEditUsername(e.target.value)}
+                className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+            </div>
+            <div className="min-w-0">
+              <label className="text-[11px] text-slate-400">ไอดีเทรด</label>
+              <input value={tvEditTradeId} onChange={(e) => setTvEditTradeId(e.target.value)}
+                className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+            </div>
           </div>
+          {/* เตือนเฉพาะตอนช่องต่างจากของจริง กันขึ้นเตือนพร่ำเพรื่อทั้งที่ยังไม่ได้แก้อะไรเลย */}
+          {tvEditUsername.trim().toLowerCase() !== String(linkedTv.username || "").trim().toLowerCase() && (
+            <div className="text-[10.5px] text-amber-700 bg-white/70 rounded-lg px-2 py-1.5">
+              จะถอนสิทธิ์ <b>{linkedTv.username}</b> บน TradingView แล้วให้สิทธิ์ <b>{tvEditUsername.trim() || "ชื่อใหม่"}</b> ในสคริปต์เดิมทั้งหมด (วันหมดอายุเท่าเดิม)
+            </div>
+          )}
           <button type="button" onClick={updateExistingTv} disabled={tvUpdateBusy}
             className="w-full rounded-lg border border-amber-400 bg-white text-amber-800 px-3 py-1.5 text-xs font-semibold hover:bg-amber-100 disabled:opacity-50 flex items-center justify-center gap-1.5">
-            {tvUpdateBusy ? <Loader2 className="animate-spin" size={13} /> : <RefreshCw size={13} />} อัปเดตชื่อ/บัญชีเทรดของสิทธิ์เดิม
+            {tvUpdateBusy ? <Loader2 className="animate-spin" size={13} /> : <RefreshCw size={13} />} บันทึกการเปลี่ยนแปลง
           </button>
           {tvUpdateMsg && <div className={`text-[11px] ${tvUpdateMsg.ok ? "text-emerald-600" : "text-rose-600"}`}>{tvUpdateMsg.text}</div>}
         </div>
