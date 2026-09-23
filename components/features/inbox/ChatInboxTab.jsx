@@ -62,6 +62,8 @@ const SKIP_NOTE = {
   disqualified: "สถานะนี้ไม่ส่งขึ้น Meta โดยเจตนา — การส่งลีดที่ไม่มีคุณสมบัติจะสอนอัลกอริทึมผิดทาง",
 };
 
+const MSG_WINDOW_STEP = 80;
+
 const CHAT_OPEN_COLS = "id, page_id, page_name, psid, customer_name, source, stage, stage_manual, classified_by, needs_ai, needs_verify, manual_data, manual_data_by, manual_data_at, trade_id, username, phone, email, awaiting_reply, unread, read_at, cust_read_at, cust_lang, country, broker, profile_pic, transcript, account_opened_at, entry_ad_id, entry_ad_name, last_user_text, last_reply_text, last_reply_by, last_reply_at, last_message_at, comment_ad_name, comment_ad_ids, comment_ad_names, comment_is_ad, comment_promoted_to_inbox, comment_permalink, blocked_at, synced_at, updated_at, notes, tags, ai_summary, ai_summary_at";
 
 export default function ChatInboxTab({ allowedPages = null, alertAllowed = true, alertMin = 3, alertPages = [], alertSound = true, alertNew = true, gotoChat = null, onGotoDone, active = true }) {
@@ -159,6 +161,9 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   const openRef = useRef(() => {});
   const bottomRef = useRef(null);
   const [highlightAt, setHighlightAt] = useState(null);   // เวลาของข้อความที่ต้องเลื่อนไปหา+ไฮไลต์
+  // ห้องที่ดึงประวัติย้อนหลังครบแล้วยาวได้หลายร้อยข้อความ (มีรูป/สติกเกอร์) — วาดทั้งหมดทีเดียวทำให้เปิดแชทหน่วง
+  // วาดแค่ช่วงท้ายก่อน แล้วค่อยเผยข้อความเก่าเมื่อกดปุ่ม (ข้อมูลอยู่ในเครื่องแล้ว ไม่ต้องยิงฐานข้อมูลซ้ำ)
+  const [msgWindow, setMsgWindow] = useState(MSG_WINDOW_STEP);
   const highlightAtRef = useRef(null);                    // ใช้กันไม่ให้ตัวเลื่อนลงล่างสุดมาแย่งจังหวะ
   const selRef = useRef(null);
   const [pageOptions, setPageOptions] = useState([]);      // เพจทั้งหมดที่เชื่อมได้
@@ -1197,8 +1202,12 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   }, [gotoChat?.id, gotoChat?.at, gotoChat?.trade_id, gotoChat?.username]);
 
   // เลื่อนไปยัง "ข้อความที่ตอบช้า/ยังไม่ตอบ" แล้วไฮไลต์ไว้สักครู่ — ไม่ต้องไล่หาเอง
+  // เปลี่ยนห้อง = กลับไปวาดแค่ช่วงท้าย
+  useEffect(() => { setMsgWindow(MSG_WINDOW_STEP); }, [selected?.id]);
   useEffect(() => {
     if (!highlightAt || !Array.isArray(selected?.transcript)) return;
+    // ข้อความเป้าหมายอาจเก่ากว่าช่วงที่วาดอยู่ — เผยทั้งห้องก่อน ไม่งั้นหา element ไม่เจอ
+    setMsgWindow(Infinity);
     const t = setTimeout(() => {
       const el = document.querySelector(`[data-msg-at="${CSS.escape(String(highlightAt))}"]`);
       if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -2133,6 +2142,8 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   // index ของข้อความฝั่งเพจ "อันสุดท้าย" — โชว์สถานะอ่านแค่อันเดียว
   const lastPageIdx = (() => { for (let k = tItems.length - 1; k >= 0; k--) if (tItems[k]?.w === "p") return k; return -1; })();
   const isLastPageMsg = (i) => i === lastPageIdx;
+  // index เดิมของ tItems ยังใช้ต่อได้ (เมนูข้อความ/สถานะอ่าน) — แค่ข้ามการวาดตัวที่อยู่ก่อน tStart
+  const tStart = Math.max(0, tItems.length - msgWindow);
   // ลูกค้าอ่านข้อความนี้แล้วหรือยัง (เทียบ cust_read_at กับเวลาข้อความ)
   const custReadStatus = (m) => {
     if (!m?.at) return null;
@@ -2705,7 +2716,14 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                 </div>
               )}
               <div className="flex-1 min-h-[96px] overflow-y-auto overscroll-contain p-4 space-y-2 bg-night-surface2/40">
-                {selected.transcript === null ? <Spinner label="กำลังโหลดบทสนทนา..." /> : <>{tItems.map((m, i) => (
+                {selected.transcript === null ? <Spinner label="กำลังโหลดบทสนทนา..." /> : <>{tStart > 0 && (
+                  <div className="flex justify-center">
+                    <button type="button" onClick={() => setMsgWindow((n) => n + MSG_WINDOW_STEP * 2)}
+                      className="px-3 py-1.5 rounded-full text-xs border border-night-border bg-night-surface text-slate-500 hover:text-slate-800 dark:hover:text-slate-200">
+                      ดูข้อความก่อนหน้า ({tStart} ข้อความ)
+                    </button>
+                  </div>
+                )}{tItems.map((m, i) => i < tStart ? null : (
                   m.w === "p" ? (
                     <div key={i} data-msg-at={m.at || undefined} data-msg-mid={m.mid || undefined} className={`flex flex-col items-end group ${isHl(m) ? "scroll-mt-20" : ""} ${m.pending ? "opacity-60" : ""}`}>
                       <div className="relative max-w-[80%] flex flex-col items-end">
