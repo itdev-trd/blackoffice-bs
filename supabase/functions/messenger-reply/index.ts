@@ -10,6 +10,7 @@ import { getMetaPages } from "../_shared/meta-pages.ts";
 import { authorizeRequest } from "../_shared/permissions.ts";
 import { getLineConfig, lineApi } from "../_shared/line.ts";
 import { readJsonBody } from "../_shared/security.ts";
+import { MAX_TRANSCRIPT_ITEMS } from "../_shared/transcript-cap.ts";
 import { getOpenAIKey } from "../_shared/openai.ts";
 
 const GRAPH_VERSION = "v22.0"; // v19 หมดอายุแล้ว (sunset ต้นปี 2026)
@@ -623,7 +624,7 @@ Deno.serve(async (req) => {
             w: "u", t: `💬 คอมเมนต์: ${String(row.last_user_text || "").slice(0, 500)}`,
             at: row.last_message_at || nowIso, via: "comment", comment_id: commentId,
           };
-          const mergedTranscript = [...oldTranscript, ...(hasContext ? [] : [commentItem]), replyItem].slice(-80);
+          const mergedTranscript = [...oldTranscript, ...(hasContext ? [] : [commentItem]), replyItem].slice(-MAX_TRANSCRIPT_ITEMS);
           await admin.from("chat_customers").update({
             transcript: mergedTranscript,
             last_user_text: row.last_user_text || null,

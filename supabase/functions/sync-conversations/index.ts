@@ -14,6 +14,7 @@ import { contentHashOf } from "../_shared/chat-extract.ts";
 import { hasFullData, authorizeRequest } from "../_shared/permissions.ts";
 import { getMetaBackgroundGuard, recordMetaUsage } from "../_shared/meta-rate.ts";
 import { readJsonBody } from "../_shared/security.ts";
+import { MAX_TRANSCRIPT_ITEMS } from "../_shared/transcript-cap.ts";
 
 const GRAPH_VERSION = "v22.0"; // v19 หมดอายุแล้ว (sunset ต้นปี 2026)
 const corsHeaders = {
@@ -29,8 +30,6 @@ const RECENT_COOLDOWN_MS = 5 * 1000;    // cooldown ร่วมต่อเพ�
 const RECENT_LIMIT = 25;                // Meta เรียง conversations ตาม updated_time ล่าสุดก่อน
 const DEFAULT_READ_STATUS_COOLDOWN_MS = 5 * 60 * 1000;
 const MAX_TRANSCRIPT_TEXT = 10_000;
-// เพดานจำนวนข้อความที่เก็บต่อห้อง — ตรงกับ meta-webhook (ต้องเท่ากันสองฝั่ง ไม่งั้นฝั่งที่เพดานต่ำกว่าจะตัดทิ้งของอีกฝั่ง)
-const MAX_TRANSCRIPT_ITEMS = 300;
 // อิโมจิ/อักขระเสริมถูกเก็บเป็น surrogate pair 2 ตัว ถ้าลูกค้าส่งมาไม่ครบคู่
 // (หรือถูกเราตัดกลางคู่ตอน slice) Postgres จะปฏิเสธ "Unicode low surrogate must follow a high surrogate"
 // แล้วล้มการเขียนทั้ง batch — ต้องตัดตัวเดี่ยวที่ค้างออกหลัง slice เสมอ
@@ -187,7 +186,7 @@ Deno.serve(async (req) => {
     const jsonResp = (b: unknown) => new Response(JSON.stringify(b), { headers: { ...corsHeaders, "content-type": "application/json" } });
 
     // เช็คว่า deploy เวอร์ชันที่มี job แล้วหรือยัง (ไม่แตะ Meta/AI) — ใช้ยืนยันการ deploy
-    if (job === "ping") return jsonResp({ ok: true, version: "sync-v5", jobs: ["sync", "recent", "read_status"], note: "classify/verify ย้ายไป function chat-ai" });
+    if (job === "ping") return jsonResp({ ok: true, version: "sync-v6", jobs: ["sync", "recent", "read_status", "backfill_transcript", "backfill_history"], note: "classify/verify ย้ายไป function chat-ai" });
 
     // ================= เช็คสถานะ "อ่าน/ยังไม่อ่าน" แบบเบา (ดึงแค่ unread_count ไม่ดึงข้อความ) =================
     if (job === "read_status") {
@@ -602,92 +601,221 @@ Deno.serve(async (req) => {
       return jsonResp({ ok: recentErrors.length === 0, job, pages: due.length, probed_only: probedOnly, upserted: recentUpserted, changed: recentChanged, ad_names_filled: adNamesFilled, errors: recentErrors });
     }
 
-    // ================= backfill_transcript: กู้ประวัติแชทเก่าที่เคยถูก sync ทับหายไปก่อนแก้บั๊ก =================
-    // เดินหน้าทีละหน้า (cursor = id ล่าสุดที่ทำแล้ว) ต่อเพจเดียว ข้ามห้องที่ transcript ยาวพอกับ
-    // message_count อยู่แล้ว (ไม่มีอะไรให้กู้) เฉพาะห้องที่มีช่องว่างจริงถึงจะยิง Graph ไปดึง
-    // messages เต็มอัตรา (limit 100) มา "ผนวก" กลับด้วยตรรกะเดียวกับ carryOver ใน processBatch
-    // เรียกซ้ำได้ปลอดภัย (idempotent) และพักตัวเองถ้าโดน Meta rate limit แล้ว resume จาก cursor เดิม
+    // ================= กู้ประวัติแชทย้อนหลังให้ครบ =================
+    // ต้นเหตุที่ประวัติไม่ครบ: ทั้งตอนนำเข้าครั้งแรกและทุกรอบ sync ดึงแค่ messages.limit(chat_sync_config.messages)
+    // ข้อความล่าสุดต่อห้อง (ตั้งไว้ 10) ห้องที่คุยกันมาก่อนหน้านั้นจึงเหลือแค่ช่วงท้าย
+    // ตัวกู้รุ่นแรกดึงหน้าเดียว (100 ข้อความ) และข้ามห้องที่มาจากแอด (source = "ad") → กู้ไม่ครบเช่นกัน
+    // ตอนนี้ไล่ paging.next ของ /messages จนสุดหรือเต็มเพดาน แล้วผนวกกับของเดิมด้วย mid
+    // history_synced_count = message_count ตอนที่กู้ครบแล้ว → รอบหน้าข้ามห้องนั้นจนกว่าจะมีข้อความใหม่
+    // (message_count ของ Meta นับข้อความที่ไม่มีเนื้อหาด้วย ช่องว่างจึงอาจเหลือถาวร ถ้าไม่จำไว้จะดึงซ้ำทุกรอบ)
+    const MSG_FIELDS = "id,message,from,created_time,sticker,attachments{mime_type,name,image_data,video_data,file_url}";
+    // แปลงเป็นรูปทรงเดียวกับ processBatch ทุกประการ (label สื่อ/mid/เลือก URL รูป) เพื่อผสานกับของเดิมได้ตรงกัน
+    const toItem = (page: any, m: any) => {
+      const att = (m.attachments?.data ?? [])[0];
+      const mt = String(att?.mime_type || "");
+      const isSticker = !!m.sticker || /facebook.*sticker|stickers/i.test(String(att?.image_data?.url || ""));
+      const label = isSticker ? "[สติกเกอร์]" : !att ? "" : mt.startsWith("image") ? "[รูปภาพ]" : mt.startsWith("video") ? "[วิดีโอ]" : mt.startsWith("audio") ? "[เสียง]" : "[ไฟล์]";
+      const isPage = m.from?.id === page.id;
+      const e: any = { w: isPage ? "p" : "u", t: transcriptText(m.message) || label || "[สื่อ]", at: m.created_time || null };
+      const cands = [m.sticker, att?.image_data?.url, att?.image_data?.preview_url, att?.video_data?.url].filter(Boolean) as string[];
+      const img = cands.find((u) => !/dst-jpg/.test(u)) || cands[0] || null;
+      if (img) { e.img = img; e.img_source = "sync"; }
+      if (isSticker) e.sticker = true;
+      if (m.id) e.mid = m.id;
+      if (isPage && m.from?.name && m.from.name !== page.name) e.by_name = m.from.name;
+      return e;
+    };
+    async function fetchAllMessages(page: any, convId: string): Promise<{ items: any[]; rateLimited?: boolean; failed?: boolean }> {
+      let url = `${base}/${convId}/messages?fields=${encodeURIComponent(MSG_FIELDS)}&limit=100&access_token=${page.access_token}`;
+      const raw: any[] = [];
+      while (url && raw.length < MAX_TRANSCRIPT_ITEMS) {
+        const data = await fetchJson(url, 2);
+        if (data?.error) {
+          if (RATE_LIMIT_CODES.has(Number(data.error.code))) return { items: [], rateLimited: true };
+          if (!raw.length) return { items: [], failed: true }; // เช่นแชทถูกลบฝั่ง Meta ไปแล้ว
+          break; // ได้มาบางส่วนแล้ว เก็บเท่าที่มี
+        }
+        raw.push(...((data?.data ?? []) as any[]));
+        url = data?.paging?.next ?? "";
+      }
+      const items = raw
+        .filter((m) => m.message || m.attachments?.data?.length || m.sticker)
+        .map((m) => toItem(page, m))
+        .reverse();
+      return { items };
+    }
+    // ผนวกด้วยตรรกะเดียวกับ carryOver ใน processBatch — คง metadata ที่แอปบันทึกไว้ (th/by/via/รูปจาก webhook)
+    function mergeTranscript(prevTr: any[], freshItems: any[]): any[] {
+      const previousByMid: Record<string, any> = {};
+      for (const pm of prevTr) if (pm?.mid) previousByMid[String(pm.mid)] = pm;
+      const newMids = new Set<string>();
+      const fresh = freshItems.map((x) => ({ ...x }));
+      for (const it of fresh) {
+        if (!it?.mid) continue;
+        newMids.add(String(it.mid));
+        const old = previousByMid[String(it.mid)];
+        if (!old) continue;
+        if (typeof old.th === "string" && old.th.trim()) it.th = old.th;
+        if (old.by) it.by = old.by;
+        if (old.by_name && !it.by_name) it.by_name = old.by_name;
+        if (old.via) it.via = old.via;
+        if (old.img_source === "webhook" && old.img) { it.img = old.img; it.img_source = "webhook"; }
+      }
+      const carryOver = prevTr.filter((pm: any) => !pm?.mid || !newMids.has(String(pm.mid)));
+      const merged = [...carryOver, ...fresh];
+      merged.sort((a: any, b: any) => timeMs(a?.at) - timeMs(b?.at));
+      return merged.length > MAX_TRANSCRIPT_ITEMS ? merged.slice(merged.length - MAX_TRANSCRIPT_ITEMS) : merged;
+    }
+    const needsHistory = (row: any) => {
+      const tl = Array.isArray(row.transcript) ? row.transcript.length : 0;
+      const mc = Number(row.message_count || 0);
+      return mc > tl && tl < MAX_TRANSCRIPT_ITEMS && Number(row.history_synced_count ?? -1) !== mc;
+    };
+    // คืนจำนวนข้อความที่ได้คืน · "rate" = โดน Meta จำกัด ให้หยุดรอบนี้แล้วทำต่อจากห้องเดิม
+    async function recoverRow(page: any, row: any): Promise<number | "rate"> {
+      const got = await fetchAllMessages(page, String(row.id));
+      if (got.rateLimited) return "rate";
+      const mc = Number(row.message_count || 0);
+      if (got.failed) {
+        await admin.from("chat_customers").update({ history_synced_count: mc }).eq("id", row.id);
+        return 0;
+      }
+      // อ่าน transcript สดอีกรอบก่อนเขียน — ระหว่างที่ดึงหลายหน้า webhook/ตอบแชทอาจต่อข้อความใหม่เข้ามาแล้ว
+      const { data: cur } = await admin.from("chat_customers").select("transcript").eq("id", row.id).maybeSingle();
+      const prevTr = Array.isArray(cur?.transcript) ? cur.transcript : [];
+      const merged = mergeTranscript(prevTr, got.items);
+      const patch: Record<string, unknown> = { history_synced_count: mc };
+      if (merged.length > prevTr.length) { patch.transcript = merged; patch.updated_at = new Date().toISOString(); }
+      const { error: updErr } = await admin.from("chat_customers").update(patch).eq("id", row.id);
+      return !updErr && patch.transcript ? merged.length - prevTr.length : 0;
+    }
+    const historyRows = (pageId: string, afterId: string, limit: number) => admin.from("chat_customers")
+      .select("id, transcript, message_count, history_synced_count")
+      .eq("page_id", pageId).or("source.is.null,source.eq.ad").not("id", "like", "fbc_%")
+      .gt("id", afterId || "")
+      .order("id", { ascending: true })
+      .limit(limit);
+
+    // ---- ปุ่ม "กู้ประวัติ" ในหน้าตั้งค่า (ทีละเพจ แบบหน้าเว็บวนเรียกต่อเอง) ----
     if (job === "backfill_transcript") {
       if (!onlyPage) throw new Error("backfill_transcript ต้องระบุ page_id");
       const page = pages.find((p: any) => p.id === onlyPage);
       if (!page) throw new Error("ไม่พบเพจนี้ในสิทธิ์ token");
       const batchSize = Math.min(20, Math.max(1, Number(body?.batch_size) || 8));
-      const { data: batchRows, error: batchErr } = await admin.from("chat_customers")
-        .select("id, transcript, message_count")
-        .eq("page_id", onlyPage).is("source", null)
-        .gt("id", after || "")
-        .order("id", { ascending: true })
-        .limit(batchSize);
+      const { data: batchRows, error: batchErr } = await historyRows(onlyPage, after || "", batchSize);
       if (batchErr) throw batchErr;
       const rows = batchRows ?? [];
       let scanned = 0, gapsFound = 0, gapsFilled = 0, messagesRecovered = 0;
       let rateLimited = false;
       let lastId: string | null = null;
       for (const row of rows) {
-        scanned++;
-        lastId = String(row.id);
-        const prevTr = Array.isArray(row.transcript) ? row.transcript : [];
-        const gap = Number(row.message_count || 0) - prevTr.length;
-        if (gap <= 0) continue;
+        if (!needsHistory(row)) { scanned++; lastId = String(row.id); continue; }
         gapsFound++;
-        const msgFields = "id,message,from,created_time,sticker,attachments{mime_type,name,image_data,video_data,file_url}";
-        const url = `${base}/${row.id}/messages?fields=${encodeURIComponent(msgFields)}&limit=100&access_token=${page.access_token}`;
-        const data = await fetchJson(url, 2);
-        if (data?.error) {
-          if (RATE_LIMIT_CODES.has(Number(data.error.code))) { rateLimited = true; lastId = String(row.id); break; }
-          continue; // ห้องนี้ดึงไม่ได้ (เช่นแอดมินลบแชทออกจากฝั่ง Meta ไปแล้ว) ข้ามไปห้องถัดไป ไม่ล้มทั้ง batch
-        }
-        const msgs = (data?.data ?? []) as any[];
-        // แปลงเป็นรูปทรงเดียวกับ processBatch ทุกประการ (label สื่อ/mid/เลือก URL รูป) เพื่อผสานกับของเดิมได้ตรงกัน
-        const freshItems = msgs
-          .filter((m) => m.message || m.attachments?.data?.length || m.sticker)
-          .map((m) => {
-            const att = (m.attachments?.data ?? [])[0];
-            const mt = String(att?.mime_type || "");
-            const isSticker = !!m.sticker || /facebook.*sticker|stickers/i.test(String(att?.image_data?.url || ""));
-            const label = isSticker ? "[สติกเกอร์]" : !att ? "" : mt.startsWith("image") ? "[รูปภาพ]" : mt.startsWith("video") ? "[วิดีโอ]" : mt.startsWith("audio") ? "[เสียง]" : "[ไฟล์]";
-            const isPage = m.from?.id === page.id;
-            const e: any = { w: isPage ? "p" : "u", t: transcriptText(m.message) || label || "[สื่อ]", at: m.created_time || null };
-            const cands = [m.sticker, att?.image_data?.url, att?.image_data?.preview_url, att?.video_data?.url].filter(Boolean) as string[];
-            const img = cands.find((u) => !/dst-jpg/.test(u)) || cands[0] || null;
-            if (img) { e.img = img; e.img_source = "sync"; }
-            if (isSticker) e.sticker = true;
-            if (m.id) e.mid = m.id;
-            if (isPage && m.from?.name && m.from.name !== page.name) e.by_name = m.from.name;
-            return e;
-          })
-          .reverse();
-        const previousByMid: Record<string, any> = {};
-        for (const pm of prevTr) if (pm?.mid) previousByMid[String(pm.mid)] = pm;
-        const newMids = new Set<string>();
-        for (const it of freshItems) {
-          if (!it?.mid) continue;
-          newMids.add(String(it.mid));
-          const old = previousByMid[String(it.mid)];
-          if (old) {
-            if (typeof old.th === "string" && old.th.trim()) it.th = old.th;
-            if (old.by) it.by = old.by;
-            if (old.by_name && !it.by_name) it.by_name = old.by_name;
-            if (old.via) it.via = old.via;
-            if (old.img_source === "webhook" && old.img) { it.img = old.img; it.img_source = "webhook"; }
-          }
-        }
-        const carryOver = prevTr.filter((pm: any) => !pm?.mid || !newMids.has(String(pm.mid)));
-        let merged = [...carryOver, ...freshItems];
-        merged.sort((a: any, b: any) => timeMs(a?.at) - timeMs(b?.at));
-        if (merged.length > MAX_TRANSCRIPT_ITEMS) merged = merged.slice(merged.length - MAX_TRANSCRIPT_ITEMS);
-        if (merged.length > prevTr.length) {
-          const { error: updErr } = await admin.from("chat_customers")
-            .update({ transcript: merged, updated_at: new Date().toISOString() }).eq("id", row.id);
-          if (!updErr) { gapsFilled++; messagesRecovered += merged.length - prevTr.length; }
-        }
+        const got = await recoverRow(page, row);
+        if (got === "rate") { rateLimited = true; break; } // lastId = ห้องก่อนหน้า → รอบหน้าเริ่มที่ห้องนี้ใหม่
+        scanned++; lastId = String(row.id);
+        if (got > 0) { gapsFilled++; messagesRecovered += got; }
       }
-      const done = rows.length < batchSize; // หน้าสุดท้ายของตารางแล้ว (ไม่ใช่แค่ของ batch นี้)
+      const done = rows.length < batchSize && !rateLimited;
       return jsonResp({
         ok: true, job, page: page.name, scanned, gaps_found: gapsFound, gaps_filled: gapsFilled,
-        messages_recovered: messagesRecovered, next_after: rateLimited ? lastId : (done ? null : lastId),
-        done: done && !rateLimited, rate_limited: rateLimited,
+        messages_recovered: messagesRecovered, next_after: done ? null : (lastId ?? after ?? null),
+        done, rate_limited: rateLimited,
       });
+    }
+
+    // ---- เก็บประวัติครบอัตโนมัติ (cron) — ไม่ต้องมีใครเปิดหน้าเว็บค้างไว้ ----
+    // เฟส convs: ไล่รายชื่อห้องทั้งหมดที่ขยับตั้งแต่ `since` (วันเปิดเว็บ) เพิ่มห้องที่ยังไม่มีในฐานข้อมูล
+    //   (sync ปกติอ่านลึกแค่ 300 ห้อง/รอบ และ recent ดูแค่ 25 ห้องล่าสุด ห้องเก่าที่หลุดรอบไปจะไม่ถูกเก็บ)
+    // เฟส transcripts: ไล่ทุกห้องของเพจ เติมข้อความที่ขาดด้วย recoverRow
+    // สถานะเก็บใน settings.chat_history_backfill ทำต่อจากจุดเดิมทุกรอบ ครบแล้วพัก 24 ชม. แล้ววนตรวจใหม่
+    if (job === "backfill_history") {
+      const KEY = "chat_history_backfill";
+      const guard = await getMetaBackgroundGuard(admin);
+      if (guard.blocked) return jsonResp({ ok: true, job, skipped: "rate_guard" });
+      const { data: stRow } = await admin.from("settings").select("value").eq("key", KEY).maybeSingle();
+      let st: any = (stRow?.value && typeof stRow.value === "object") ? stRow.value : {};
+      const nowMs = Date.now();
+      if (st.running_until && timeMs(st.running_until) > nowMs) return jsonResp({ ok: true, job, skipped: "running" });
+      if (st.done_at && !body?.restart && nowMs - timeMs(st.done_at) < 24 * 3600 * 1000) return jsonResp({ ok: true, job, skipped: "done", state: st });
+      if (st.done_at || body?.restart || !st.phase) {
+        st = {
+          phase: "convs", page_idx: 0, conv_after: null, row_after: "",
+          since: body?.since || st.since || "2026-08-31T00:00:00+07:00",
+          started_at: new Date().toISOString(), runs: 0,
+          stats: { convs_added: 0, rows_checked: 0, rows_recovered: 0, messages_recovered: 0 },
+          last_done_at: st.done_at ?? st.last_done_at ?? null,
+        };
+      }
+      const save = (extra: Record<string, unknown> = {}) =>
+        admin.from("settings").upsert({ key: KEY, value: { ...st, ...extra }, updated_at: new Date().toISOString() });
+      await save({ running_until: new Date(nowMs + 120_000).toISOString() }); // กันรอบซ้อนถ้า cron ยิงถี่กว่ารอบที่ใช้จริง
+      const deadline = nowMs + 70_000;
+      const sinceAt = timeMs(st.since);
+      const orderedPages = [...pages].sort((a: any, b: any) => String(a.id).localeCompare(String(b.id)));
+      let rateLimited = false;
+      while (st.page_idx < orderedPages.length && Date.now() < deadline && !rateLimited) {
+        const page = orderedPages[st.page_idx];
+        if (st.phase === "convs") {
+          const url = `${base}/${page.id}/conversations?platform=messenger&fields=id,updated_time&limit=100&access_token=${page.access_token}`
+            + (st.conv_after ? `&after=${encodeURIComponent(st.conv_after)}` : "");
+          const data = await fetchJson(url, 2);
+          if (data?.error) {
+            if (RATE_LIMIT_CODES.has(Number(data.error.code))) { rateLimited = true; break; }
+            st.phase = "transcripts"; st.conv_after = null; continue; // เพจนี้อ่านรายชื่อไม่ได้ ข้ามไปเติมข้อความ
+          }
+          const list = (data?.data ?? []) as any[];
+          const inRange = list.filter((c: any) => !sinceAt || !c.updated_time || timeMs(c.updated_time) >= sinceAt);
+          if (inRange.length) {
+            const { data: known } = await admin.from("chat_customers").select("id").in("id", inRange.map((c: any) => String(c.id)));
+            const knownIds = new Set((known ?? []).map((r: any) => String(r.id)));
+            const missing = inRange.filter((c: any) => !knownIds.has(String(c.id)));
+            const full: any[] = [];
+            for (const c of missing) {
+              const conv = await fetchJson(`${base}/${c.id}?fields=${encodeURIComponent(fieldsQ)}&access_token=${page.access_token}`, 2);
+              if (conv?.error) {
+                if (RATE_LIMIT_CODES.has(Number(conv.error.code))) { rateLimited = true; break; }
+                continue;
+              }
+              // ห้องเก่าที่ตามเก็บย้อนหลัง ไม่ใช่แชทเข้าใหม่ — ไม่ส่ง unread_count ให้ processBatch
+              // ไม่งั้นห้องที่ค้างไม่ได้ตอบเมื่อเดือนก่อนจะเด้งเป็นยังไม่อ่านและยิงแจ้งเตือนแชทค้าง
+              delete conv.unread_count;
+              full.push(conv);
+            }
+            if (full.length) {
+              const rb = await processBatch(page, full, false);
+              st.stats.convs_added += rb.upserted;
+            }
+            if (rateLimited) break; // cursor เดิม → รอบหน้าอ่านหน้านี้ซ้ำ (ห้องที่เพิ่มแล้วจะถูกนับเป็น known)
+          }
+          const next = data?.paging?.next ? (data?.paging?.cursors?.after ?? null) : null;
+          // Meta เรียงใหม่→เก่า หน้าที่มีห้องเก่ากว่า since = ที่เหลือเก่ากว่าทั้งหมด
+          if (!next || inRange.length < list.length) { st.phase = "transcripts"; st.conv_after = null; st.row_after = ""; }
+          else st.conv_after = next;
+          continue;
+        }
+        // phase transcripts
+        const { data: rows, error: rowsErr } = await historyRows(String(page.id), st.row_after || "", 25);
+        if (rowsErr) throw rowsErr;
+        for (const row of rows ?? []) {
+          if (Date.now() > deadline) break;
+          if (needsHistory(row)) {
+            const got = await recoverRow(page, row);
+            if (got === "rate") { rateLimited = true; break; }
+            if (got > 0) { st.stats.rows_recovered++; st.stats.messages_recovered += got; }
+          }
+          st.stats.rows_checked++;
+          st.row_after = String(row.id);
+        }
+        if (!rateLimited && (rows ?? []).length < 25 && Date.now() <= deadline) {
+          st.page_idx++; st.phase = "convs"; st.conv_after = null; st.row_after = "";
+        }
+      }
+      st.runs = Number(st.runs || 0) + 1;
+      const finished = st.page_idx >= orderedPages.length;
+      if (finished) st.done_at = new Date().toISOString();
+      await save({ running_until: null, last_run_at: new Date().toISOString(), rate_limited: rateLimited });
+      return jsonResp({ ok: true, job, done: finished, rate_limited: rateLimited, state: st });
     }
 
     // ---- โหมดปกติ: ทุกเพจที่เปิด ดึงจนได้ "งานที่ต้องทำ" ครบ per_page ----

@@ -9,15 +9,13 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getMetaAppSecret, getMetaToken } from "../_shared/meta.ts";
 import { getMetaPages } from "../_shared/meta-pages.ts";
 import { getSelectedCommentPageIds, resolveCommentAds } from "../_shared/comment-realtime.ts";
+import { MAX_TRANSCRIPT_ITEMS } from "../_shared/transcript-cap.ts";
 
 // คอมเมนต์ยังเก็บเหมือนเดิม แต่ไม่ปนในกล่องแชท — ไปอยู่หน้า "ฟีด" แยกต่างหาก (แท็บ feed)
 // ตัวแปรนี้เหลือไว้เป็นสวิตช์เดียวสำหรับปิดทั้งเส้นถ้าวันหนึ่งไม่ใช้แล้ว
 const COMMENTS_ENABLED = true;
 const GRAPH_BASE = "https://graph.facebook.com/v22.0";
 const MAX_TRANSCRIPT_TEXT = 10_000;
-// เพดานจำนวนข้อความที่เก็บต่อห้อง — เดิม 80 ตัดประวัติแชทของลูกค้าที่คุยเยอะทิ้งเงียบๆ ทุกครั้งที่มีข้อความใหม่เข้ามา
-// (sync-conversations ก็เจอปัญหาเดียวกันจาก messages.limit ของ Meta ที่ดึงมาแค่ช่วงล่าสุด) ยกเป็นค่าเดียวกันทั้งสองฝั่ง
-const MAX_TRANSCRIPT_ITEMS = 300;
 // อิโมจิ/อักขระเสริมถูกเก็บเป็น surrogate pair 2 ตัว ถ้าลูกค้าส่งมาไม่ครบคู่
 // (หรือถูกเราตัดกลางคู่ตอน slice) Postgres จะปฏิเสธ "Unicode low surrogate must follow a high surrogate"
 // แล้วล้มการเขียนทั้ง batch — ต้องตัดตัวเดี่ยวที่ค้างออกหลัง slice เสมอ

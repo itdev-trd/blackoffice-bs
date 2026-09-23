@@ -1,5 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getLineConfig, lineApi } from "../_shared/line.ts";
+import { MAX_TRANSCRIPT_ITEMS } from "../_shared/transcript-cap.ts";
 
 const enc = new TextEncoder();
 const LINE_INGEST_ENABLED = true;
@@ -120,7 +121,7 @@ Deno.serve(async (req) => {
       const row = {
         id, source: "line", page_id: pageId, page_name: pageName, psid: userId,
         customer_name: profile.displayName || "ลูกค้า LINE", profile_pic: profile.pictureUrl || null,
-        transcript: [...transcript, item].slice(-100), last_user_text: text.slice(0, 1000), last_message_at: at,
+        transcript: [...transcript, item].slice(-MAX_TRANSCRIPT_ITEMS), last_user_text: text.slice(0, 1000), last_message_at: at,
         message_count: Number(old?.message_count || 0) + 1, user_message_count: Number(old?.user_message_count || 0) + 1,
         awaiting_reply: true, unread: true, synced_at: new Date().toISOString(), updated_at: new Date().toISOString(),
       };

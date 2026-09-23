@@ -4,6 +4,7 @@ import { getMetaToken } from "../_shared/meta.ts";
 import { getMetaPages } from "../_shared/meta-pages.ts";
 import { authorizeRequest } from "../_shared/permissions.ts";
 import { getMetaBackgroundGuard, recordMetaUsage } from "../_shared/meta-rate.ts";
+import { MAX_TRANSCRIPT_ITEMS } from "../_shared/transcript-cap.ts";
 
 const GRAPH_BASE = "https://graph.facebook.com/v22.0";
 const SYNC_STATE_KEY = "comment_reply_fallback_sync";
@@ -65,7 +66,7 @@ Deno.serve(async (req) => {
         }));
         const latest = replies[replies.length - 1];
         await admin.from("chat_customers").update({
-          transcript: [...tr, ...additions].slice(-80), awaiting_reply: false, unread: false,
+          transcript: [...tr, ...additions].slice(-MAX_TRANSCRIPT_ITEMS), awaiting_reply: false, unread: false,
           last_reply_text: String(latest.message || "[ตอบจากเพจ]").slice(0, 500), last_reply_by: "ตอบจากเพจ",
           last_reply_at: latest.created_time || new Date().toISOString(), updated_at: new Date().toISOString(),
         }).eq("id", row.id);
