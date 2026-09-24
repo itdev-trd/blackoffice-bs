@@ -65,7 +65,7 @@ const SKIP_NOTE = {
 
 const MSG_WINDOW_STEP = 80;
 
-const CHAT_OPEN_COLS = "id, page_id, page_name, psid, customer_name, source, stage, stage_manual, classified_by, needs_ai, needs_verify, manual_data, manual_data_by, manual_data_at, trade_id, username, phone, email, awaiting_reply, unread, read_at, cust_read_at, cust_lang, country, broker, profile_pic, transcript, account_opened_at, entry_ad_id, entry_ad_name, last_user_text, last_reply_text, last_reply_by, last_reply_at, last_message_at, comment_ad_name, comment_ad_ids, comment_ad_names, comment_is_ad, comment_promoted_to_inbox, comment_permalink, blocked_at, synced_at, updated_at, notes, tags, ai_summary, ai_summary_at";
+const CHAT_OPEN_COLS = "id, page_id, page_name, psid, customer_name, source, stage, stage_manual, classified_by, needs_ai, needs_verify, manual_data, manual_data_by, manual_data_at, trade_id, username, phone, email, awaiting_reply, unread, read_at, cust_read_at, cust_lang, country, broker, profile_pic, transcript, account_opened_at, entry_ad_id, entry_ad_name, last_user_text, last_reply_text, last_reply_by, last_reply_at, last_message_at, comment_ad_name, comment_ad_ids, comment_ad_names, comment_is_ad, comment_promoted_to_inbox, comment_permalink, blocked_at, synced_at, updated_at, notes, tags, ai_summary, ai_summary_at, not_interested_at, purge_at";
 
 export default function ChatInboxTab({ allowedPages = null, alertAllowed = true, alertMin = 3, alertPages = [], alertSound = true, alertNew = true, gotoChat = null, onGotoDone, active = true }) {
   const isInstagramComment = (row) => String(row?.id || "").startsWith("igc_");
@@ -2137,53 +2137,92 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
       setTvBrandPages(s);
     });
   }, []);
-  // มาร์ก/ปลดมาร์ก "ไม่สนใจ" + ยืนยันว่าไม่เอาจริง (ตั้งกำหนดล้างข้อมูล)
+  // มาร์ก "ไม่สนใจ" + ให้แอดมินเลือกวันลบแชทออกจากฐานข้อมูลถาวร (chat-retention ลบให้เมื่อถึงวัน)
+  // ลูกค้าทักกลับมาก่อนถึงวันลบ = ระบบดึงกลับเข้ากล่องหลักและยกเลิกวันลบให้เอง
   const [retBusy, setRetBusy] = useState("");
-  async function retention(action, id) {
+  const [retPick, setRetPick] = useState(null);      // null = ปิดตัวเลือก | "YYYY-MM-DD" = วันที่เลือกไว้
+  useEffect(() => { setRetPick(null); }, [selected?.id]);
+  const thDate = (daysAhead) => new Date(Date.now() + 7 * 3600000 + daysAhead * 86400000).toISOString().slice(0, 10);
+  const fmtThDate = (ymd) => new Date(`${ymd}T00:00:00+07:00`).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" });
+  const RET_PRESETS = [[0, "วันนี้"], [3, "3 วัน"], [7, "7 วัน"], [14, "14 วัน"], [30, "30 วัน"]];
+  async function retention(action, id, purgeOn) {
     if (!id || retBusy) return;
-    if (action === "confirm") {
-      const d = retentionCfg?.purge_days ?? 23;
-      const what = (retentionCfg?.mode === "full") ? "ลบข้อมูลลูกค้าทั้งแถว" : "ลบเนื้อบทสนทนา (เก็บชื่อ/เลขบัญชี/สถิติไว้)";
-      if (!confirm(`ยืนยันว่าลูกค้าคนนี้ไม่เอาแล้ว?\n\nระบบจะ${what} ในอีก ${d} วัน\nยกเลิกได้ก่อนถึงกำหนดโดยกด "ยังสนใจอยู่"`)) return;
-    }
     setRetBusy(action);
-    const { data, error } = await supabase.functions.invoke("chat-retention", { body: { action, ids: [id] } });
+    const { data, error } = await supabase.functions.invoke("chat-retention", { body: { action, ids: [id], ...(purgeOn ? { purge_on: purgeOn } : {}) } });
     setRetBusy("");
     if (error || data?.ok === false) { alert("ไม่สำเร็จ: " + (data?.error || error?.message || "ลองใหม่")); return; }
-    // ออกจากลิสต์ปัจจุบันทันที ไม่ต้องรอ poll — มาร์กแล้วต้องหายจากกล่องหลักเลย
+    setRetPick(null);
+    // เปลี่ยนวันลบของห้องที่อยู่ในเมนู "ไม่สนใจ" อยู่แล้ว = อยู่ที่เดิม แค่อัปเดตวัน
+    if (action === "mark" && selected?.not_interested_at) {
+      const patch = { purge_at: data?.purge_at ?? null };
+      setSelected((s) => (s?.id === id ? { ...s, ...patch } : s));
+      setList((l) => (l || []).map((x) => (x.id === id ? { ...x, ...patch } : x)));
+      return;
+    }
+    // มาร์กใหม่/ดึงกลับ = ออกจากลิสต์ปัจจุบันทันที ไม่ต้องรอ poll
     setList((l) => (l || []).filter((x) => x.id !== id));
     setSelected(null);
   }
+
+  // ตัวเลือกวันลบ — ใช้ทั้งตอนมาร์กครั้งแรกและตอนเปลี่ยนวัน
+  const retentionPicker = !selected || retPick === null ? null : (
+    <div className="rounded-lg border border-rose-500/40 bg-rose-500/5 p-2.5 space-y-2">
+      <div className="text-[11px] font-semibold text-rose-400">ลบแชทนี้ออกจากระบบวันไหน?</div>
+      <div className="flex flex-wrap gap-1.5">
+        {RET_PRESETS.map(([n, label]) => (
+          <button key={n} type="button" onClick={() => setRetPick(thDate(n))}
+            className={`rounded-full border px-2.5 py-1 text-[11px] ${retPick === thDate(n) ? "border-rose-500 bg-rose-500/15 text-rose-400 font-semibold" : "border-night-border text-night-ink-2 hover:border-rose-500/50"}`}>
+            {label}
+          </button>
+        ))}
+      </div>
+      <input type="date" value={retPick || ""} min={thDate(0)} max={thDate(365)} onChange={(e) => setRetPick(e.target.value)}
+        className="w-full rounded-lg border border-night-border bg-night-surface px-2 py-1.5 text-xs" />
+      <div className="text-[10.5px] leading-relaxed text-night-ink-2">
+        {retPick
+          ? <>ระบบจะ<b className="text-rose-400">ลบแชทและข้อมูลลูกค้าคนนี้ออกจากฐานข้อมูลถาวร</b>ในวันที่ {fmtThDate(retPick)} — กู้คืนไม่ได้ · ถ้าลูกค้าทักกลับมาก่อนวันนั้น ระบบจะดึงกลับเข้ากล่องหลักและยกเลิกการลบให้เอง</>
+          : "เลือกวันที่ต้องการให้ลบ"}
+      </div>
+      <div className="flex gap-1.5">
+        <button type="button" onClick={() => setRetPick(null)} disabled={!!retBusy}
+          className="flex-1 rounded-lg border border-night-border px-2 py-1.5 text-[11px] text-night-ink-2 disabled:opacity-50">ยกเลิก</button>
+        <button type="button" onClick={() => retention("mark", selected.id, retPick)} disabled={!!retBusy || !retPick}
+          className="flex-[2] rounded-lg bg-rose-600 px-2 py-1.5 text-[11px] font-semibold text-white hover:bg-rose-700 disabled:opacity-50">
+          {retBusy === "mark" ? <Loader2 className="inline animate-spin" size={11} /> : null} {retPick ? `ยืนยัน · ลบวันที่ ${fmtThDate(retPick)}` : "ยืนยัน"}
+        </button>
+      </div>
+    </div>
+  );
 
   // กล่องวงจร "ไม่สนใจ" — ใช้ทั้งแผงข้างบนคอมและเมนูสถานะบนมือถือ
   // ประกาศครั้งเดียวแล้วเสียบสองที่ ไม่ก๊อปโค้ดซ้ำ (ก่อนหน้านี้ใส่แค่แผงมือถือจึงไม่เห็นบนคอม)
   const retentionBox = !selected ? null : selected.not_interested_at ? (
     <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 space-y-1.5">
       <div className="text-[11px] font-semibold text-amber-300">
-        🚫 มาร์กว่าไม่สนใจ · {new Date(selected.not_interested_at).toLocaleDateString("th-TH")}
+        🚫 ไม่สนใจ · มาร์กเมื่อ {new Date(selected.not_interested_at).toLocaleDateString("th-TH")}
       </div>
-      {selected.purge_at ? (
-        <div className="text-[10.5px] text-amber-200/80">
-          ตั้งล้างข้อมูลวันที่ {new Date(selected.purge_at).toLocaleDateString("th-TH")}
-          {retentionCfg?.mode === "full" ? " (ลบทั้งแถว)" : " (ลบแค่บทสนทนา)"}
-        </div>
-      ) : (
-        <button onClick={() => retention("confirm", selected.id)} disabled={!!retBusy}
+      <div className="text-[10.5px] text-amber-200/80">
+        {selected.purge_at
+          ? <>จะลบออกจากฐานข้อมูลถาวรวันที่ <b>{new Date(selected.purge_at).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Bangkok" })}</b></>
+          : "ยังไม่ได้ตั้งวันลบ"}
+      </div>
+      {retentionPicker || (
+        <button onClick={() => setRetPick(selected.purge_at ? new Date(new Date(selected.purge_at).getTime() + 7 * 3600000).toISOString().slice(0, 10) : thDate(7))} disabled={!!retBusy}
           className="w-full rounded-lg border border-amber-500/50 px-2 py-1.5 text-[11px] font-semibold text-amber-300 hover:bg-amber-500/15 disabled:opacity-50">
-          {retBusy === "confirm" ? <Loader2 className="inline animate-spin" size={11} /> : null} ยืนยันว่าไม่เอาแล้ว
+          {selected.purge_at ? "เปลี่ยนวันลบ" : "ตั้งวันลบ"}
         </button>
       )}
       <button onClick={() => retention("unmark", selected.id)} disabled={!!retBusy}
         className="w-full rounded-lg border border-emerald-500/40 px-2 py-1.5 text-[11px] font-semibold text-emerald-400 hover:bg-emerald-500/15 disabled:opacity-50">
-        {retBusy === "unmark" ? <Loader2 className="inline animate-spin" size={11} /> : null} ยังสนใจอยู่ — ดึงกลับ
+        {retBusy === "unmark" ? <Loader2 className="inline animate-spin" size={11} /> : null} ยังสนใจอยู่ — ดึงกลับ (ยกเลิกการลบ)
       </button>
     </div>
-  ) : (
-    <button onClick={() => retention("mark", selected.id)} disabled={!!retBusy}
+  ) : (retentionPicker || (
+    <button onClick={() => setRetPick(thDate(7))} disabled={!!retBusy}
       className="w-full rounded-lg border border-amber-500/40 px-3 py-2 text-sm font-medium text-amber-400 hover:bg-amber-500/10 disabled:opacity-50 flex items-center justify-center gap-1.5">
-      {retBusy === "mark" ? <Loader2 className="animate-spin" size={14} /> : null} 🚫 ไม่สนใจแล้ว
+      🚫 ไม่สนใจแล้ว
     </button>
-  );
+  ));
 
   const isBeSightPage = (r) => !!tvBrandPages && tvBrandPages.has(String(r?.page_id || ""));
 

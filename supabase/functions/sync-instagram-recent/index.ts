@@ -188,6 +188,9 @@ Deno.serve(async (req) => {
           const { error } = await admin.from("chat_customers").update(common).eq("id", existing.id);
           if (!error) upserted++;
         } else {
+          // ห้องที่แอดมินตั้งลบถาวรไปแล้ว (chat-retention) ห้ามดึงกลับ — เว้นแต่ลูกค้าทักมาใหม่หลังจากถูกลบ
+          const { data: tomb } = await admin.from("chat_purged").select("last_message_at").eq("id", `ig_${igId}_${psid}`).maybeSingle();
+          if (tomb && timeMs(lastAt) <= timeMs(tomb.last_message_at)) continue;
           const { error } = await admin.from("chat_customers").insert({
             id: `ig_${igId}_${psid}`, ...common, stage: "new", stage_auto: "new", classified_by: "pending",
           });

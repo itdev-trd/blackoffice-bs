@@ -5,13 +5,15 @@
 // เหตุผลจริงคือ (1) กล่องแชทสะอาด ไม่ต้องเลื่อนผ่านคนที่ไม่สนใจ (2) ไม่เก็บข้อมูลส่วนตัวเกินจำเป็น
 //
 //   { action: "status" }                    -> สรุปคิว: อยู่ในเมนู / รอยืนยัน / รอล้าง
-//   { action: "mark", ids[] }               -> มาร์กว่าไม่สนใจ (ติดแท็ก + ย้ายออกจากกล่องหลัก)
-//   { action: "unmark", ids[] }             -> ดึงกลับเข้ากล่องหลัก
-//   { action: "confirm", ids[] }            -> แอดมินยืนยันว่าไม่เอาจริง → ตั้งกำหนดล้าง
-//   { action: "run", dry_run? }             -> งานประจำวัน: ดึงคนที่ทักกลับ + ล้างที่ถึงกำหนด
+//   { action: "mark", ids[], purge_on }     -> มาร์กว่าไม่สนใจ + ตั้งวันลบถาวร (purge_on = "YYYY-MM-DD" เวลาไทย)
+//                                              ส่งซ้ำได้เพื่อเปลี่ยนวันลบ · ไม่ส่ง purge_on = มาร์กอย่างเดียว ยังไม่ตั้งวันลบ
+//   { action: "unmark", ids[] }             -> ดึงกลับเข้ากล่องหลัก (ยกเลิกวันลบด้วย)
+//   { action: "confirm", ids[] }            -> (รุ่นเก่า) ตั้งวันลบอีก purge_days วัน
+//   { action: "run", dry_run? }             -> งานประจำวัน: ดึงคนที่ทักกลับ + ลบที่ถึงกำหนด
 //
 // ตัวที่ "ลบข้อมูลจริง" มีแค่ action run และทำเฉพาะแถวที่ purge_at ถึงกำหนดแล้วเท่านั้น
-// ไม่มีทางไหนลบข้อมูลโดยที่แอดมินไม่ได้กดยืนยันมาก่อน
+// การลบ = ลบแถวออกจาก chat_customers ถาวร (แอดมินเลือกวันเองตอนกดปุ่ม "ไม่สนใจแล้ว")
+// และจดไว้ใน chat_purged กันงานซิงก์ Messenger ดึงห้องเดิมกลับมา
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { authorizeRequest } from "../_shared/permissions.ts";
@@ -46,6 +48,17 @@ async function loadCfg(admin: any) {
 
 const daysAgo = (n: number) => new Date(Date.now() - n * 86400000).toISOString();
 const daysAhead = (n: number) => new Date(Date.now() + n * 86400000).toISOString();
+const MAX_PURGE_DAYS = 365;
+// "YYYY-MM-DD" (วันที่ตามปฏิทินไทย) → เวลาเริ่มวันนั้นตามเวลาไทย · cron รันตีสอง (19:00 UTC) ของวันนั้นจึงลบให้
+function purgeAtFromDate(v: unknown): string | null {
+  const m = String(v || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const t = Date.parse(`${m[1]}-${m[2]}-${m[3]}T00:00:00+07:00`);
+  if (!Number.isFinite(t)) return null;
+  const todayTh = Date.parse(new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 10) + "T00:00:00+07:00");
+  if (t < todayTh || t > Date.now() + MAX_PURGE_DAYS * 86400000) return null;
+  return new Date(t).toISOString();
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -93,7 +106,11 @@ Deno.serve(async (req) => {
     // ---------- มาร์ก / ยกเลิกมาร์ก ----------
     if (action === "mark" || action === "unmark") {
       if (ids.length === 0) return json({ ok: false, error: "ไม่มีรายการที่เลือก" }, 400);
-      const { data: rows } = await admin.from("chat_customers").select("id, tags").in("id", ids);
+      const purgeAt = action === "mark" && body?.purge_on != null ? purgeAtFromDate(body.purge_on) : null;
+      if (action === "mark" && body?.purge_on != null && !purgeAt) {
+        return json({ ok: false, error: `วันลบไม่ถูกต้อง — เลือกได้ตั้งแต่วันนี้ถึง ${MAX_PURGE_DAYS} วันข้างหน้า` }, 400);
+      }
+      const { data: rows } = await admin.from("chat_customers").select("id, tags, not_interested_at").in("id", ids);
       let done = 0;
       for (const r of rows ?? []) {
         const tags: string[] = Array.isArray(r.tags) ? r.tags : [];
@@ -102,7 +119,9 @@ Deno.serve(async (req) => {
           : tags.filter((t) => t !== cfg.tag);
         const patch: Record<string, unknown> = { tags: next, updated_at: nowIso };
         if (action === "mark") {
-          patch.not_interested_at = nowIso;
+          // มาร์กซ้ำเพื่อเปลี่ยนวันลบ = คงเวลามาร์กเดิม (ใช้เทียบว่าลูกค้าทักกลับมาหลังมาร์กหรือเปล่า)
+          patch.not_interested_at = r.not_interested_at || nowIso;
+          if (purgeAt) { patch.purge_at = purgeAt; patch.purge_confirmed_at = nowIso; }
           // ออกจากกล่องหลัก = ไม่ต้องค้างสถานะรอตอบอีก ไม่งั้นตัวนับ "ยังไม่ตอบ" เพี้ยน
           patch.awaiting_reply = false;
           patch.unread = false;
@@ -115,7 +134,7 @@ Deno.serve(async (req) => {
         const { error } = await admin.from("chat_customers").update(patch).eq("id", r.id);
         if (!error) done++;
       }
-      return json({ ok: true, applied: action, done });
+      return json({ ok: true, applied: action, done, purge_at: purgeAt });
     }
 
     // ---------- แอดมินยืนยันว่าไม่เอาจริง ----------
@@ -136,7 +155,7 @@ Deno.serve(async (req) => {
     if (action === "run") {
       if (!cfg.enabled) return json({ ok: true, skipped: "ปิดใช้งานอยู่ใน retention_config" });
       const dryRun = body?.dry_run === true;
-      const out: Record<string, unknown> = { dry_run: dryRun, mode: cfg.mode };
+      const out: Record<string, unknown> = { dry_run: dryRun, mode: "delete_row" };
 
       // 1) ลูกค้าที่ทักกลับมาหลังถูกมาร์ก = ยังสนใจอยู่ → ดึงกลับเข้ากล่องหลัก
       // เทียบ last_message_at > not_interested_at ตรงๆ ไม่ต้องพึ่ง webhook มาแก้
@@ -177,22 +196,24 @@ Deno.serve(async (req) => {
       out.due_purge = dueIds.length;
 
       if (dueIds.length > 0 && !dryRun) {
-        if (cfg.mode === "full") {
+        const { data: dueRows } = await admin.from("chat_customers")
+          .select("id, page_id, psid, source, last_message_at").in("id", dueIds);
+        // จดก่อนลบ — ถ้าจดไม่สำเร็จห้ามลบ ไม่งั้นซิงก์รอบหน้าจะดึงห้องทั้งห้องกลับมา
+        const { error: tombErr } = await admin.from("chat_purged").upsert(
+          (dueRows ?? []).map((r: any) => ({ id: r.id, page_id: r.page_id, psid: r.psid, source: r.source, last_message_at: r.last_message_at, purged_at: nowIso })),
+          { onConflict: "id" },
+        );
+        if (tombErr) {
+          out.error = tombErr.message;
+        } else {
           const { error } = await admin.from("chat_customers").delete().in("id", dueIds);
           out.deleted_rows = error ? 0 : dueIds.length;
           if (error) out.error = error.message;
-        } else {
-          // ล้างแค่เนื้อบทสนทนา + ข้อความย่อที่มีคำพูดลูกค้า — เก็บแถวไว้ให้สถิติ/แอด/ไอดีเทรดไม่พัง
-          const { error } = await admin.from("chat_customers").update({
-            transcript: [],
-            last_user_text: null,
-            last_reply_text: null,
-            transcript_purged_at: nowIso,
-            purge_at: null,          // ล้างแล้วออกจากคิว ไม่วนล้างซ้ำทุกวัน
-            updated_at: nowIso,
-          }).in("id", dueIds);
-          out.purged_transcripts = error ? 0 : dueIds.length;
-          if (error) out.error = error.message;
+          else {
+            // ข้อมูลประกอบที่ผูกกับห้อง: ประวัติแจ้งเตือนลบทิ้ง · สถิติการตอบแชทเก็บตัวเลขไว้ให้ลีดเดอร์บอร์ดไม่เพี้ยน แต่ลบชื่อลูกค้าออก
+            await admin.from("push_sent_log").delete().in("conversation_id", dueIds);
+            await admin.from("reply_stats").update({ customer_name: null }).in("conversation_id", dueIds);
+          }
         }
       }
 

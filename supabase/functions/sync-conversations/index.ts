@@ -286,7 +286,19 @@ Deno.serve(async (req) => {
     if (pages.length === 0) throw new Error("ไม่มีเพจให้ซิงก์ (เช็คสิทธิ์ หรือเปิดเพจในตั้งค่า)");
 
     // อ่าน 1 หน้าผลลัพธ์และ upsert โดยไม่สกัดข้อมูลลูกค้าจากข้อความ
-    async function processBatch(page: any, convs: any[], _aiOn: boolean): Promise<{ upserted: number; worked: number }> {
+    async function processBatch(page: any, convsIn: any[], _aiOn: boolean): Promise<{ upserted: number; worked: number }> {
+      // ห้องที่แอดมินตั้งลบถาวรไปแล้ว (chat-retention) ห้ามดึงกลับ — เว้นแต่ลูกค้าทักมาใหม่หลังจากถูกลบ
+      let convs = convsIn;
+      if (convsIn.length) {
+        const { data: tombs } = await admin.from("chat_purged").select("id, last_message_at").in("id", convsIn.map((c: any) => String(c.id)));
+        if (tombs?.length) {
+          const tombAt = new Map(tombs.map((t: any) => [String(t.id), timeMs(t.last_message_at)]));
+          convs = convsIn.filter((c: any) => {
+            const at = tombAt.get(String(c.id));
+            return at === undefined || timeMs(c.updated_time) > at;
+          });
+        }
+      }
       const rows: any[] = [];
       for (const c of convs) {
         const participants = c.participants?.data ?? [];
