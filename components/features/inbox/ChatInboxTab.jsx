@@ -64,6 +64,10 @@ const SKIP_NOTE = {
 };
 
 const MSG_WINDOW_STEP = 80;
+// ลิสต์ซ้ายโหลดทีละหน้า — poll ทุก 10 วิดึงแค่หน้าแรก แชทเก่าที่เลื่อนโหลดมาแล้วเก็บไว้ในลิสต์ต่อ
+// (เดิม limit 200 ตายตัว: ลูกค้าใหม่ทักเข้ามา 1 คน ห้องที่ 200 ก็หลุดจากลิสต์ ดูเหมือนแชทเก่าหาย ทั้งที่ข้อมูลยังอยู่ครบ)
+const LIST_PAGE = 200;
+const LIST_COLS = "id, customer_name, last_user_text, last_reply_text, last_reply_by, last_reply_at, last_message_at, page_id, page_name, country, cust_lang, source, entry_ad_id, entry_ad_name, comment_ad_name, comment_ad_ids, comment_ad_names, comment_is_ad, comment_promoted_to_inbox, stage, stage_manual, psid, profile_pic, awaiting_reply, unread, cust_read_at, blocked_at, synced_at, updated_at, tags, not_interested_at, purge_confirmed_at, purge_at";
 
 const CHAT_OPEN_COLS = "id, page_id, page_name, psid, customer_name, source, stage, stage_manual, classified_by, needs_ai, needs_verify, manual_data, manual_data_by, manual_data_at, trade_id, username, phone, email, awaiting_reply, unread, read_at, cust_read_at, cust_lang, country, broker, profile_pic, transcript, account_opened_at, entry_ad_id, entry_ad_name, last_user_text, last_reply_text, last_reply_by, last_reply_at, last_message_at, comment_ad_name, comment_ad_ids, comment_ad_names, comment_is_ad, comment_promoted_to_inbox, comment_permalink, blocked_at, synced_at, updated_at, notes, tags, ai_summary, ai_summary_at, not_interested_at, purge_at";
 
@@ -165,6 +169,10 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   // ห้องที่ดึงประวัติย้อนหลังครบแล้วยาวได้หลายร้อยข้อความ (มีรูป/สติกเกอร์) — วาดทั้งหมดทีเดียวทำให้เปิดแชทหน่วง
   // วาดแค่ช่วงท้ายก่อน แล้วค่อยเผยข้อความเก่าเมื่อกดปุ่ม (ข้อมูลอยู่ในเครื่องแล้ว ไม่ต้องยิงฐานข้อมูลซ้ำ)
   const [msgWindow, setMsgWindow] = useState(MSG_WINDOW_STEP);
+  const listMergedKeyRef = useRef("");
+  const [listEnd, setListEnd] = useState(false);          // true = โหลดแชทเก่าครบแล้ว
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [searchingDb, setSearchingDb] = useState(false);
   const highlightAtRef = useRef(null);                    // ใช้กันไม่ให้ตัวเลื่อนลงล่างสุดมาแย่งจังหวะ
   const selRef = useRef(null);
   const [pageOptions, setPageOptions] = useState([]);      // เพจทั้งหมดที่เชื่อมได้
@@ -662,6 +670,39 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     if (String(term).trim().length >= 2) searchKnowledge(term);
   }
 
+  // ตัวกรองลิสต์ชุดเดียวกันทั้ง poll (หน้าแรก), โหลดแชทเก่าเพิ่ม และค้นหาจากฐานข้อมูล
+  function applyListFilters(query) {
+    query = showBlocked ? query.not("blocked_at", "is", null) : query.is("blocked_at", null);
+    // เมนู "ไม่สนใจ" แยกออกจากกล่องหลักคนละทาง — กล่องหลักต้องไม่เห็นคนที่ถูกมาร์ก
+    // ไม่งั้นมาร์กแล้วยังเลื่อนเจออยู่ ซึ่งขัดกับจุดประสงค์ทั้งหมดของฟีเจอร์นี้
+    query = showDropped
+      ? query.not("not_interested_at", "is", null)
+      : query.is("not_interested_at", null);
+    if (listTab === "comments") query = query.or("source.eq.comment,id.like.fbc_%");
+    else if (listTab === "line") query = query.eq("source", "line");
+    else if (listTab === "instagram") query = query.eq("source", "instagram");
+    // ปิดระบบความคิดเห็นแล้ว = แท็บ "ทั้งหมด" ต้องไม่มีคอมเมนต์เก่าโผล่ปนกับแชทด้วย
+    // (แท็บความคิดเห็นถูกซ่อนไปแล้ว ถ้ายังโผล่ตรงนี้จะกดเข้าไปเจอห้องที่ตอบไม่ได้)
+    else if (listTab === "everything") {
+      if (!INBOX_COMMENTS_ENABLED) query = query.not("id", "like", "fbc_%").not("id", "like", "igc_%").or("source.is.null,source.neq.comment");
+    }
+    // แท็บ Messenger — เดิมกันออกแค่ comment กับ line ทำให้แชท Instagram หลุดมาปนอยู่ในนี้
+    else query = query.not("id", "like", "fbc_%").or("source.is.null,and(source.neq.comment,source.neq.line,source.neq.instagram)");
+    if (unreadOnly) query = query.eq("unread", true);
+
+    if (listTab === "line") {
+      // ไม่กรองเพจเลย — LINE ไม่ได้ผูกกับเพจ Facebook และ RLS คุมสิทธิ์ให้อยู่แล้ว
+    } else if (listTab !== "everything") {
+      if (pageSel.mode === "single" && pageSel.single) query = query.eq("page_id", pageSel.single);
+      else if (pageSel.mode === "multi" && pageSel.multi.length) query = query.in("page_id", pageSel.multi);
+      if (allowedPages) query = query.in("page_id", allowedPages);
+    } else {
+      // รวมทุกเพจ แต่ยังเคารพสิทธิ์เพจที่ผู้ใช้ได้รับ (บวกแชท LINE ที่ไม่ผูกกับเพจ)
+      query = scopeToAllowedPages(query, allowedPages);
+    }
+    return query;
+  }
+
   async function loadList({ refreshAfterCurrent = false, lean = false } = {}) {
     const key = JSON.stringify({
       listTab,
@@ -690,42 +731,26 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     const timeout = setTimeout(() => controller.abort(), 15_000);
     const promise = (async () => {
       try {
-        let query = supabase.from("chat_customers")
-          .select("id, customer_name, last_user_text, last_reply_text, last_reply_by, last_reply_at, last_message_at, page_id, page_name, country, cust_lang, source, entry_ad_id, entry_ad_name, comment_ad_name, comment_ad_ids, comment_ad_names, comment_is_ad, comment_promoted_to_inbox, stage, stage_manual, psid, profile_pic, awaiting_reply, unread, cust_read_at, blocked_at, synced_at, updated_at, tags, not_interested_at, purge_confirmed_at, purge_at")
-          .order("last_message_at", { ascending: false }).limit(200);
-        query = showBlocked ? query.not("blocked_at", "is", null) : query.is("blocked_at", null);
-        // เมนู "ไม่สนใจ" แยกออกจากกล่องหลักคนละทาง — กล่องหลักต้องไม่เห็นคนที่ถูกมาร์ก
-        // ไม่งั้นมาร์กแล้วยังเลื่อนเจออยู่ ซึ่งขัดกับจุดประสงค์ทั้งหมดของฟีเจอร์นี้
-        query = showDropped
-          ? query.not("not_interested_at", "is", null)
-          : query.is("not_interested_at", null);
-        if (listTab === "comments") query = query.or("source.eq.comment,id.like.fbc_%");
-        else if (listTab === "line") query = query.eq("source", "line");
-        else if (listTab === "instagram") query = query.eq("source", "instagram");
-        // ปิดระบบความคิดเห็นแล้ว = แท็บ "ทั้งหมด" ต้องไม่มีคอมเมนต์เก่าโผล่ปนกับแชทด้วย
-        // (แท็บความคิดเห็นถูกซ่อนไปแล้ว ถ้ายังโผล่ตรงนี้จะกดเข้าไปเจอห้องที่ตอบไม่ได้)
-        else if (listTab === "everything") {
-          if (!INBOX_COMMENTS_ENABLED) query = query.not("id", "like", "fbc_%").not("id", "like", "igc_%").or("source.is.null,source.neq.comment");
-        }
-        // แท็บ Messenger — เดิมกันออกแค่ comment กับ line ทำให้แชท Instagram หลุดมาปนอยู่ในนี้
-        else query = query.not("id", "like", "fbc_%").or("source.is.null,and(source.neq.comment,source.neq.line,source.neq.instagram)");
-        if (unreadOnly) query = query.eq("unread", true);
-
-        if (listTab === "line") {
-          // ไม่กรองเพจเลย — LINE ไม่ได้ผูกกับเพจ Facebook และ RLS คุมสิทธิ์ให้อยู่แล้ว
-        } else if (listTab !== "everything") {
-          if (pageSel.mode === "single" && pageSel.single) query = query.eq("page_id", pageSel.single);
-          else if (pageSel.mode === "multi" && pageSel.multi.length) query = query.in("page_id", pageSel.multi);
-          if (allowedPages) query = query.in("page_id", allowedPages);
-        } else {
-          // รวมทุกเพจ แต่ยังเคารพสิทธิ์เพจที่ผู้ใช้ได้รับ (บวกแชท LINE ที่ไม่ผูกกับเพจ)
-          query = scopeToAllowedPages(query, allowedPages);
-        }
+        let query = applyListFilters(supabase.from("chat_customers")
+          .select(LIST_COLS)
+          .order("last_message_at", { ascending: false }).limit(LIST_PAGE));
 
         const { data, error } = await query.abortSignal(controller.signal);
         if (error) throw error;
         if (seq !== listSeqRef.current || key !== latestListKeyRef.current) return;
-        setList((data || []).map((row) => applyReadMark(normalizeChatSource(row))));
+        const top = (data || []).map((row) => applyReadMark(normalizeChatSource(row)));
+        const sameKey = listMergedKeyRef.current === key;
+        listMergedKeyRef.current = key;
+        if (!sameKey) setListEnd(top.length < LIST_PAGE);
+        setList((prev) => {
+          // เปลี่ยนตัวกรอง = เริ่มใหม่ · หน้าแรกไม่เต็ม = ไม่มีแชทเก่ากว่านี้ที่ตรงตัวกรองแล้ว
+          if (!sameKey || !Array.isArray(prev) || top.length < LIST_PAGE) return top;
+          // คงแชทเก่าที่เลื่อนโหลดมาแล้ว (เก่ากว่าแถวสุดท้ายของหน้าแรก) — แถวที่ขยับขึ้นมาอยู่หน้าแรกใช้ของใหม่
+          const topIds = new Set(top.map((r) => r.id));
+          const cutoff = Date.parse(top[top.length - 1]?.last_message_at || "") || 0;
+          const older = prev.filter((r) => !topIds.has(r.id) && (Date.parse(r.last_message_at || "") || 0) <= cutoff);
+          return [...top, ...older];
+        });
         // นับ unread/badge (count query หลายตัว) — ข้ามในโหมด lean เพื่อให้ poll 10 วิ ยิงแค่ query ลิสต์ตัวเดียว
         if (!lean) {
           void Promise.allSettled([
@@ -753,6 +778,59 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     listLoadRef.current = { key, promise };
     return promise;
   }
+  // เลื่อนลงสุดลิสต์ = โหลดแชทเก่าหน้าถัดไป (ต่อจากแถวสุดท้ายที่มีอยู่)
+  async function loadOlderChats() {
+    if (loadingMore || listEnd || !Array.isArray(list) || !list.length) return;
+    const last = list[list.length - 1]?.last_message_at;
+    if (!last) { setListEnd(true); return; }
+    const key = listMergedKeyRef.current;
+    setLoadingMore(true);
+    const { data, error } = await applyListFilters(supabase.from("chat_customers").select(LIST_COLS)
+      .lt("last_message_at", last).order("last_message_at", { ascending: false }).limit(LIST_PAGE));
+    setLoadingMore(false);
+    if (error || key !== listMergedKeyRef.current) return;   // เปลี่ยนตัวกรองระหว่างโหลด = ทิ้งผล
+    const rows = (data || []).map((row) => applyReadMark(normalizeChatSource(row)));
+    if (rows.length < LIST_PAGE) setListEnd(true);
+    setList((prev) => {
+      const have = new Set((prev || []).map((r) => r.id));
+      return [...(prev || []), ...rows.filter((r) => !have.has(r.id))];
+    });
+  }
+  const loadMoreRef = useRef(null);
+  useEffect(() => {
+    const el = loadMoreRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver((entries) => { if (entries.some((e) => e.isIntersecting)) loadOlderChats(); }, { rootMargin: "300px" });
+    io.observe(el);
+    return () => io.disconnect();
+  });
+
+  // ค้นหา = ถามฐานข้อมูลด้วย ไม่ใช่แค่กรองแชทที่โหลดอยู่ในลิสต์ (ไม่งั้นหาลูกค้าเก่าไม่เจอ)
+  // ผลที่เจอผนวกเข้าลิสต์ แล้วตัวกรองฝั่งหน้าเว็บด้านล่างจะคัดให้เหลือแค่ที่ตรงคำค้น
+  useEffect(() => {
+    const term = q.trim().replace(/[,()*%\\]/g, " ").trim();
+    if (term.length < 2) { setSearchingDb(false); return; }
+    let cancelled = false;
+    setSearchingDb(true);
+    const t = setTimeout(async () => {
+      const like = `*${term}*`;
+      const { data } = await applyListFilters(supabase.from("chat_customers").select(LIST_COLS)
+        .or(`customer_name.ilike.${like},last_user_text.ilike.${like},last_reply_text.ilike.${like},country.ilike.${like},entry_ad_name.ilike.${like}`)
+        .order("last_message_at", { ascending: false }).limit(100));
+      if (cancelled) return;
+      setSearchingDb(false);
+      const rows = (data || []).map((row) => applyReadMark(normalizeChatSource(row)));
+      if (!rows.length) return;
+      setList((prev) => {
+        const have = new Set((prev || []).map((r) => r.id));
+        const merged = [...(prev || []), ...rows.filter((r) => !have.has(r.id))];
+        return merged.sort((a, b) => (Date.parse(b.last_message_at || "") || 0) - (Date.parse(a.last_message_at || "") || 0));
+      });
+    }, 400);
+    return () => { cancelled = true; clearTimeout(t); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, listTab, showBlocked, showDropped, unreadOnly, pageSel.mode, pageSel.single, (pageSel.multi || []).join(",")]);
+
   async function loadMessengerUnreadCount() {
     const ps = pageSelRef.current;
     let mq = supabase.from("chat_customers").select("id", { count: "exact", head: true })
@@ -2575,7 +2653,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                 </div>
               </div>
             )
-              : filtered.map((x) => (
+              : <>{filtered.map((x) => (
                 <button key={x.id} onClick={() => openChat(x)} onMouseEnter={() => prefetchChat(x)} onMouseLeave={cancelPrefetch} onFocus={() => prefetchChat(x)} className={`w-full text-left p-3 hover:bg-night-surface2 flex gap-2.5 ${selected?.id === x.id ? "bg-night-accent/15 chat-item-active" : ""}`}>
                   <div className="relative shrink-0">
                     <div className="w-9 h-9 rounded-full bg-night-surface2 text-night-ink-2 flex items-center justify-center text-sm font-semibold relative overflow-hidden">
@@ -2637,6 +2715,19 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                   </div>
                 </button>
               ))}
+              {!q.trim() && !listEnd && (
+                <div ref={loadMoreRef} className="p-3 text-center">
+                  <button type="button" onClick={loadOlderChats} disabled={loadingMore}
+                    className="px-3 py-1.5 rounded-full text-xs border border-night-border text-night-ink-2 hover:text-night-ink disabled:opacity-60">
+                    {loadingMore ? "กำลังโหลดแชทเก่า..." : "โหลดแชทเก่าเพิ่ม"}
+                  </button>
+                </div>
+              )}
+              {!q.trim() && listEnd && list.length > LIST_PAGE && (
+                <div className="p-3 text-center text-2xs text-night-ink-3">แสดงแชทครบทั้งหมด {list.length} ห้องแล้ว</div>
+              )}
+              {q.trim() && searchingDb && <div className="p-3 text-center text-2xs text-night-ink-3">กำลังค้นหาในแชททั้งหมด...</div>}
+              </>}
         </div>
       </div>
 
