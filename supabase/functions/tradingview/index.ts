@@ -774,7 +774,11 @@ Deno.serve(async (req) => {
       if (!u) return json({ ok: false, error: "ไม่มี username" });
       const cookie = await getBrandCookie(Number(body?.brand_id) || null);
       const res = await callTv({ action: "validate", username: u }, cookie, { actor: auth.permission?.email ?? null });
-      return json({ ok: true, exists: !!res?.username, username: res?.username || null });
+      // ยิงตรง: tvValidate คืน username ติดมาเสมอ (ไม่เจอก็คืนชื่อที่ส่งไป) ต้องดู exists เท่านั้น
+      // เดิมใช้ !!res.username จึงตอบ "มีอยู่" ทุกชื่อ พิมพ์ผิดก็ผ่านไปยิงให้สิทธิ์แล้วโดน 422 ทุกสคริปต์
+      // n8n ไม่มีฟิลด์ exists → ใช้การมี username เหมือนเดิม
+      const exists = typeof res?.exists === "boolean" ? res.exists : !!res?.username;
+      return json({ ok: true, exists, username: exists ? (res?.username || u) : null });
     }
 
     // renew: true = "ต่ออายุ" (ปุ่มต่ออายุหน้าแชท) — ต่างจากการให้สิทธิ์ใหม่ 2 อย่าง

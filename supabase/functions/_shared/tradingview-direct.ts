@@ -57,6 +57,19 @@ function headersFor(cookie: TvCookie, base: string): HeadersInit {
 }
 
 /** ยิงจริง + จับ error ทุกแบบให้กลายเป็น TvResult ไม่ throw ออกไปให้ผู้เรียกเดา */
+// แปลงรหัส error ของ TradingView เป็นข้อความที่แอดมินรู้ว่าต้องแก้อะไร — "ตอบ 422" เฉย ๆ อ่านแล้วไม่รู้เรื่อง
+const TV_ERROR_TEXT: Record<string, string> = {
+  username_recip_not_found: "ไม่พบ username นี้ใน TradingView — เช็กตัวสะกดอีกครั้ง (ต้องเป็น username ไม่ใช่ชื่อที่แสดงหรืออีเมล)",
+};
+function tvErrorText(status: number, body: string): string {
+  let j: any = null;
+  try { j = JSON.parse(body); } catch { /* ไม่ใช่ JSON */ }
+  const code = String(j?.code || "");
+  if (TV_ERROR_TEXT[code]) return TV_ERROR_TEXT[code];
+  const detail = typeof j?.detail === "string" ? j.detail.slice(0, 160) : "";
+  return detail ? `TradingView ตอบ ${status}: ${detail}` : `TradingView ตอบ ${status}`;
+}
+
 async function post(base: string, path: string, cookie: TvCookie, form: Record<string, string>): Promise<TvResult> {
   const endpoint = `${base}${path}`;
   const body = new URLSearchParams(form).toString();
@@ -74,7 +87,7 @@ async function post(base: string, path: string, cookie: TvCookie, form: Record<s
     if (res.status === 401 || res.status === 403 || /"detail":\s*"[^"]*[Aa]uth/.test(raw)) {
       return { ok: false, endpoint, http_status: res.status, raw, _full: full, error: "คุกกี้ TradingView หมดอายุหรือใช้ไม่ได้ — ต้องใส่ใหม่ในหน้าตั้งค่า" };
     }
-    if (!res.ok) return { ok: false, endpoint, http_status: res.status, raw, _full: full, error: `TradingView ตอบ ${res.status}` };
+    if (!res.ok) return { ok: false, endpoint, http_status: res.status, raw, _full: full, error: tvErrorText(res.status, full) };
     return { ok: true, endpoint, http_status: res.status, raw, _full: full };
   } catch (e) {
     const msg = e instanceof Error ? (e.name === "TimeoutError" ? "TradingView ไม่ตอบใน 20 วินาที" : e.message) : String(e);
