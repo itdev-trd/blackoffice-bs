@@ -831,14 +831,28 @@ Deno.serve(async (req) => {
         if (Date.now() > aiDeadline || seen >= CONV_CAP) { stoppedEarly = true; break; }
         const data = await fetchJson(url);
         if (data?.error) { pageErr = data.error.message || String(data.error); pageErrors.push({ page: page.name, error: pageErr }); break; }
-        const batch = data?.data ?? [];
-        seen += batch.length;
-        const rb = await processBatch(page, batch, false);
+        const batchAll = (data?.data ?? []) as any[];
+        seen += batchAll.length;
+        // upsert เฉพาะห้องใหม่/ห้องที่ขยับหลังจากที่เก็บไว้ — เดิมเขียนทับทุกห้องที่อ่าน (~300 ห้องทุก 15 นาที ≈ 2.9 หมื่นครั้ง/วัน)
+        // ทุกการเขียนถูก realtime ส่งทั้งแถว (รวม transcript) ไปทุกเครื่องที่เปิดแอป จนโควตา egress ของ Supabase เต็ม
+        const { data: knownRows } = batchAll.length
+          ? await admin.from("chat_customers").select("id, last_message_at").in("id", batchAll.map((c: any) => String(c.id)))
+          : { data: [] };
+        const knownAt = new Map((knownRows ?? []).map((r: any) => [String(r.id), timeMs(r.last_message_at)]));
+        const batch = batchAll.filter((c: any) => {
+          const prev = knownAt.get(String(c.id));
+          if (prev === undefined) return true;
+          const at = timeMs(c.updated_time);
+          return !at || at > prev;
+        });
+        const rb = batch.length ? await processBatch(page, batch, false) : { upserted: 0, worked: 0 };
         convCount += rb.upserted;
         pageConv += rb.upserted;
         worked += rb.worked;
         url = data?.paging?.next ?? "";
         if (worked >= perPage) break; // เติม "งานที่ต้องทำ" ครบโควตาแล้ว
+        // Meta เรียงห้องตาม updated_time ใหม่→เก่า ทั้งหน้าไม่มีอะไรขยับ = หน้าถัดไปก็ไม่มี
+        if (batchAll.length && !batch.length) break;
       }
       // piggyback: ดึงโฟลเดอร์สแปมของเพจ (1 คำขอ) → บล็อกแชทที่แอดมินกดสแปมจากฝั่งเพจให้อัตโนมัติ
       // (ถูกมาก ~1 call/เพจ/รอบ · ไม่ auto-unblock — ปลดเองได้จากแอป)

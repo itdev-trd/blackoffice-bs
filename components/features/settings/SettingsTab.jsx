@@ -1,5 +1,6 @@
 "use client";
 
+import { compressImage, STORAGE_CACHE_SECONDS } from "@/lib/utils/image";
 import { useState, useEffect } from "react";
 import {
   Sparkles,
@@ -1537,10 +1538,12 @@ export function SavedRepliesPanel({ allowedPages = null }) {
     if (files.length > room) alert(`เหลือที่ว่างอีก ${room} รูป — จะอัปโหลดให้เท่าที่ใส่ได้`);
     setSaving(items[idx].id || items[idx].tmp);
     const added = [];
-    for (const file of files.slice(0, room)) {
+    for (const raw of files.slice(0, room)) {
+      // รูปคลังคำตอบถูกเปิดดูซ้ำบ่อยที่สุด (รูปเดียว 2.4 MB เคยกิน egress 120 MB/วัน) — บีบก่อนเก็บเสมอ
+      const file = await compressImage(raw);
       const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
       const path = `saved/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-      const { error } = await supabase.storage.from("chat-media").upload(path, file, { contentType: file.type || "image/jpeg", upsert: false });
+      const { error } = await supabase.storage.from("chat-media").upload(path, file, { contentType: file.type || "image/jpeg", upsert: false, cacheControl: STORAGE_CACHE_SECONDS });
       if (error) { alert(`อัปโหลด "${file.name}" ไม่สำเร็จ: ${error.message}`); continue; }
       added.push(supabase.storage.from("chat-media").getPublicUrl(path).data.publicUrl);
     }

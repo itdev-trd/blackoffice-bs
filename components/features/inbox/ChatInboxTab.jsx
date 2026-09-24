@@ -25,6 +25,7 @@ import { lsGet, lsSet } from "@/lib/utils/storage";
 import { logActivity, getDeviceId } from "@/lib/utils/activity";
 import { readFunctionErrorMessage } from "@/lib/utils/errors";
 import { serviceWorkerReady } from "@/lib/utils/service-worker";
+import { compressImage, STORAGE_CACHE_SECONDS } from "@/lib/utils/image";
 import Spinner from "@/components/shared/Spinner";
 import { TradeIdChecker, CustomerDataForm } from "@/components/features/customerdb/CustomerDatabaseTab";
 import MetaLabels from "@/components/features/inbox/MetaLabels";
@@ -1322,36 +1323,10 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   function removePending(idx) {
     setPendingFiles((p) => { const c = [...p]; const [rm] = c.splice(idx, 1); if (rm?.preview && String(rm.preview).startsWith("blob:")) URL.revokeObjectURL(rm.preview); return c; });
   }
-  // ลดขนาดรูปก่อนอัปโหลด — รูปจากมือถือมักหนัก 3-8 MB ซึ่งต้องอัปขึ้น storage หนึ่งรอบ
-  // แล้ว Meta ยังต้องมาโหลดต่ออีกรอบ รวมแล้วรอเป็นสิบวินาที
-  // Messenger แสดงรูปกว้างไม่เกินราว 1600px อยู่แล้ว ย่อเท่านี้ตาเปล่าไม่เห็นต่าง
-  const IMG_MAX_EDGE = 1600;
-  const IMG_SKIP_BYTES = 400 * 1024;      // เล็กกว่านี้บีบแล้วไม่คุ้มเวลาที่ใช้บีบ
-  async function compressImage(file) {
-    if (!file?.type?.startsWith("image/")) return file;
-    if (file.type === "image/gif") return file;          // GIF ขยับได้ บีบแล้วภาพเคลื่อนไหวหาย
-    if (file.size <= IMG_SKIP_BYTES) return file;
-    try {
-      const bmp = await createImageBitmap(file);
-      const scale = Math.min(1, IMG_MAX_EDGE / Math.max(bmp.width, bmp.height));
-      const w = Math.max(1, Math.round(bmp.width * scale));
-      const h = Math.max(1, Math.round(bmp.height * scale));
-      const canvas = document.createElement("canvas");
-      canvas.width = w; canvas.height = h;
-      canvas.getContext("2d").drawImage(bmp, 0, 0, w, h);
-      bmp.close?.();
-      const blob = await new Promise((res) => canvas.toBlob(res, "image/jpeg", 0.82));
-      if (!blob || blob.size >= file.size) return file;   // บีบแล้วไม่เล็กลง = ส่งไฟล์เดิม
-      return new File([blob], String(file.name || "image").replace(/\.\w+$/, "") + ".jpg", { type: "image/jpeg" });
-    } catch {
-      return file;                                        // เบราว์เซอร์ไม่รองรับ = ส่งไฟล์เดิม
-    }
-  }
-
   async function uploadToStorage(file) {
     const ext = (file.name.split(".").pop() || "bin").toLowerCase();
     const path = `${selected.page_id || "p"}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
-    const { error } = await supabase.storage.from("chat-media").upload(path, file, { contentType: file.type || "application/octet-stream", upsert: false });
+    const { error } = await supabase.storage.from("chat-media").upload(path, file, { contentType: file.type || "application/octet-stream", upsert: false, cacheControl: STORAGE_CACHE_SECONDS });
     if (error) throw error;
     return supabase.storage.from("chat-media").getPublicUrl(path).data.publicUrl;
   }

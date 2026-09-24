@@ -66,7 +66,7 @@ async function saveLineMedia(admin: any, accessToken: string, messageId: string,
       : kind === "video" ? "mp4" : "jpg";
     // ใช้ messageId เป็นชื่อไฟล์ — LINE ส่ง event ซ้ำได้ upsert จึงไม่สร้างไฟล์ซ้ำ
     const path = `line/${messageId}.${ext}`;
-    const up = await admin.storage.from("chat-media").upload(path, buf, { contentType: mime, upsert: true });
+    const up = await admin.storage.from("chat-media").upload(path, buf, { contentType: mime, upsert: true, cacheControl: "31536000" });
     if (up.error) { console.warn("[line media] อัปโหลดไม่สำเร็จ", up.error.message); return null; }
     return { url: admin.storage.from("chat-media").getPublicUrl(path).data.publicUrl, mime };
   } catch (e) {
