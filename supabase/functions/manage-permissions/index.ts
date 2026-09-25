@@ -1,5 +1,6 @@
 // supabase/functions/manage-permissions/index.ts
 // จัดการสิทธิ์ผู้ใช้ (เฉพาะ owner) — list / upsert / delete แถวใน user_permissions
+// + reset_password: owner ตั้งรหัสผ่านใหม่ให้ผู้ใช้คนอื่น (ไม่ส่งอีเมล — owner เอารหัสไปบอกเอง)
 // เช็คว่าผู้เรียกเป็นเจ้าของระบบจริงก่อน แล้วใช้ service role เขียน (ข้าม RLS)
 //
 // ทำไมต้องเป็น owner: บทบาท admin/ads เห็นหัวข้อตั้งค่าแค่ "ข้อความบันทึกไว้"
@@ -14,6 +15,13 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// ตัดตัวที่อ่านสับสนออก (0/O, 1/l/I) เพราะ owner ต้องอ่านไปบอกต่อ
+function randomPassword(len = 12): string {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+  const buf = crypto.getRandomValues(new Uint32Array(len));
+  return Array.from(buf, (n) => chars[n % chars.length]).join("");
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
@@ -22,7 +30,7 @@ Deno.serve(async (req) => {
 
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const myEmail = auth.user?.email?.toLowerCase();
-    const { action, email, role, nickname, allowed_ad_accounts, allowed_tabs, allowed_pages, allowed_settings, chat_alert, alert_minutes, alert_pages, alert_sound, alert_new } = await readJsonBody(req, 64 * 1024);
+    const { action, email, password, role, nickname, allowed_ad_accounts, allowed_tabs, allowed_pages, allowed_settings, chat_alert, alert_minutes, alert_pages, alert_sound, alert_new } = await readJsonBody(req, 64 * 1024);
     const targetEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
 
     if (action === "list") {
@@ -67,6 +75,43 @@ Deno.serve(async (req) => {
       const { error } = await admin.from("user_permissions").delete().eq("email", targetEmail);
       if (error) throw error;
       return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, "content-type": "application/json" } });
+    }
+
+    if (action === "reset_password") {
+      if (!targetEmail) throw new Error("ต้องระบุอีเมล");
+      // รหัสตัวเองเปลี่ยนผ่านหน้าบัญชีตามปกติ — กันกดผิดแล้วล็อกตัวเองออกกลางคัน
+      if (targetEmail === myEmail) throw new Error("รีเซ็ตรหัสของตัวเองจากหน้านี้ไม่ได้");
+      // รีเซ็ตได้เฉพาะคนที่อยู่ในรายชื่อสิทธิ์ของระบบนี้ ไม่ใช่ทุกบัญชีในโปรเจกต์
+      const { data: perm } = await admin.from("user_permissions").select("email").eq("email", targetEmail).maybeSingle();
+      if (!perm) throw new Error("ไม่พบผู้ใช้นี้ในรายชื่อสิทธิ์");
+      const given = typeof password === "string" ? password : "";
+      if (given && (given.length < 8 || given.length > 72)) throw new Error("รหัสผ่านต้องยาว 8–72 ตัวอักษร");
+      const newPassword = given || randomPassword();
+
+      // หา user id จากอีเมล — listUsers ไม่มีตัวกรองอีเมล ต้องไล่ทีละหน้า
+      let userId: string | null = null;
+      for (let page = 1; page <= 20 && !userId; page++) {
+        const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 1000 });
+        if (error) throw error;
+        const hit = data.users.find((u) => String(u.email || "").toLowerCase() === targetEmail);
+        if (hit) userId = hit.id;
+        if (data.users.length < 1000) break;
+      }
+      let created = false;
+      if (userId) {
+        const { error } = await admin.auth.admin.updateUserById(userId, { password: newPassword });
+        if (error) throw error;
+      } else {
+        // มีสิทธิ์ในระบบแต่ยังไม่เคยมีบัญชีล็อกอิน = สร้างให้เลยด้วยรหัสนี้
+        const { error } = await admin.auth.admin.createUser({ email: targetEmail, password: newPassword, email_confirm: true });
+        if (error) throw error;
+        created = true;
+      }
+      try {
+        await admin.from("activity_log").insert({ email: myEmail, event: "reset_password", detail: { target: targetEmail, created } });
+      } catch { /* log พังไม่ควรทำให้การรีเซ็ตพัง */ }
+      // คืนรหัสให้ owner ครั้งเดียวตอนนี้ — ระบบไม่เก็บรหัสไว้ที่ไหน
+      return new Response(JSON.stringify({ ok: true, password: newPassword, created }), { headers: { ...corsHeaders, "content-type": "application/json", "cache-control": "no-store" } });
     }
 
     throw new Error("action ไม่ถูกต้อง");

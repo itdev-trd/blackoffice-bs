@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { Loader2, Wand2, ImageIcon, FileDown, Trash2, RefreshCw } from "lucide-react";
+import { Loader2, Wand2, ImageIcon, FileDown, Trash2, RefreshCw, KeyRound, Copy } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { readFunctionErrorMessage } from "@/lib/utils/errors";
 import PasswordInput from "@/components/shared/PasswordInput";
@@ -928,6 +928,33 @@ export function PermissionsPanel() {
   const [notice, setNotice] = useState("");
   const [editing, setEditing] = useState(null); // { email, role, allowed:[], tabs:[], pages:[] }
   const [saving, setSaving] = useState(false);
+  // รีเซ็ตรหัสผ่านให้ผู้ใช้คนอื่น (owner เท่านั้น — หน้านี้เปิดได้เฉพาะ owner อยู่แล้ว)
+  const [myEmail, setMyEmail] = useState("");
+  const [resetFor, setResetFor] = useState("");        // อีเมลที่กำลังเปิดกล่องรีเซ็ต
+  const [resetPw, setResetPw] = useState("");
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetResult, setResetResult] = useState(null); // { email, password, created } — โชว์ครั้งเดียว
+  const [copied, setCopied] = useState(false);
+  useEffect(() => { supabase.auth.getUser().then(({ data }) => setMyEmail(String(data?.user?.email || "").toLowerCase())); }, []);
+
+  function openReset(email) {
+    setResetFor(resetFor === email ? "" : email);
+    setResetPw(""); setResetResult(null); setCopied(false); setError("");
+  }
+  async function doReset() {
+    if (!resetFor || resetBusy) return;
+    if (resetPw && resetPw.length < 8) { setError("รหัสผ่านต้องยาวอย่างน้อย 8 ตัวอักษร"); return; }
+    setResetBusy(true); setError("");
+    const { data, error: fnErr } = await supabase.functions.invoke("manage-permissions", { body: { action: "reset_password", email: resetFor, password: resetPw || undefined } });
+    setResetBusy(false);
+    if (fnErr) { setError(await readFunctionErrorMessage(fnErr)); return; }
+    if (!data?.ok) { setError(data?.error || "รีเซ็ตรหัสผ่านไม่สำเร็จ"); return; }
+    setResetResult({ email: resetFor, password: data.password, created: !!data.created });
+    setResetPw("");
+  }
+  async function copyPw() {
+    try { await navigator.clipboard.writeText(resetResult?.password || ""); setCopied(true); } catch { setCopied(false); }
+  }
 
   async function load() {
     setLoading(true);
@@ -998,7 +1025,8 @@ export function PermissionsPanel() {
         <div className="border border-slate-200 rounded-lg divide-y divide-slate-100">
           {(rows || []).length === 0 && <div className="text-sm text-slate-400 py-4 text-center">ยังไม่มีข้อมูลสิทธิ์</div>}
           {(rows || []).map((r) => (
-            <div key={r.email} className="flex items-center justify-between gap-2 px-3 py-2 text-sm">
+            <div key={r.email}>
+            <div className="flex items-center justify-between gap-2 px-3 py-2 text-sm">
               <div className="min-w-0">
                 <div className="text-slate-800 truncate">{r.nickname ? <><span className="font-medium">{r.nickname}</span> <span className="text-slate-400 font-normal">· {r.email}</span></> : r.email}</div>
                 <div className="text-[11px] text-slate-400">
@@ -1016,8 +1044,47 @@ export function PermissionsPanel() {
                   {ROLES.find((x) => x.key === r.role)?.label || r.role}
                 </span>
                 <button onClick={() => setEditing({ email: r.email, nickname: r.nickname || "", role: r.role, allowed: (r.allowed_ad_accounts || []).map(String), tabs: (r.allowed_tabs || []).map(String), pages: (r.allowed_pages || []).map(String), settings: (r.allowed_settings || []).map(String), chatAlert: r.chat_alert !== false, alertMinutes: r.alert_minutes ?? 3, alertPages: (r.alert_pages || []).map(String), alertSound: r.alert_sound !== false, alertNew: r.alert_new !== false })} className="text-slate-500 hover:text-slate-800 text-xs underline">แก้ไข</button>
+                {String(r.email).toLowerCase() !== myEmail && (
+                  <button onClick={() => openReset(r.email)} title="รีเซ็ตรหัสผ่าน" className={`hover:text-slate-800 ${resetFor === r.email ? "text-brand-600" : "text-slate-500"}`}><KeyRound size={15} /></button>
+                )}
                 <button onClick={() => remove(r.email)} className="text-rose-500 hover:text-rose-700"><Trash2 size={15} /></button>
               </div>
+            </div>
+            {resetFor === r.email && (
+              <div className="px-3 pb-3 -mt-1">
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-2 text-sm">
+                  {resetResult?.email === r.email ? (
+                    <>
+                      <div className="text-emerald-700 font-medium">
+                        {resetResult.created ? "สร้างบัญชีล็อกอินให้แล้ว" : "เปลี่ยนรหัสผ่านแล้ว"} — ส่งรหัสนี้ให้ {r.nickname || r.email}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <code className="flex-1 rounded-md border border-slate-200 bg-white px-3 py-2 font-mono text-base tracking-wide select-all">{resetResult.password}</code>
+                        <button onClick={copyPw} className="shrink-0 inline-flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-2 text-xs hover:bg-slate-50">
+                          <Copy size={13} /> {copied ? "คัดลอกแล้ว" : "คัดลอก"}
+                        </button>
+                      </div>
+                      <div className="text-[11px] text-slate-500">รหัสนี้แสดงครั้งเดียว ระบบไม่เก็บไว้ · แนะนำให้ผู้ใช้เปลี่ยนรหัสเองหลังล็อกอิน</div>
+                      <button onClick={() => openReset(r.email)} className="text-xs text-slate-500 underline">ปิด</button>
+                    </>
+                  ) : (
+                    <>
+                      <div className="font-medium text-amber-800">ตั้งรหัสผ่านใหม่ให้ {r.nickname || r.email}</div>
+                      <input type="text" value={resetPw} onChange={(e) => setResetPw(e.target.value)} autoComplete="new-password"
+                        placeholder="พิมพ์รหัสใหม่ (อย่างน้อย 8 ตัว) หรือเว้นว่างให้ระบบสุ่มให้"
+                        className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm" />
+                      <div className="text-[11px] text-slate-500">รหัสเดิมจะใช้ไม่ได้ทันที ผู้ใช้ต้องล็อกอินด้วยรหัสใหม่</div>
+                      <div className="flex gap-2">
+                        <button onClick={() => openReset(r.email)} disabled={resetBusy} className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs disabled:opacity-50">ยกเลิก</button>
+                        <button onClick={doReset} disabled={resetBusy} className="inline-flex items-center gap-1 rounded-md bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50">
+                          {resetBusy && <Loader2 size={12} className="animate-spin" />} {resetPw ? "ตั้งรหัสนี้" : "สุ่มรหัสใหม่"}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
             </div>
           ))}
         </div>
