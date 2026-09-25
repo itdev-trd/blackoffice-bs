@@ -4065,6 +4065,53 @@ create table if not exists public.chat_purged (
 alter table public.chat_purged enable row level security;
 -- ไม่มี policy = อ่าน/เขียนได้เฉพาะ service role (edge functions)
 
+-- ======================================================================
+-- FILE: supabase/migrations/20260925090000_admin_revoke_user_sessions.sql
+-- ======================================================================
+
+-- ใช้ตอน owner รีเซ็ตรหัสผ่านให้ผู้ใช้คนอื่น (manage-permissions reset_password)
+-- เปลี่ยนรหัสอย่างเดียวไม่เตะเครื่องที่ล็อกอินค้างไว้ — ถ้ารีเซ็ตเพราะรหัสรั่ว คนที่ถือ session เดิมยังใช้ต่อได้
+-- ลบ session ทั้งหมดของผู้ใช้ = refresh token ใช้ไม่ได้ (refresh_tokens ผูก session แบบ cascade)
+-- access token ที่ออกไปแล้วยังใช้ได้จนหมดอายุ (ค่าเริ่มต้น 1 ชม.)
+create or replace function public.admin_revoke_user_sessions(target uuid)
+returns integer
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare n integer;
+begin
+  delete from auth.sessions where user_id = target;
+  get diagnostics n = row_count;
+  return n;
+end;
+$$;
+revoke all on function public.admin_revoke_user_sessions(uuid) from public, anon, authenticated;
+grant execute on function public.admin_revoke_user_sessions(uuid) to service_role;
+
+-- ======================================================================
+-- FILE: supabase/migrations/20260925100000_admin_cron_health.sql
+-- ======================================================================
+
+-- สรุปสถานะงานตั้งเวลา (pg_cron) ให้ system-health อ่าน — schema cron เรียกผ่าน PostgREST ตรงไม่ได้
+-- หมายเหตุ: net.http_post ใน cron ถือว่า "สำเร็จ" ทันทีที่เข้าคิว ถ้า function ปลายทางตอบ error
+-- จะไม่นับเป็น failed ที่นี่ — ข้อนี้จับได้แค่ SQL ของงานเองพัง (เช่น cron ถูกปิด/คำสั่งผิดรูป)
+create or replace function public.admin_cron_health()
+returns table (jobname text, schedule text, active boolean, last_status text, last_run timestamptz, failed_24h integer)
+language sql
+security definer
+set search_path = ''
+as $$
+  select j.jobname::text, j.schedule::text, j.active,
+         (select d.status::text from cron.job_run_details d where d.jobid = j.jobid order by d.start_time desc limit 1),
+         (select max(d.start_time) from cron.job_run_details d where d.jobid = j.jobid),
+         (select count(*)::int from cron.job_run_details d where d.jobid = j.jobid and d.status = 'failed' and d.start_time > now() - interval '24 hours')
+  from cron.job j
+  order by j.jobname;
+$$;
+revoke all on function public.admin_cron_health() from public, anon, authenticated;
+grant execute on function public.admin_cron_health() to service_role;
+
 -- ============================================================
 -- UTILITY / DIAGNOSTIC / MAINTENANCE SCRIPTS (run ad hoc, not part of the migration order)
 -- ============================================================

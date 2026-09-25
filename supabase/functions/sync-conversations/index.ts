@@ -15,6 +15,7 @@ import { hasFullData, authorizeRequest } from "../_shared/permissions.ts";
 import { getMetaBackgroundGuard, recordMetaUsage } from "../_shared/meta-rate.ts";
 import { readJsonBody } from "../_shared/security.ts";
 import { MAX_TRANSCRIPT_ITEMS } from "../_shared/transcript-cap.ts";
+import { mergeTranscript, needsHistory } from "../_shared/transcript-merge.ts";
 
 const GRAPH_VERSION = "v22.0"; // v19 หมดอายุแล้ว (sunset ต้นปี 2026)
 const corsHeaders = {
@@ -656,33 +657,7 @@ Deno.serve(async (req) => {
         .reverse();
       return { items };
     }
-    // ผนวกด้วยตรรกะเดียวกับ carryOver ใน processBatch — คง metadata ที่แอปบันทึกไว้ (th/by/via/รูปจาก webhook)
-    function mergeTranscript(prevTr: any[], freshItems: any[]): any[] {
-      const previousByMid: Record<string, any> = {};
-      for (const pm of prevTr) if (pm?.mid) previousByMid[String(pm.mid)] = pm;
-      const newMids = new Set<string>();
-      const fresh = freshItems.map((x) => ({ ...x }));
-      for (const it of fresh) {
-        if (!it?.mid) continue;
-        newMids.add(String(it.mid));
-        const old = previousByMid[String(it.mid)];
-        if (!old) continue;
-        if (typeof old.th === "string" && old.th.trim()) it.th = old.th;
-        if (old.by) it.by = old.by;
-        if (old.by_name && !it.by_name) it.by_name = old.by_name;
-        if (old.via) it.via = old.via;
-        if (old.img_source === "webhook" && old.img) { it.img = old.img; it.img_source = "webhook"; }
-      }
-      const carryOver = prevTr.filter((pm: any) => !pm?.mid || !newMids.has(String(pm.mid)));
-      const merged = [...carryOver, ...fresh];
-      merged.sort((a: any, b: any) => timeMs(a?.at) - timeMs(b?.at));
-      return merged.length > MAX_TRANSCRIPT_ITEMS ? merged.slice(merged.length - MAX_TRANSCRIPT_ITEMS) : merged;
-    }
-    const needsHistory = (row: any) => {
-      const tl = Array.isArray(row.transcript) ? row.transcript.length : 0;
-      const mc = Number(row.message_count || 0);
-      return mc > tl && tl < MAX_TRANSCRIPT_ITEMS && Number(row.history_synced_count ?? -1) !== mc;
-    };
+    // mergeTranscript / needsHistory → ../_shared/transcript-merge.ts
     // คืนจำนวนข้อความที่ได้คืน · "rate" = โดน Meta จำกัด ให้หยุดรอบนี้แล้วทำต่อจากห้องเดิม
     async function recoverRow(page: any, row: any): Promise<number | "rate"> {
       const got = await fetchAllMessages(page, String(row.id));

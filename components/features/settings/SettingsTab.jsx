@@ -50,6 +50,7 @@ import {
   LineOAPanel,
   OpenAIKeyPanel,
   PermissionsPanel,
+  SystemHealthPanel,
   ActivityPanel,
 } from "@/components/features/settings/SettingsPanelsA";
 import {
@@ -922,9 +923,13 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
   // (openai_key เป็นคีย์เดียวที่ทั้งระบบใช้ร่วมกัน ไม่ควรให้ผู้ใช้อื่นแก้ได้ · crm_api ออกคีย์ให้ระบบ
   // ภายนอกดึงข้อมูลลูกค้าออกไปได้ ความเสี่ยงเทียบเท่า permissions — backend ก็ล็อกไว้ owner เท่านั้นอยู่แล้ว)
   const visibleSections = allowedSettings
-    ? SETTINGS_SECTIONS.filter((s) => s.key !== "permissions" && s.key !== "tv_settings" && s.key !== "openai_key" && s.key !== "crm_api" && allowedSettings.includes(s.key))
+    ? SETTINGS_SECTIONS.filter((s) => s.key !== "permissions" && s.key !== "tv_settings" && s.key !== "openai_key" && s.key !== "crm_api" && s.key !== "health" && allowedSettings.includes(s.key))
     : SETTINGS_SECTIONS;
-  const [section, setSection] = useState(() => visibleSections[0]?.key || "general");
+  // เปิดหัวข้อตรงจาก ?section= ได้ (แจ้งเตือนสุขภาพระบบกดแล้วพามาหน้านี้)
+  const [section, setSection] = useState(() => {
+    const want = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("section") : null;
+    return (want && visibleSections.some((s) => s.key === want) ? want : null) || visibleSections[0]?.key || "general";
+  });
   const [sectionQuery, setSectionQuery] = useState("");
   const [openSettingsGroups, setOpenSettingsGroups] = useState({});
   const [secMenuOpen, setSecMenuOpen] = useState(false);   // (เดิม) มือถือ: กางรายการหัวข้อตั้งค่า
@@ -1056,7 +1061,7 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
     { label: "แชทและการตอบกลับ", keys: ["leadfields", "synccfg", "ghost", "savedreplies", "chatmenu", "knowledge"] },
     { label: "AI และคอนเทนต์", keys: ["general", "ai_models", "ai_prompts", "brand"] },
     { label: "แคมเปญและการวิเคราะห์", keys: ["campaign", "decision", "prefetch", "replystats"] },
-    { label: "งานอัตโนมัติและแจ้งเตือน", keys: ["jobs", "notifications"] },
+    { label: "งานอัตโนมัติและแจ้งเตือน", keys: ["health", "jobs", "notifications"] },
     { label: "ทีมและความปลอดภัย", keys: ["permissions", "activity", "import_old"] },
     { label: "TradingView และแต้มทีม", keys: ["tv_settings", "leaderboard"] },
   ];
@@ -1185,6 +1190,7 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
       {section === "openai_key" && <OpenAIKeyPanel />}
       {section === "line" && <LineOAPanel />}
       {section === "permissions" && <PermissionsPanel />}
+      {section === "health" && <SystemHealthPanel />}
       {section === "tv_settings" && <TvAdminSettingsPanel />}
       {section === "replystats" && <ReplyStatsPanel onOpenChat={onOpenChat} />}
       {section === "leaderboard" && <LeaderboardSettingsPanel />}
@@ -1570,6 +1576,47 @@ export function SavedRepliesPanel({ allowedPages = null }) {
     else await supabase.from("saved_replies").insert(payload);
     setSaving(""); load();
   }
+  // บีบรูปเก่าที่อัปไว้ก่อนมีการย่อรูปอัตโนมัติ — รูปคลังคำตอบถูกโหลดซ้ำบ่อยที่สุดในระบบ
+  // (เคยวัดได้: PNG 2.6 MB รูปเดียวถูกโหลด 50 ครั้ง/วัน) · ไฟล์เดิมยังอยู่ เพราะแชทที่ส่งไปแล้วอาจชี้ไฟล์เดิม
+  const [shrink, setShrink] = useState(null);   // { running, done, total, saved } | null
+  async function shrinkOldImages() {
+    if (shrink?.running) return;
+    const MIN_BYTES = 400 * 1024;
+    const targets = (items || []).filter((it) => it.id && imagesOf(it).some((u) => String(u).includes("/chat-media/saved/")));
+    setShrink({ running: true, done: 0, total: targets.length, saved: 0, changed: 0 });
+    let saved = 0, changed = 0;
+    for (let n = 0; n < targets.length; n++) {
+      const it = targets[n];
+      const next = [];
+      let touched = false;
+      for (const url of imagesOf(it)) {
+        try {
+          if (!String(url).includes("/chat-media/saved/")) { next.push(url); continue; }
+          const res = await fetch(url);
+          const blob = await res.blob();
+          if (!res.ok || blob.size < MIN_BYTES) { next.push(url); continue; }
+          const name = String(url).split("/").pop() || "image";
+          const small = await compressImage(new File([blob], name, { type: blob.type || "image/jpeg" }));
+          if (small.size >= blob.size * 0.8) { next.push(url); continue; }   // เล็กลงไม่ถึง 20% ไม่คุ้มเปลี่ยน
+          const path = `saved/${Date.now()}-${Math.random().toString(36).slice(2)}.jpg`;
+          const { error } = await supabase.storage.from("chat-media").upload(path, small, { contentType: small.type || "image/jpeg", upsert: false, cacheControl: STORAGE_CACHE_SECONDS });
+          if (error) { next.push(url); continue; }
+          next.push(supabase.storage.from("chat-media").getPublicUrl(path).data.publicUrl);
+          saved += blob.size - small.size;
+          touched = true;
+        } catch {
+          next.push(url);   // รูปไหนพังก็คงของเดิมไว้ ไม่ทำให้ข้อความทั้งชุดเสีย
+        }
+      }
+      if (touched) {
+        const { error } = await supabase.from("saved_replies").update({ image_urls: next, image_url: next[0] || null, updated_at: new Date().toISOString() }).eq("id", it.id);
+        if (!error) changed++;
+      }
+      setShrink({ running: true, done: n + 1, total: targets.length, saved, changed });
+    }
+    setShrink({ running: false, done: targets.length, total: targets.length, saved, changed });
+    load();
+  }
   async function del(idx) {
     const it = items[idx];
     if (it.id) { if (!window.confirm("ลบข้อความนี้?")) return; await supabase.from("saved_replies").delete().eq("id", it.id); }
@@ -1583,8 +1630,19 @@ export function SavedRepliesPanel({ allowedPages = null }) {
           <h3 className="font-semibold text-slate-800">ข้อความบันทึกไว้</h3>
           <p className="text-xs text-slate-500 mt-0.5">ข้อความสำเร็จรูปสำหรับกดใช้ในหน้า "ตอบแชท" (แนบรูปได้) · เลือกได้ว่าใช้ทุกเพจหรือเฉพาะเพจ</p>
         </div>
-        <button onClick={addNew} className="bg-brand-600 text-white rounded-lg px-3 py-2 text-sm font-medium hover:bg-brand-700">+ เพิ่มใหม่</button>
+        <div className="flex items-center gap-2">
+          <button onClick={shrinkOldImages} disabled={!!shrink?.running} title="ย่อรูปที่ใหญ่เกิน 400 KB ให้เล็กลง โหลดเร็วขึ้นและประหยัดโควตา"
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-60">
+            {shrink?.running ? `กำลังย่อรูป ${shrink.done}/${shrink.total}...` : "ย่อรูปเก่าให้เล็กลง"}
+          </button>
+          <button onClick={addNew} className="bg-brand-600 text-white rounded-lg px-3 py-2 text-sm font-medium hover:bg-brand-700">+ เพิ่มใหม่</button>
+        </div>
       </div>
+      {shrink && !shrink.running && (
+        <div className="text-xs rounded-lg bg-emerald-50 text-emerald-700 px-3 py-2">
+          {shrink.changed ? `ย่อรูปแล้ว ${shrink.changed} ข้อความ · ประหยัดได้ ${(shrink.saved / 1024 / 1024).toFixed(1)} MB ต่อการเปิดดู 1 รอบ` : "ไม่มีรูปที่ต้องย่อแล้ว"}
+        </div>
+      )}
       {items.length === 0 && (
         <EmptyState
           icon={MessageSquare}

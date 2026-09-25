@@ -61,7 +61,7 @@ function headersFor(cookie: TvCookie, base: string): HeadersInit {
 const TV_ERROR_TEXT: Record<string, string> = {
   username_recip_not_found: "ไม่พบ username นี้ใน TradingView — เช็กตัวสะกดอีกครั้ง (ต้องเป็น username ไม่ใช่ชื่อที่แสดงหรืออีเมล)",
 };
-function tvErrorText(status: number, body: string): string {
+export function tvErrorText(status: number, body: string): string {
   let j: any = null;
   try { j = JSON.parse(body); } catch { /* ไม่ใช่ JSON */ }
   const code = String(j?.code || "");

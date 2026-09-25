@@ -10,6 +10,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { AD_LIBRARY_TOKEN_KEY, getMetaAppId, getMetaAppSecret, getMetaToken } from "../_shared/meta.ts";
 import { authorizeRequest } from "../_shared/permissions.ts";
+import { readJsonBody } from "../_shared/security.ts";
 
 const GRAPH_VERSION = "v22.0"; // อัปจาก v19 (sunset ต้นปี 2026)
 const corsHeaders = {
@@ -121,13 +122,18 @@ Deno.serve(async (req) => {
     }
 
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
-    const body = await req.json().catch(() => ({}));
+    const body = await readJsonBody(req, 64 * 1024).catch(() => ({})) as Record<string, any>;
     // รายชื่อนี้ต้องมี action ใหม่ทุกตัว ไม่งั้นคำขอจะตกไปเป็น "save"
     // (บั๊กที่เจอจริง: messaging_status/save_messaging ไม่ได้อยู่ในลิสต์ → token ที่วางในช่อง
     //  "ตอบแชท" ถูกบันทึกทับ token หลักแทน และหน้าเว็บโชว์ "แอป: ไม่ทราบ · เห็น 0 เพจ"
     //  เพราะได้ผลลัพธ์ของ action save ที่ไม่มีฟิลด์เหล่านั้น)
-    const ACTIONS = ["status", "app_status", "save_app", "messaging_status", "save_messaging", "ad_library_status", "save_ad_library"];
-    const action = ACTIONS.includes(String(body.action)) ? String(body.action) : "save";
+    // ห้ามเดา action ที่ไม่รู้จักเป็น "save": คำขอที่อ่าน body ไม่ได้ (เช่นหน้าตั้งค่ายิงสถานะพร้อมกัน 4 ตัว
+    // แล้วมีตัวหนึ่งมาไม่ครบ) จะไปตกที่ save แล้วล้มเป็น 500 "กรุณาวาง token" — เจอจริงใน log
+    const ACTIONS = ["save", "status", "app_status", "save_app", "messaging_status", "save_messaging", "ad_library_status", "save_ad_library"];
+    const action = String(body?.action || "");
+    if (!ACTIONS.includes(action)) {
+      return new Response(JSON.stringify({ ok: false, error: `ไม่รู้จัก action "${action}"` }), { status: 400, headers: { ...corsHeaders, "content-type": "application/json" } });
+    }
 
     // ---------- App ID / App Secret ของ Meta app ----------
     // ตรวจโดยขอ app access token (`{app_id}|{app_secret}`) ไปอ่านข้อมูลแอปตัวเอง
@@ -275,7 +281,9 @@ Deno.serve(async (req) => {
 
     return new Response(JSON.stringify({ ok: true, saved: true, ...info }), { headers: { ...corsHeaders, "content-type": "application/json" } });
   } catch (err) {
+    // ข้อผิดพลาดที่ตั้งใจโยน (กรอกไม่ครบ/token ใช้ไม่ได้) ไม่ใช่ความผิดของเซิร์ฟเวอร์ ตอบ 400 และข้อความสั้น
     console.error(err);
-    return new Response(JSON.stringify({ ok: false, error: String(err) }), { status: 500, headers: { ...corsHeaders, "content-type": "application/json" } });
+    const msg = err instanceof Error ? err.message : String(err);
+    return new Response(JSON.stringify({ ok: false, error: msg }), { status: 400, headers: { ...corsHeaders, "content-type": "application/json" } });
   }
 });

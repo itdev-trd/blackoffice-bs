@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { Loader2, Wand2, ImageIcon, FileDown, Trash2, RefreshCw, KeyRound, Copy } from "lucide-react";
+import { Loader2, Wand2, ImageIcon, FileDown, Trash2, RefreshCw, KeyRound, Copy, CheckCircle2, AlertTriangle, XCircle } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { readFunctionErrorMessage } from "@/lib/utils/errors";
 import PasswordInput from "@/components/shared/PasswordInput";
@@ -919,6 +919,72 @@ const GRANTABLE_TABS = [
   { key: "tv_members", label: "จัดการสมาชิก TV" },
   { key: "settings", label: "ตั้งค่า" },
 ];
+// สุขภาพระบบ — สิ่งที่ถ้าพังแล้วไม่มีใครรู้จนลูกค้าบ่น (token หมดอายุ, คุกกี้ TV, ซิงก์หยุด, cron ล้ม)
+// ผลตรวจมาจาก function system-health · cron ตรวจทุกชั่วโมงและส่ง push หา owner เมื่อมีอะไรแย่ลง
+export function SystemHealthPanel() {
+  const [data, setData] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  async function run(action) {
+    setBusy(true); setErr("");
+    const { data: d, error } = await supabase.functions.invoke("system-health", { body: { action } });
+    setBusy(false);
+    if (error) { setErr(await readFunctionErrorMessage(error)); return; }
+    if (!d?.ok) { setErr(d?.error || "ตรวจไม่สำเร็จ"); return; }
+    setData(d);
+    // ยังไม่เคยตรวจ หรือผลเก่าเกิน 2 ชม. = ตรวจใหม่ให้เลย
+    if (action === "status" && (!d.checked_at || Date.now() - Date.parse(d.checked_at) > 2 * 3600 * 1000)) run("check");
+  }
+  useEffect(() => { run("status"); }, []);
+  const tone = {
+    ok: { Icon: CheckCircle2, cls: "text-emerald-600", bg: "bg-emerald-50 border-emerald-200", label: "ปกติ" },
+    warn: { Icon: AlertTriangle, cls: "text-amber-600", bg: "bg-amber-50 border-amber-200", label: "ใกล้มีปัญหา" },
+    error: { Icon: XCircle, cls: "text-rose-600", bg: "bg-rose-50 border-rose-200", label: "มีปัญหา" },
+  };
+  const checks = data?.checks || [];
+  const all = tone[data?.overall || "ok"];
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h3 className="font-semibold text-slate-800">สุขภาพระบบ</h3>
+          <p className="text-xs text-slate-500 mt-0.5">ตรวจอัตโนมัติทุกชั่วโมง — มีอะไรพังหรือใกล้หมดอายุ ระบบจะส่งแจ้งเตือน (Push) หา owner ทุกเครื่องที่เปิดแจ้งเตือนไว้</p>
+        </div>
+        <button onClick={() => run("check")} disabled={busy} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50 disabled:opacity-60">
+          {busy ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} ตรวจตอนนี้
+        </button>
+      </div>
+      {err && <div className="text-sm text-rose-600 bg-rose-50 rounded-lg px-3 py-2">{err}</div>}
+      {!data ? <Spinner label="กำลังโหลด..." /> : (
+        <>
+          <div className={`rounded-lg border px-3 py-2 text-sm flex items-center gap-2 ${all.bg}`}>
+            <all.Icon size={16} className={all.cls} />
+            <span className="font-medium text-slate-800">{checks.length ? `ภาพรวม: ${all.label}` : "ยังไม่เคยตรวจ"}</span>
+            {data.checked_at && <span className="text-xs text-slate-500 ml-auto">ตรวจล่าสุด {new Date(data.checked_at).toLocaleString("th-TH")}</span>}
+          </div>
+          <div className="border border-slate-200 rounded-lg divide-y divide-slate-100">
+            {checks.map((c) => {
+              const t = tone[c.status] || tone.warn;
+              return (
+                <div key={c.key} className="flex items-start gap-2.5 px-3 py-2.5 text-sm">
+                  <t.Icon size={16} className={`${t.cls} mt-0.5 shrink-0`} />
+                  <div className="min-w-0">
+                    <div className="font-medium text-slate-800">{c.label}</div>
+                    <div className="text-xs text-slate-500 break-words">{c.detail}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-[11px] text-slate-400 leading-relaxed">
+            ที่หน้านี้ตรวจไม่ได้: โควตา egress/พื้นที่ของ Supabase และ backup — ดูที่ Supabase Dashboard → Usage / Database → Backups
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function PermissionsPanel() {
   const [rows, setRows] = useState(null);
   const [accounts, setAccounts] = useState([]);
@@ -949,7 +1015,7 @@ export function PermissionsPanel() {
     setResetBusy(false);
     if (fnErr) { setError(await readFunctionErrorMessage(fnErr)); return; }
     if (!data?.ok) { setError(data?.error || "รีเซ็ตรหัสผ่านไม่สำเร็จ"); return; }
-    setResetResult({ email: resetFor, password: data.password, created: !!data.created });
+    setResetResult({ email: resetFor, password: data.password, created: !!data.created, revoked: Number(data.sessions_revoked) || 0 });
     setResetPw("");
   }
   async function copyPw() {
@@ -978,7 +1044,7 @@ export function PermissionsPanel() {
   // หัวข้อย่อยในตั้งค่าที่มอบสิทธิ์ได้ — ตัด "สิทธิ์ผู้ใช้" ออก (กันการมอบสิทธิ์ให้คนอื่นตั้งสิทธิ์เองซึ่งเป็นช่องยกระดับสิทธิ์)
   // crm_api ออกคีย์ให้ระบบภายนอกดึงข้อมูลลูกค้า/TradingView ออกไปได้ — ระดับความเสี่ยงเดียวกับ
   // permissions/tv_settings จึงกันไว้เหมือนกัน (มอบให้ได้เฉพาะ owner ผ่าน role ไม่ใช่ผ่านการติ๊ก)
-  const grantableSettings = SETTINGS_SECTIONS.filter((s) => s.key !== "permissions" && s.key !== "tv_settings" && s.key !== "crm_api");
+  const grantableSettings = SETTINGS_SECTIONS.filter((s) => s.key !== "permissions" && s.key !== "tv_settings" && s.key !== "crm_api" && s.key !== "health");
 
   async function save() {
     if (!editing?.email) { setError("กรอกอีเมลก่อน"); return; }
@@ -1064,7 +1130,7 @@ export function PermissionsPanel() {
                           <Copy size={13} /> {copied ? "คัดลอกแล้ว" : "คัดลอก"}
                         </button>
                       </div>
-                      <div className="text-[11px] text-slate-500">รหัสนี้แสดงครั้งเดียว ระบบไม่เก็บไว้ · แนะนำให้ผู้ใช้เปลี่ยนรหัสเองหลังล็อกอิน</div>
+                      <div className="text-[11px] text-slate-500">รหัสนี้แสดงครั้งเดียว ระบบไม่เก็บไว้{resetResult.revoked ? ` · ออกจากระบบทุกเครื่องที่ล็อกอินค้างไว้แล้ว (${resetResult.revoked} เครื่อง)` : ""} · แนะนำให้ผู้ใช้เปลี่ยนรหัสเองหลังล็อกอิน</div>
                       <button onClick={() => openReset(r.email)} className="text-xs text-slate-500 underline">ปิด</button>
                     </>
                   ) : (
@@ -1073,7 +1139,7 @@ export function PermissionsPanel() {
                       <input type="text" value={resetPw} onChange={(e) => setResetPw(e.target.value)} autoComplete="new-password"
                         placeholder="พิมพ์รหัสใหม่ (อย่างน้อย 8 ตัว) หรือเว้นว่างให้ระบบสุ่มให้"
                         className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm" />
-                      <div className="text-[11px] text-slate-500">รหัสเดิมจะใช้ไม่ได้ทันที ผู้ใช้ต้องล็อกอินด้วยรหัสใหม่</div>
+                      <div className="text-[11px] text-slate-500">รหัสเดิมใช้ไม่ได้ทันที และทุกเครื่องที่ล็อกอินค้างไว้จะถูกออกจากระบบ (ภายใน 1 ชม.)</div>
                       <div className="flex gap-2">
                         <button onClick={() => openReset(r.email)} disabled={resetBusy} className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs disabled:opacity-50">ยกเลิก</button>
                         <button onClick={doReset} disabled={resetBusy} className="inline-flex items-center gap-1 rounded-md bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50">

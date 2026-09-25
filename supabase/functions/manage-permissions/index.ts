@@ -107,11 +107,18 @@ Deno.serve(async (req) => {
         if (error) throw error;
         created = true;
       }
+      // เตะออกจากทุกเครื่องที่ล็อกอินค้างไว้ — รีเซ็ตมักเกิดเพราะลืมรหัสหรือรหัสรั่ว (ดู migration admin_revoke_user_sessions)
+      let sessionsRevoked = 0;
+      if (userId) {
+        const { data: n, error: revErr } = await admin.rpc("admin_revoke_user_sessions", { target: userId });
+        if (revErr) console.error("revoke sessions:", revErr.message);
+        else sessionsRevoked = Number(n) || 0;
+      }
       try {
-        await admin.from("activity_log").insert({ email: myEmail, event: "reset_password", detail: { target: targetEmail, created } });
+        await admin.from("activity_log").insert({ email: myEmail, event: "reset_password", detail: { target: targetEmail, created, sessions_revoked: sessionsRevoked } });
       } catch { /* log พังไม่ควรทำให้การรีเซ็ตพัง */ }
       // คืนรหัสให้ owner ครั้งเดียวตอนนี้ — ระบบไม่เก็บรหัสไว้ที่ไหน
-      return new Response(JSON.stringify({ ok: true, password: newPassword, created }), { headers: { ...corsHeaders, "content-type": "application/json", "cache-control": "no-store" } });
+      return new Response(JSON.stringify({ ok: true, password: newPassword, created, sessions_revoked: sessionsRevoked }), { headers: { ...corsHeaders, "content-type": "application/json", "cache-control": "no-store" } });
     }
 
     throw new Error("action ไม่ถูกต้อง");

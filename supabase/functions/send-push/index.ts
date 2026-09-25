@@ -191,6 +191,35 @@ Deno.serve(async (req) => {
       return json({ ok: true, sent, pruned });
     }
 
+    // ---- แจ้งเตือนเจ้าของระบบ (owner) เรื่องระบบมีปัญหา — ส่งจาก system-health (service เท่านั้น) ----
+    // ไม่ผูกกับตัวเลือกแจ้งเตือนแชท (chat_alert/pages) เพราะเป็นเรื่องระบบ ไม่ใช่แชทลูกค้า
+    if (action === "notify_owner") {
+      if (!isService) return json({ ok: false, error: "unauthorized" }, 401);
+      if (!VAPID_PUBLIC || !VAPID_PRIVATE) return json({ ok: false, error: "no vapid" });
+      const { data: owners } = await admin.from("user_permissions").select("email").eq("role", "owner");
+      const emails = (owners ?? []).map((o: any) => String(o.email || "").toLowerCase()).filter(Boolean);
+      if (!emails.length) return json({ ok: true, sent: 0, note: "ไม่มี owner" });
+      const { data: subs } = await admin.from("push_subscriptions").select("*").in("email", emails);
+      const payload = JSON.stringify({
+        title: String(body?.title || "ระบบมีปัญหา").slice(0, 80),
+        body: String(body?.body || "").slice(0, 300),
+        tag: String(body?.tag || "system"),
+        renotify: true,
+        url: String(body?.url || "/settings"),
+      });
+      let sent = 0, pruned = 0;
+      await Promise.allSettled((subs ?? []).map(async (sub: any) => {
+        try {
+          await webpush.sendNotification({ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } }, payload);
+          sent++;
+        } catch (e: any) {
+          const code = e?.statusCode || e?.status;
+          if (code === 404 || code === 410) { await admin.from("push_subscriptions").delete().eq("endpoint", sub.endpoint); pruned++; }
+        }
+      }));
+      return json({ ok: true, sent, pruned, devices: (subs ?? []).length });
+    }
+
     // อ่าน/ตอบจากอุปกรณ์หนึ่งแล้ว → ล้าง notification ของแชทนั้นและคำนวณ badge ใหม่ให้ทุกอุปกรณ์
     if (action === "sync_state") {
       if (!isService) return json({ ok: false, error: "unauthorized" }, 401);

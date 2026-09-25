@@ -18,6 +18,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { authorizeRequest } from "../_shared/permissions.ts";
 import { readJsonBody } from "../_shared/security.ts";
+import { MAX_PURGE_DAYS, purgeAtFromDate } from "../_shared/retention-date.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -48,17 +49,6 @@ async function loadCfg(admin: any) {
 
 const daysAgo = (n: number) => new Date(Date.now() - n * 86400000).toISOString();
 const daysAhead = (n: number) => new Date(Date.now() + n * 86400000).toISOString();
-const MAX_PURGE_DAYS = 365;
-// "YYYY-MM-DD" (วันที่ตามปฏิทินไทย) → เวลาเริ่มวันนั้นตามเวลาไทย · cron รันตีสอง (19:00 UTC) ของวันนั้นจึงลบให้
-function purgeAtFromDate(v: unknown): string | null {
-  const m = String(v || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!m) return null;
-  const t = Date.parse(`${m[1]}-${m[2]}-${m[3]}T00:00:00+07:00`);
-  if (!Number.isFinite(t)) return null;
-  const todayTh = Date.parse(new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 10) + "T00:00:00+07:00");
-  if (t < todayTh || t > Date.now() + MAX_PURGE_DAYS * 86400000) return null;
-  return new Date(t).toISOString();
-}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });

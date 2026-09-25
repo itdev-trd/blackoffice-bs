@@ -26,6 +26,8 @@ import { logActivity, getDeviceId } from "@/lib/utils/activity";
 import { readFunctionErrorMessage } from "@/lib/utils/errors";
 import { serviceWorkerReady } from "@/lib/utils/service-worker";
 import { compressImage, STORAGE_CACHE_SECONDS } from "@/lib/utils/image";
+import { mergeTopPage, appendUnique, mergeSearchResults } from "@/lib/inbox/list";
+import { dedupeTranscript } from "@/lib/inbox/transcript";
 import Spinner from "@/components/shared/Spinner";
 import { TradeIdChecker, CustomerDataForm } from "@/components/features/customerdb/CustomerDatabaseTab";
 import MetaLabels from "@/components/features/inbox/MetaLabels";
@@ -742,15 +744,8 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
         const sameKey = listMergedKeyRef.current === key;
         listMergedKeyRef.current = key;
         if (!sameKey) setListEnd(top.length < LIST_PAGE);
-        setList((prev) => {
-          // เปลี่ยนตัวกรอง = เริ่มใหม่ · หน้าแรกไม่เต็ม = ไม่มีแชทเก่ากว่านี้ที่ตรงตัวกรองแล้ว
-          if (!sameKey || !Array.isArray(prev) || top.length < LIST_PAGE) return top;
-          // คงแชทเก่าที่เลื่อนโหลดมาแล้ว (เก่ากว่าแถวสุดท้ายของหน้าแรก) — แถวที่ขยับขึ้นมาอยู่หน้าแรกใช้ของใหม่
-          const topIds = new Set(top.map((r) => r.id));
-          const cutoff = Date.parse(top[top.length - 1]?.last_message_at || "") || 0;
-          const older = prev.filter((r) => !topIds.has(r.id) && (Date.parse(r.last_message_at || "") || 0) <= cutoff);
-          return [...top, ...older];
-        });
+        // คงแชทเก่าที่เลื่อนโหลดมาแล้วไว้ท้ายลิสต์ — ดู lib/inbox/list.js
+        setList((prev) => mergeTopPage(prev, top, { pageSize: LIST_PAGE, sameKey }));
         // นับ unread/badge (count query หลายตัว) — ข้ามในโหมด lean เพื่อให้ poll 10 วิ ยิงแค่ query ลิสต์ตัวเดียว
         if (!lean) {
           void Promise.allSettled([
@@ -791,10 +786,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     if (error || key !== listMergedKeyRef.current) return;   // เปลี่ยนตัวกรองระหว่างโหลด = ทิ้งผล
     const rows = (data || []).map((row) => applyReadMark(normalizeChatSource(row)));
     if (rows.length < LIST_PAGE) setListEnd(true);
-    setList((prev) => {
-      const have = new Set((prev || []).map((r) => r.id));
-      return [...(prev || []), ...rows.filter((r) => !have.has(r.id))];
-    });
+    setList((prev) => appendUnique(prev, rows));
   }
   const loadMoreRef = useRef(null);
   useEffect(() => {
@@ -821,11 +813,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
       setSearchingDb(false);
       const rows = (data || []).map((row) => applyReadMark(normalizeChatSource(row)));
       if (!rows.length) return;
-      setList((prev) => {
-        const have = new Set((prev || []).map((r) => r.id));
-        const merged = [...(prev || []), ...rows.filter((r) => !have.has(r.id))];
-        return merged.sort((a, b) => (Date.parse(b.last_message_at || "") || 0) - (Date.parse(a.last_message_at || "") || 0));
-      });
+      setList((prev) => mergeSearchResults(prev, rows));
     }, 400);
     return () => { cancelled = true; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2164,34 +2152,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     (!q.trim() || `${x.customer_name || ""} ${x.last_user_text || ""} ${x.country || ""} ${x.entry_ad_name || ""}`.toLowerCase().includes(q.trim().toLowerCase()))
   );
   const tItemsRaw = Array.isArray(selected?.transcript) ? selected.transcript : [];
-  // กันแสดงซ้ำ — ตาข่ายกันสุดท้าย ไม่ว่า transcript ใน DB จะเบิ้ลด้วยเหตุใด (race webhook / echo+sync คนละ id)
-  // ยุบเฉพาะข้อความ "เหมือนกันเป๊ะ + อยู่ติดกัน" (ฝั่งเดียวกัน + รูป/ข้อความเดียวกัน) ภายใน ~90 วิ
-  // — ยังปล่อยให้ส่งข้อความเดิมซ้ำโดยตั้งใจแบบเว้นช่วงได้
-  const tItems = (() => {
-    const out = [];
-    for (const m of tItemsRaw) {
-      const prev = out[out.length - 1];
-      if (prev && prev.w === m.w) {
-        const sameMid = m.mid && prev.mid && m.mid === prev.mid;
-        const sameImg = m.img && prev.img && m.img === prev.img;
-        const sameText = !m.img && !prev.img && m.t && prev.t && m.t === prev.t;
-        const near = (!m.at || !prev.at) || Math.abs(new Date(m.at).getTime() - new Date(prev.at).getTime()) < 90 * 1000;
-        if (sameMid) {
-          // รายการเดียวกันจาก sync + webhook: สติกเกอร์เลือก URL sync (โปร่งใส), สื่อทั่วไปเลือก webhook
-          const isSticker = !!m.sticker || !!prev.sticker || m.t === "[สติกเกอร์]" || prev.t === "[สติกเกอร์]";
-          if (isSticker) {
-            if (m.img_source === "sync" && prev.img_source !== "sync") out[out.length - 1] = { ...prev, ...m, sticker: true };
-          } else if (m.img_source === "webhook" && prev.img_source !== "webhook") {
-            out[out.length - 1] = { ...prev, ...m };
-          }
-          continue;
-        }
-        if ((sameImg || sameText) && near) continue;
-      }
-      out.push(m);
-    }
-    return out;
-  })();
+  const tItems = dedupeTranscript(tItemsRaw);   // ยุบข้อความเบิ้ล — ดู lib/inbox/transcript.js
   // index ของข้อความฝั่งเพจ "อันสุดท้าย" — โชว์สถานะอ่านแค่อันเดียว
   const lastPageIdx = (() => { for (let k = tItems.length - 1; k >= 0; k--) if (tItems[k]?.w === "p") return k; return -1; })();
   const isLastPageMsg = (i) => i === lastPageIdx;

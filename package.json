@@ -7,10 +7,11 @@
     "build": "next build",
     "start": "next start",
     "lint": "node scripts/lint-source.mjs",
+    "test": "node --experimental-strip-types --no-warnings --test tests/*.test.mjs",
     "build:sql": "node scripts/build-supabase-all.mjs",
     "check:sql": "node scripts/build-supabase-all.mjs --check",
     "build:check": "NEXT_DIST_DIR=.next-check next build",
-    "check": "npm run build:sql && npm run lint && npm run build:check"
+    "check": "npm run build:sql && npm run lint && npm test && npm run build:check"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.2",
