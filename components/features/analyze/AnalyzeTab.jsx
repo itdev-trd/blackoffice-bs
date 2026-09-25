@@ -1499,6 +1499,7 @@ function CampaignOverviewView({ initialResult, campaignIds, range, textModel, on
   const [aiBusy, setAiBusy] = useState(false);
   const [aiError, setAiError] = useState("");
   const [exportMenu, setExportMenu] = useState(false);
+  const [trackerBusy, setTrackerBusy] = useState("");  // ข้อความความคืบหน้าตอนรวมไฟล์งบยิง Ads ทุกแคมเปญ
   const [dashItem, setDashItem] = useState(() => lsGet("ov.dashItem", null));
   const [expandedCamps, setExpandedCamps] = useState(() => lsGet("ov.expandedCamps", {}));
   const toggleCamp = (id) => setExpandedCamps((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -1515,6 +1516,23 @@ function CampaignOverviewView({ initialResult, campaignIds, range, textModel, on
     if (error) { setAiError(await readFunctionErrorMessage(error)); return; }
     if (!data?.ok) { setAiError(data?.error || "วิเคราะห์ไม่สำเร็จ"); return; }
     setResult(data);
+  }
+
+  async function runTrackerAll(fmt) {
+    const camps = result.campaigns || [];
+    if (!camps.length) return;
+    setTrackerBusy(`กำลังดึง 0/${camps.length} แคมเปญ...`);
+    logActivity("export", { format: `งบยิง Ads รวมแคมเปญ (${fmt})`, count: camps.length });
+    try {
+      const { title, rows } = await fetchCampaignsTree(camps, range, (n, total) => setTrackerBusy(`กำลังดึง ${n}/${total} แคมเปญ...`));
+      if (!rows.length) { alert("ไม่พบโฆษณาในแคมเปญที่เลือก (หรือดึงข้อมูลไม่สำเร็จ)"); return; }
+      setTrackerBusy("กำลังสร้างไฟล์...");
+      if (fmt === "pdf") exportTrackerPdf(title, rows);
+      else if (fmt === "excel") await exportTrackerExcel(title, rows);
+      else exportTrackerCsv(title, rows);
+    } catch (error) {
+      alert(`สร้างไฟล์ไม่สำเร็จ: ${error?.message || error}`);
+    } finally { setTrackerBusy(""); }
   }
 
   // เดิมหน้านี้เป็นแผ่นครอบเต็มจอ (fixed inset-0) ที่ทับเมนูข้างไว้ แล้วมีแถบนำทางของตัวเอง
@@ -1536,13 +1554,14 @@ function CampaignOverviewView({ initialResult, campaignIds, range, textModel, on
               {aiBusy ? <Loader2 className="animate-spin" size={14} /> : <Sparkles size={14} />} AI วิเคราะห์
             </button>
             <div className="relative">
-              <button onClick={() => setExportMenu((v) => !v)} className="text-xs border border-slate-300 rounded-lg px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-1.5">
-                <FileDown size={14} /> Export <ChevronDown size={13} />
+              <button onClick={() => setExportMenu((v) => !v)} disabled={!!trackerBusy} className="text-xs border border-slate-300 rounded-lg px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60 flex items-center gap-1.5">
+                {trackerBusy ? <><Loader2 size={14} className="animate-spin" /> {trackerBusy}</> : <><FileDown size={14} /> Export <ChevronDown size={13} /></>}
               </button>
               {exportMenu && (
                 <>
                   <div className="fixed inset-0 z-10" onClick={() => setExportMenu(false)} />
-                  <div className="absolute right-0 mt-1 z-20 bg-white border border-slate-200 rounded-lg shadow-lg py-1 min-w-[190px] overflow-hidden">
+                  <div className="absolute right-0 mt-1 z-20 bg-white border border-slate-200 rounded-lg shadow-lg py-1 min-w-[230px] overflow-hidden">
+                    <div className="px-3 pt-1 pb-0.5 text-[10px] font-semibold text-slate-400">สรุปรายแคมเปญ</div>
                     {[
                       ["PDF (พิมพ์/บันทึก)", () => exportCampaignAnalysisPdf(result)],
                       ["Excel (.xls)", () => exportCampaignAnalysisExcel(result)],
@@ -1551,6 +1570,18 @@ function CampaignOverviewView({ initialResult, campaignIds, range, textModel, on
                       <button key={label} onClick={() => { logActivity("export", { format: label, name: "รายงานแคมเปญ" }); fn(); setExportMenu(false); }}
                         className="w-full text-left text-xs px-3 py-2 hover:bg-slate-50 text-slate-700 flex items-center gap-2">
                         <FileDown size={13} className="text-slate-400" /> {label}
+                      </button>
+                    ))}
+                    <div className="border-t border-slate-100 my-1" />
+                    <div className="px-3 pt-0.5 pb-0.5 text-[10px] font-semibold text-slate-400">ฟอร์แมตงบยิง Ads (รวม {result.campaigns.length} แคมเปญในไฟล์เดียว)</div>
+                    {[
+                      ["งบยิง Ads (Excel)", "excel"],
+                      ["งบยิง Ads (PDF)", "pdf"],
+                      ["งบยิง Ads (CSV)", "csv"],
+                    ].map(([label, fmt]) => (
+                      <button key={label} onClick={() => { setExportMenu(false); runTrackerAll(fmt); }}
+                        className="w-full text-left text-xs px-3 py-2 hover:bg-slate-50 text-slate-700 flex items-center gap-2">
+                        <FileDown size={13} className="text-emerald-500" /> {label}
                       </button>
                     ))}
                   </div>
@@ -2147,7 +2178,7 @@ async function fetchCampaignTree(ad, data, range) {
     const stopped = !!st && st !== "ACTIVE";
     const spend = n.metrics?.spend != null ? Number(n.metrics.spend) : (n.spend != null ? Number(n.spend) : null);
     return {
-      adset: adsetName || "", ad: n.name || "", thumb: n.thumbnail || "", ad_id: n.id || "", status: st,
+      campaign: campaignName, adset: adsetName || "", ad: n.name || "", thumb: n.thumbnail || "", ad_id: n.id || "", status: st,
       spend, start: gregDate(n.created_time), stopDate: stopped ? gregDate(n.updated_time) : "", stopped,
       // reach/conversations/engagement มาจาก buildMetrics (_shared/ad-metrics.ts) ที่ list-children
       // คำนวณมาให้อยู่แล้วต่อโหนด — ไม่ต้องยิง Meta เพิ่มสำหรับตัวเลขพวกนี้ตอน export
@@ -2175,6 +2206,21 @@ async function fetchCampaignTree(ad, data, range) {
   return { campaignName, rows };
 }
 
+// ไฟล์งบยิง Ads รวมหลายแคมเปญในไฟล์เดียว — ดึงทรีทีละ 3 แคมเปญพร้อมกันพอ (แต่ละแคมเปญยิง
+// list-children ชุดละครั้ง) กัน Meta rate limit เวลาเลือกแคมเปญเยอะ · เรียงตามลำดับที่ส่งเข้ามา
+async function fetchCampaignsTree(campaigns, range, onProgress) {
+  const trees = new Array(campaigns.length);
+  let done = 0;
+  for (let i = 0; i < campaigns.length; i += 3) {
+    await Promise.all(campaigns.slice(i, i + 3).map(async (c, off) => {
+      trees[i + off] = await fetchCampaignTree({ ad_id: c.campaign_id, headline: c.name, level: "campaign" }, null, range);
+      onProgress?.(++done, campaigns.length);
+    }));
+  }
+  const title = campaigns.length === 1 ? (campaigns[0].name || "") : `รวม ${campaigns.length} แคมเปญ`;
+  return { title, rows: trees.flatMap((t) => t.rows) };
+}
+
 function exportTrackerCsv(campaignName, rows) {
   const esc = (v) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const lines = [
@@ -2182,11 +2228,13 @@ function exportTrackerCsv(campaignName, rows) {
     ["BG คงเหลือเดือนที่แล้ว", "", "BG เดือนนี้", "", "ยอดรวม", ""].map(esc).join(","),
     TRACKER_HEADERS.map(esc).join(","),
   ];
-  let total = 0, campShown = false, lastAdset = null;
+  let total = 0, lastCamp = null, lastAdset = null;
   for (const r of rows) {
     if (r.spend != null) total += r.spend;
-    const camp = campShown ? "" : campaignName; campShown = true;
-    const adset = r.adset === lastAdset ? "" : r.adset; lastAdset = r.adset;
+    const rc = r.campaign ?? campaignName;
+    const newCamp = rc !== lastCamp;
+    const camp = newCamp ? rc : ""; lastCamp = rc;
+    const adset = !newCamp && r.adset === lastAdset ? "" : r.adset; lastAdset = r.adset;
     lines.push([camp, adset, r.ad, r.thumb || "", r.ad_id, "", r.spend != null ? money2(r.spend) : "", "", r.start, r.stopDate, "", ""].map(esc).join(","));
   }
   lines.push(["ผลรวม", "", "", "", "", "", money2(total), "", "", "", "", ""].map(esc).join(","));
@@ -2194,11 +2242,13 @@ function exportTrackerCsv(campaignName, rows) {
 }
 function trackerBodyHtml(campaignName, rows, { withImg }) {
   const esc = escHtml;
-  let total = 0, campShown = false, lastAdset = null;
+  let total = 0, lastCamp = null, lastAdset = null;
   const body = rows.map((r) => {
     if (r.spend != null) total += r.spend;
-    const camp = campShown ? "" : esc(campaignName); campShown = true;
-    const adset = r.adset === lastAdset ? "" : esc(r.adset); lastAdset = r.adset;
+    const rc = r.campaign ?? campaignName;
+    const newCamp = rc !== lastCamp;
+    const camp = newCamp ? esc(rc) : ""; lastCamp = rc;
+    const adset = !newCamp && r.adset === lastAdset ? "" : esc(r.adset); lastAdset = r.adset;
     const img = withImg && r.thumb ? `<img src="${esc(r.thumb)}" width="46" height="46" style="object-fit:cover;border-radius:4px">` : "";
     const stop = r.stopDate ? `<span style="color:#dc2626;font-weight:700">${esc(r.stopDate)}</span>` : "";
     const spend = r.spend != null ? esc(money2(r.spend)) : "";
@@ -2351,7 +2401,7 @@ async function exportTrackerExcel(campaignName, rows) {
   enriched.forEach((r, idx) => {
     const rowNo = firstDataRow + idx;
     const row = report.getRow(rowNo);
-    row.values = [campaignName, r.adset, r.ad, "", r.conversations, r.engagement, r.avgPerConvo, r.spend, r.reach, r.start, r.stopDate, r.leadsTotal, r.leadsOpened, r.avgPerOpened];
+    row.values = [r.campaign ?? campaignName, r.adset, r.ad, "", r.conversations, r.engagement, r.avgPerConvo, r.spend, r.reach, r.start, r.stopDate, r.leadsTotal, r.leadsOpened, r.avgPerOpened];
     row.height = 82;
     const openedHere = r.leadsOpened > 0;
     row.eachCell({ includeEmpty: true }, (cell, col) => {
@@ -2366,19 +2416,22 @@ async function exportTrackerExcel(campaignName, rows) {
   // แอดที่เพิ่งเปิดยังไม่มีแถวเลย (เช่น campaign ว่าง) กันตารางว่างล้วนดูแปลก
   if (!enriched.length) { report.mergeCells(firstDataRow, 1, firstDataRow, lastCol); report.getCell(firstDataRow, 1).value = "ยังไม่พบโฆษณาในแคมเปญนี้"; }
 
-  // รวมเซลล์ Campaign (คอลัมน์เดียวทั้งตาราง — รายงานนี้มีแคมเปญเดียว) และ ชุดโฆษณา (ต่อกลุ่มที่ติดกัน)
+  // รวมเซลล์ Campaign (ต่อแคมเปญที่ติดกัน — ไฟล์รวมหลายแคมเปญก็แยกบล็อกให้เอง) และ ชุดโฆษณา
+  // (ต่อกลุ่มที่ติดกัน และตัดกลุ่มเมื่อขึ้นแคมเปญใหม่ เผื่อสองแคมเปญมีชุดโฆษณาชื่อซ้ำกัน)
   if (enriched.length) {
-    report.mergeCells(firstDataRow, 1, lastDataRow, 1);
-    report.getCell(firstDataRow, 1).alignment = { vertical: "middle", horizontal: "center" };
-    let groupStart = firstDataRow;
-    for (let i = 1; i <= enriched.length; i++) {
-      const changed = i === enriched.length || enriched[i].adset !== enriched[i - 1].adset;
-      if (changed) {
+    const campOf = (r) => r.campaign ?? campaignName;
+    const mergeRuns = (col, sameGroup) => {
+      let groupStart = firstDataRow;
+      for (let i = 1; i <= enriched.length; i++) {
+        if (i < enriched.length && sameGroup(enriched[i], enriched[i - 1])) continue;
         const groupEnd = firstDataRow + i - 1;
-        if (groupEnd > groupStart) { report.mergeCells(groupStart, 2, groupEnd, 2); report.getCell(groupStart, 2).alignment = { vertical: "middle", horizontal: "center" }; }
+        if (groupEnd > groupStart) report.mergeCells(groupStart, col, groupEnd, col);
+        report.getCell(groupStart, col).alignment = { vertical: "middle", horizontal: "center", wrapText: true };
         groupStart = groupEnd + 1;
       }
-    }
+    };
+    mergeRuns(1, (a, b) => campOf(a) === campOf(b));
+    mergeRuns(2, (a, b) => campOf(a) === campOf(b) && a.adset === b.adset);
   }
 
   report.mergeCells(totalRow, 1, totalRow, 3);
@@ -2477,7 +2530,7 @@ async function exportTrackerExcel(campaignName, rows) {
 
   raw.columns = [22, 26, 34, 58, 20, 16, 14, 14, 12, 12, 12, 14, 14, 14, 16].map((width) => ({ width }));
   raw.addRow(["Campaign", "ชุดโฆษณา", "โฆษณา", "URL รูป", "ID โฆษณา", "สถานะ", "จำนวนทักทั้งหมด (Meta)", "การมีส่วนร่วม", "ค่าใช้จ่าย", "การเข้าถึง", "วันที่เปิด", "วันที่ปิด", "ลูกค้าที่สนใจ (DB)", "ลูกค้าที่เปิดบัญชี (DB)"]);
-  enriched.forEach((r) => raw.addRow([campaignName, r.adset, r.ad, r.thumb || "", String(r.ad_id || ""), r.status || "", r.conversations, r.engagement, r.spend, r.reach, r.start, r.stopDate, r.leadsTotal, r.leadsOpened]));
+  enriched.forEach((r) => raw.addRow([r.campaign ?? campaignName, r.adset, r.ad, r.thumb || "", String(r.ad_id || ""), r.status || "", r.conversations, r.engagement, r.spend, r.reach, r.start, r.stopDate, r.leadsTotal, r.leadsOpened]));
   raw.getRow(1).eachCell((cell) => { cell.font = { name: "Sarabun", size: 10, bold: true, color: { argb: white } }; cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: green } }; cell.alignment = { horizontal: "center", vertical: "middle" }; cell.border = thinBorder; });
   raw.autoFilter = `A1:N${Math.max(1, enriched.length + 1)}`;
   raw.getColumn(9).numFmt = '#,##0.00" ฿"';
