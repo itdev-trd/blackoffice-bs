@@ -1527,8 +1527,7 @@ function CampaignOverviewView({ initialResult, campaignIds, range, textModel, on
       const { title, rows } = await fetchCampaignsTree(camps, range, (n, total) => setTrackerBusy(`กำลังดึง ${n}/${total} แคมเปญ...`));
       if (!rows.length) { alert("ไม่พบโฆษณาในแคมเปญที่เลือก (หรือดึงข้อมูลไม่สำเร็จ)"); return; }
       setTrackerBusy("กำลังสร้างไฟล์...");
-      if (fmt === "pdf") exportTrackerPdf(title, rows);
-      else if (fmt === "excel") await exportTrackerExcel(title, rows);
+      if (fmt === "excel") await exportTrackerExcel(title, rows);
       else exportTrackerCsv(title, rows);
     } catch (error) {
       alert(`สร้างไฟล์ไม่สำเร็จ: ${error?.message || error}`);
@@ -1575,8 +1574,8 @@ function CampaignOverviewView({ initialResult, campaignIds, range, textModel, on
                     <div className="border-t border-slate-100 my-1" />
                     <div className="px-3 pt-0.5 pb-0.5 text-[10px] font-semibold text-slate-400">ฟอร์แมตงบยิง Ads (รวม {result.campaigns.length} แคมเปญในไฟล์เดียว)</div>
                     {[
+                      // ไม่มี PDF ในเมนูรวมแคมเปญ — PDF ต้องเปิดหน้าต่างพิมพ์ (ป๊อปอัป) ผู้ใช้อยากให้กดแล้วได้ไฟล์ทันที
                       ["งบยิง Ads (Excel)", "excel"],
-                      ["งบยิง Ads (PDF)", "pdf"],
                       ["งบยิง Ads (CSV)", "csv"],
                     ].map(([label, fmt]) => (
                       <button key={label} onClick={() => { setExportMenu(false); runTrackerAll(fmt); }}
