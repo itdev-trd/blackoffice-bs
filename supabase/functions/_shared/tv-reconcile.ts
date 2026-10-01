@@ -30,7 +30,9 @@ export function reconcileTvAccess(appRows: any[], tvUsers: Map<string, TvUser>, 
       const expChanged = !sameTime(r.expiration, exp);
       const tvExpChanged = !sameTime(r.tv_expiration, exp);
       const statusChanged = r.status !== status;
-      if (!expChanged && !tvExpChanged && !statusChanged && r.tv_access_verified === true) continue;
+      // หมดอายุแล้วตั้ง tv_access_verified = false — ต้องเทียบกับค่าที่ควรเป็น ไม่ใช่ true เสมอ
+      // ไม่งั้นแถวหมดอายุถูกเขียนซ้ำทุกคืน (เจอจริง: รอบที่สอง One STR โดนแก้ซ้ำ 409 แถว)
+      if (!expChanged && !tvExpChanged && !statusChanged && r.tv_access_verified === (status === "active")) continue;
       const patch: Record<string, unknown> = {
         expiration: exp, tv_expiration: exp, status,
         tv_access_verified: status === "active", tv_verified_at: nowIso, tv_verify_error: null,
@@ -49,4 +51,14 @@ export function reconcileTvAccess(appRows: any[], tvUsers: Map<string, TvUser>, 
     }
   }
   return patches;
+}
+
+// คนที่มีสิทธิ์อยู่บน TradingView แต่แอปไม่มีแถวเลย (ให้สิทธิ์ตรงบน TradingView ไม่ผ่านแอป)
+// → นำเข้าเป็นแถวใหม่ให้เห็นในหน้าสมาชิก · ข้อมูลลูกค้า (ชื่อ/อีเมล/ไอดีเทรด) คัดลอกจากแถวสคริปต์อื่นของคนเดียวกันถ้ามี
+// นำเข้าเฉพาะสิทธิ์ที่ยังไม่หมดอายุ — คนที่หมดไปนานแล้วไม่ต้องรก
+export function missingFromApp(appRows: any[], tvUsers: Map<string, TvUser>, nowMs = Date.now()): TvUser[] {
+  const have = new Set((appRows || []).map((r) => String(r.username || "").toLowerCase()));
+  return [...tvUsers.entries()]
+    .filter(([key, u]) => !have.has(key) && u.expiration !== undefined && (u.expiration === null || Date.parse(u.expiration) > nowMs))
+    .map(([, u]) => u);
 }

@@ -21,7 +21,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { hasFullData, authorizeRequest } from "../_shared/permissions.ts";
 import { readJsonBody } from "../_shared/security.ts";
 import { buildBackfill, backfillExpiration, choiceFor } from "../_shared/tv-backfill.ts";
-import { reconcileTvAccess } from "../_shared/tv-reconcile.ts";
+import { reconcileTvAccess, missingFromApp } from "../_shared/tv-reconcile.ts";
 import { tvValidate, tvListUsers, tvCheckAccess, tvGrant, tvRevoke, tvPing,
   tvExtend,
 } from "../_shared/tradingview-direct.ts";
@@ -450,15 +450,43 @@ Deno.serve(async (req) => {
             appRows.push(...(data ?? []));
             if ((data ?? []).length < 1000) break;
           }
-          const patches = reconcileTvAccess(appRows, tvUsers, Date.now(), nowIso);
+          // list_users ของ TradingView ไม่ส่งช่อง expiration มาเลยสำหรับสิทธิ์ตลอดชีพ (ดูจาก tv_api_log)
+          // รายชื่อชุดนี้ครบแล้ว (res.complete) จึงตีความ "ไม่มีช่อง" = ตลอดชีพ ได้อย่างปลอดภัย
+          // เดิมส่งต่อเป็น undefined ทำให้ reconcile ข้ามคนตลอดชีพทั้งหมด และนำเข้าคนตลอดชีพไม่ได้ (ตกไป 12 แถว)
+          const tvTruth = new Map([...tvUsers].map(([k, u]) => [k, { ...u, expiration: u.expiration ?? null }]));
+          const patches = reconcileTvAccess(appRows, tvTruth, Date.now(), nowIso);
           for (const { id, patch } of patches) {
             const { error } = await db.from("tv_access").update(patch).eq("id", id);
             if (!error) changed++;
           }
+          // คนที่ให้สิทธิ์ตรงบน TradingView (ไม่ผ่านแอป) — นำเข้าให้เห็นในหน้าสมาชิก
+          const missing = missingFromApp(appRows, tvTruth, Date.now());
+          let imported = 0;
+          if (missing.length) {
+            const { data: others } = await db.from("tv_access")
+              .select("username, display_name, email, trade_id, lot, contact_channel, member_type, broker, phone, country, telegram, updated_at")
+              .in("username", missing.map((u) => u.username)).order("updated_at", { ascending: false });
+            const profile = new Map<string, any>();
+            for (const o of others ?? []) { const k = String(o.username).toLowerCase(); if (!profile.has(k)) profile.set(k, o); }
+            for (const u of missing) {
+              const p = profile.get(u.username.toLowerCase()) || {};
+              const tvRow = tvUsers.get(u.username.toLowerCase()) as any;
+              const { error } = await db.from("tv_access").upsert({
+                username: u.username, pine_id: pineId, brand_id: script.brand_id ?? null,
+                display_name: p.display_name ?? null, email: p.email ?? null, trade_id: p.trade_id ?? null, lot: p.lot ?? null,
+                contact_channel: p.contact_channel ?? null, member_type: p.member_type ?? null, broker: p.broker ?? "XM",
+                phone: p.phone ?? null, country: p.country ?? null, telegram: p.telegram ?? null,
+                expiration: u.expiration ?? null, tv_expiration: u.expiration ?? null, tv_granted_at: tvRow?.tv_granted_at ?? null,
+                status: "active", tv_access_verified: true, tv_verified_at: nowIso, last_synced_at: nowIso,
+                granted_by: "นำเข้าจาก TradingView", granted_at: tvRow?.tv_granted_at ?? nowIso, updated_at: nowIso,
+              }, { onConflict: "username,pine_id", ignoreDuplicates: true });
+              if (!error) imported++;
+            }
+          }
           if (staleErr) throw new Error(staleErr.message);
           changed += snapshot.length;
           synced++;
-          results.push({ pine_id: pineId, brand_id: script.brand_id ?? null, ok: true, members: tvUsers.size, stored_in: "tv_external_members", pages: res.pages ?? null, reconciled: patches.length });
+          results.push({ pine_id: pineId, brand_id: script.brand_id ?? null, ok: true, members: tvUsers.size, stored_in: "tv_external_members", pages: res.pages ?? null, reconciled: patches.length, imported });
         } catch (e) {
           failed++;
           const error = String(e instanceof Error ? e.message : e).slice(0, 500);

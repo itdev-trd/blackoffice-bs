@@ -38,3 +38,25 @@ test("ตรงกันอยู่แล้ว = ไม่เขียนซ�
   ], tv([{ username: "ok", expiration: "2026-11-01T00:00:00Z" }, { username: "unk" }]), NOW);
   assert.deepEqual(out, []);
 });
+
+import { missingFromApp } from "../supabase/functions/_shared/tv-reconcile.ts";
+
+test("นำเข้าคนที่มีบน TradingView แต่แอปไม่มีแถว — เฉพาะที่ยังไม่หมดอายุ", () => {
+  const out = missingFromApp(
+    [{ username: "Have" }],
+    tv([
+      { username: "have", expiration: null },                     // มีในแอปแล้ว (ตัวพิมพ์ต่างกัน)
+      { username: "NewLife", expiration: null },                  // ตลอดชีพ
+      { username: "newTimed", expiration: "2026-10-07T00:00:00Z" },
+      { username: "old", expiration: "2026-09-01T00:00:00Z" },    // หมดแล้ว
+      { username: "unknown" },                                    // ไม่รู้วันหมดอายุ
+    ]), NOW);
+  assert.deepEqual(out.map((u) => u.username), ["NewLife", "newTimed"]);
+});
+
+test("รันซ้ำ = ไม่แก้อะไร (แถวหมดอายุที่ปรับแล้วต้องไม่ถูกเขียนซ้ำทุกคืน)", () => {
+  const users = tv([{ username: "x", expiration: "2026-09-01T00:00:00Z" }]);
+  const [first] = reconcileTvAccess([{ id: 9, username: "x", status: "active", expiration: "2026-09-01T00:00:00Z" }], users, NOW);
+  const after = { id: 9, username: "x", ...first.patch };
+  assert.deepEqual(reconcileTvAccess([after], users, NOW), []);
+});
