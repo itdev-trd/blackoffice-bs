@@ -22,7 +22,7 @@ import {
   SectionTitle, StatCard, Button, Card, Dialog, SearchInput, FilterPill, Field, Input, Select, EmptyState,
 } from "@/components/ui";
 import {
-  Gauge, CheckCircle2, XCircle, Plus, Download, RefreshCw, Loader2, Pencil, Trash2, ChevronLeft, ChevronRight, ListTree, PartyPopper,
+  Gauge, CheckCircle2, XCircle, Plus, Download, RefreshCw, Loader2, Pencil, Trash2, ChevronLeft, ChevronRight, ListTree, PartyPopper, PackagePlus,
 } from "lucide-react";
 
 // Plan ของสมาชิก — เลื่อนขั้นตามยอด Lot ที่เทรดได้ในแต่ละรอบอายุ
@@ -224,7 +224,7 @@ export default function BesightMembersTab({ active = true }) {
     if (!brandId) { setRows([]); setScripts([]); return; }
     // tv_access ต้องแบ่งหน้าเอง — ทะลุ 1000 แถวแล้วสมาชิกท้าย ๆ จะหายเงียบ ๆ (ตอนนี้ 884 แถว)
     const [{ data: sc }, ac] = await Promise.all([
-      supabase.from("tv_scripts").select("pine_id, name").eq("brand_id", brandId).order("name"),
+      supabase.from("tv_scripts").select("pine_id, name, created_at").eq("brand_id", brandId).order("name"),
       (async () => {
         const all = [];
         for (let from = 0; ; from += 1000) {
@@ -296,6 +296,42 @@ export default function BesightMembersTab({ active = true }) {
   }, [detailMember?.key, detailMember?.trade_id]);
 
   // เปิดกล่องรายละเอียด — รีเซ็ตช่วงที่เลือกกับช่องโควตาให้ตรงกับคนที่กดทุกครั้ง
+  // ---- อัปเดตอินดิเคเตอร์รายคน: ให้สคริปต์ใหม่กับคนที่ตกหล่นจากการให้สิทธิ์ย้อนหลัง ----
+  // ใช้ action backfill_script ตัวเดียวกับหน้าตั้งค่า TV (กติกาวันหมดอายุเดียวกัน) แต่จำกัดเฉพาะคนนี้
+  const [indi, setIndi] = useState(null);   // { member, target, preview, choice, busy, result, error }
+  const indiBody = (st, extra) => ({
+    action: "backfill_script", target_pine: st.target, mode: "any", usernames: [st.member.username],
+    source_pines: scripts.filter((x) => x.pine_id !== st.target).map((x) => x.pine_id),
+    decide_default: st.choice, ...extra,
+  });
+  async function indiCheck(st) {
+    setIndi({ ...st, preview: null, result: null, error: "", busy: true });
+    const { data, error } = await supabase.functions.invoke("tradingview", { body: indiBody(st, { dry_run: true }) });
+    if (error || !data?.ok) { setIndi({ ...st, busy: false, error: data?.error || (error ? await readFunctionErrorMessage(error) : "") || "ตรวจไม่สำเร็จ" }); return; }
+    setIndi({ ...st, busy: false, preview: data, result: null, error: "" });
+  }
+  function openIndi(m) {
+    const have = new Set(m.indicators.map((x) => x.pine_id));
+    // ค่าเริ่มต้น: สคริปต์ใหม่สุดที่คนนี้ยังไม่มี (ถ้ามีครบทุกตัวแล้ว ใช้ตัวใหม่สุดไว้ตรวจซ้ำ)
+    const byNewest = [...scripts].sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
+    const target = (byNewest.find((x) => !have.has(x.pine_id)) || byNewest[0])?.pine_id;
+    if (!target) return;
+    indiCheck({ member: m, target, choice: "month" });
+  }
+  async function indiRun() {
+    const st = indi;
+    if (!st?.preview?.pending) return;
+    setIndi({ ...st, busy: true, error: "" });
+    const { data, error } = await supabase.functions.invoke("tradingview", { body: indiBody(st, { batch: 5 }) });
+    if (error || !data?.ok || (data.failed || []).length) {
+      setIndi({ ...st, busy: false, error: data?.failed?.[0]?.error || data?.error || (error ? await readFunctionErrorMessage(error) : "") || "ให้สิทธิ์ไม่สำเร็จ" });
+      return;
+    }
+    setIndi({ ...st, busy: false, result: data });
+    logActivity("tv_backfill_one", { username: st.member.username, pine_id: st.target, granted: data.granted });
+    loadMembers();
+  }
+
   function openDetail(m) {
     setDetailMember(m);
     setDetailRange({ mode: "cycle", start: "", end: "" });
@@ -733,6 +769,9 @@ export default function BesightMembersTab({ active = true }) {
                         <div className="inline-flex items-center gap-1">
                           <button onClick={() => openDetail(m)} className="p-1.5 rounded-lg text-slate-400 hover:text-brand-600 hover:bg-brand-50" title="ดูรายละเอียด/อินดิเคเตอร์ทั้งหมด"><ListTree size={14} /></button>
                           <button onClick={() => openEdit(m)} className="p-1.5 rounded-lg text-slate-400 hover:text-brand-600 hover:bg-brand-50" title="แก้ไข"><Pencil size={14} /></button>
+                          {isAdmin && scripts.length > 1 && (
+                            <button onClick={() => openIndi(m)} className="p-1.5 rounded-lg text-slate-400 hover:text-brand-600 hover:bg-brand-50" title="อัปเดตอินดิเคเตอร์ (ให้สคริปต์ใหม่ที่ตกหล่น)"><PackagePlus size={14} /></button>
+                          )}
                           {m.indicators.length === 1 && (
                             <button onClick={() => revoke(m.primary)} disabled={busyRow === m.primary.id} className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 disabled:opacity-50" title="ถอนสิทธิ์">
                               {busyRow === m.primary.id ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
@@ -815,6 +854,61 @@ export default function BesightMembersTab({ active = true }) {
             </label>
           </div>
         </div>
+      </Dialog>
+
+      <Dialog open={!!indi} title="อัปเดตอินดิเคเตอร์" onClose={() => !indi?.busy && setIndi(null)}
+        description={indi ? `${indi.member.display_name || indi.member.username} · TradingView: ${indi.member.username}` : undefined}
+        footer={indi && <>
+          <Button variant="secondary" disabled={indi.busy} onClick={() => setIndi(null)}>{indi.result ? "ปิด" : "ยกเลิก"}</Button>
+          {!indi.result && indi.preview?.pending > 0 && <Button variant="primary" loading={indi.busy} onClick={indiRun}>ให้สิทธิ์</Button>}
+        </>}>
+        {indi && (() => {
+          const nameOf = (pid) => scripts.find((x) => x.pine_id === pid)?.name || pid;
+          const p = indi.preview;
+          const one = p?.pending_list?.[0];
+          const expText = one?.tier === "lifetime" || (one?.tier === "decide" && indi.choice === "lifetime") ? "ตลอดชีพ"
+            : one?.tier === "decide" ? "1 เดือน (30 วันนับจากวันนี้)"
+            : one?.expiration ? `ถึง ${new Date(one.expiration).toLocaleDateString("th-TH")} (เท่ากับวันที่ไกลที่สุดของสคริปต์เดิม)` : "";
+          return (
+            <div className="space-y-4 text-sm">
+              <Field label="สคริปต์ที่จะให้">
+                <Select value={indi.target} disabled={indi.busy || !!indi.result} onChange={(e) => indiCheck({ member: indi.member, target: e.target.value, choice: indi.choice })}>
+                  {scripts.map((x) => <option key={x.pine_id} value={x.pine_id}>{x.name}{indi.member.indicators.some((i) => i.pine_id === x.pine_id) ? " (มีในระบบแล้ว)" : ""}</option>)}
+                </Select>
+              </Field>
+              {indi.busy && !p && <div className="flex items-center gap-2 text-slate-500"><Loader2 size={15} className="animate-spin" /> กำลังตรวจกับ TradingView...</div>}
+              {indi.error && <div className="rounded-lg bg-rose-50 px-3 py-2 text-rose-700">{indi.error}</div>}
+              {indi.result && (
+                <div className="flex items-start gap-2 rounded-lg bg-emerald-50 px-3 py-2.5 text-emerald-800">
+                  <CheckCircle2 size={16} className="mt-0.5 shrink-0" /> ให้สิทธิ์ {nameOf(indi.target)} แล้ว · {expText}
+                </div>
+              )}
+              {p && !indi.result && (p.pending > 0 && one ? (
+                <div className="space-y-3">
+                  <div className="rounded-lg border border-slate-200 px-3 py-2.5">
+                    <div className="text-xs text-slate-500">จะได้ <b className="text-slate-800">{nameOf(indi.target)}</b></div>
+                    <div className="mt-0.5 font-semibold text-slate-800">{expText}</div>
+                  </div>
+                  {one.tier === "decide" && (
+                    <div className="space-y-1.5">
+                      <div className="text-xs text-slate-600">คนนี้มีสคริปต์เดิมที่เป็นตลอดชีพแค่บางตัว — ให้แบบไหน?</div>
+                      <div className="inline-flex rounded-lg bg-slate-100 p-0.5 text-xs">
+                        {[["month", "1 เดือน"], ["lifetime", "ตลอดชีพ"]].map(([v, label]) => (
+                          <button key={v} type="button" onClick={() => setIndi((s) => ({ ...s, choice: v }))}
+                            className={`rounded-md px-3 py-1.5 font-medium ${indi.choice === v ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}`}>{label}</button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="rounded-lg bg-amber-50 px-3 py-2.5 text-amber-800">
+                  {p.not_eligible?.[0]?.reason || "ไม่เข้าเกณฑ์"}
+                </div>
+              ))}
+            </div>
+          );
+        })()}
       </Dialog>
 
       <Dialog open={!!editMember} title="แก้ไขข้อมูลสมาชิก" onClose={() => setEditMember(null)}

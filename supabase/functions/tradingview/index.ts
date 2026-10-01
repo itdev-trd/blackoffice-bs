@@ -810,12 +810,33 @@ Deno.serve(async (req) => {
         if ((data ?? []).length < 1000) break;
       }
       const { data: tgtRows } = await db.from("tv_access").select("username, status, expiration").eq("pine_id", target);
+      // รายชื่อจริงจาก TradingView (ซิงก์ทุกคืน) — ใช้เป็นหลัก ดูเหตุผลใน _shared/tv-backfill.ts
+      const tvRows: any[] = [];
+      for (let from = 0; from < 50_000; from += 1000) {
+        const { data, error } = await db.from("tv_external_members").select("username, pine_id, expiration, status")
+          .in("pine_id", [...sources, target]).range(from, from + 999);
+        if (error) return json({ ok: false, error: error.message });
+        tvRows.push(...(data ?? []));
+        if ((data ?? []).length < 1000) break;
+      }
+      // ทำรายคน (ปุ่มในหน้าสมาชิก) — จำกัดเฉพาะ username ที่ส่งมา
+      const onlyUsers: Set<string> | null = Array.isArray(body?.usernames) && body.usernames.length
+        ? new Set(body.usernames.map((u: unknown) => String(u).toLowerCase().trim()).filter(Boolean)) : null;
+      const pick = (rows: any[]) => onlyUsers ? rows.filter((r) => onlyUsers.has(String(r.username || "").toLowerCase())) : rows;
 
-      const { pending: pendingList, summary } = buildBackfill(srcRows, tgtRows ?? [], sources, mode, nowMs);
+      const { pending: pendingList, summary, hasTarget } = buildBackfill(
+        pick(srcRows), pick(tgtRows ?? []), sources, mode, nowMs,
+        pick(tvRows.filter((r) => r.pine_id !== target)), pick(tvRows.filter((r) => r.pine_id === target)),
+      );
       const pending = pendingList.map((c) => [c.key, c] as const);
 
       if (body?.dry_run === true) {
         return json({ ok: true, dry_run: true, ...summary,
+          // รายคน: บอกเหตุผลถ้าไม่เข้าเกณฑ์ จะได้ไม่ต้องเดา
+          ...(onlyUsers ? { not_eligible: [...onlyUsers].filter((u) => !pendingList.some((c) => c.key === u)).map((u) => ({
+            username: u, reason: hasTarget.has(u) ? "มีสคริปต์นี้อยู่แล้ว" : "ไม่มีสิทธิ์สคริปต์เดิมที่ยังไม่หมดอายุ (ทั้งในระบบและบน TradingView)",
+          })), pending_list: pendingList.map((c) => ({ key: c.key, username: c.username, tier: c.tier,
+            expiration: c.tier === "timed" ? new Date(c.maxExp).toISOString() : null })) } : {}),
           // กลุ่มที่ต้องตัดสินใจ — ส่งรายชื่อครบให้หน้าเว็บเลือกรายคนได้
           decide_list: pendingList.filter((c) => c.tier === "decide").map((c) => ({
             key: c.key, username: c.username, display_name: c.profile?.display_name ?? null,

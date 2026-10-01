@@ -12,21 +12,40 @@ export type BackfillCand = {
 };
 export const MONTH_DAYS = 30;
 
-export function buildBackfill(srcRows: any[], tgtRows: any[], sources: string[], mode: "any" | "all", nowMs = Date.now()) {
-  const hasTarget = new Set((tgtRows || [])
-    .filter((r: any) => r.status === "active" && (!r.expiration || Date.parse(r.expiration) > nowMs))
-    .map((r: any) => String(r.username).toLowerCase()));
+// tvRows = รายชื่อจริงจาก TradingView (tv_external_members ซิงก์ทุกคืน) — ใช้เป็นหลักเรื่อง "มีสิทธิ์ถึงวันไหน"
+// เพราะ tv_access (ประวัติที่ทำผ่านแอป) ค้างได้: ต่ออายุ/เพิ่มสคริปต์บน TradingView ตรง ๆ แล้วแอปไม่รู้
+// (เจอจริง 1 ต.ค. 69: patie52546 ในแอปมีแค่ One STR หมด 6 ก.ย. แต่ TradingView มีทั้งสองตัวถึง 7 ต.ค. — ตกหล่น 48 คน)
+// appRows = tv_access ใช้เอาข้อมูลลูกค้า (ชื่อ/อีเมล/ไอดีเทรด) และเป็นข้อมูลสำรองถ้าคนนั้นไม่อยู่ใน snapshot
+export function buildBackfill(
+  appRows: any[], appTgtRows: any[], sources: string[], mode: "any" | "all", nowMs = Date.now(),
+  tvRows: any[] = [], tvTgtRows: any[] = [],
+) {
+  const alive = (r: any) => (r.status ?? "active") === "active" && (!r.expiration || Date.parse(r.expiration) > nowMs);
+  const hasTarget = new Set([...(appTgtRows || []), ...(tvTgtRows || [])].filter(alive).map((r: any) => String(r.username).toLowerCase()));
+
+  // สิทธิ์ต่อ (คน, สคริปต์): TradingView ชนะ · ไม่อยู่ใน snapshot ค่อยใช้ของแอป
+  const grants = new Map<string, { username: string; pine: string; expiration: string | null }>();
+  const keyOf = (u: string, p: string) => `${u.toLowerCase()}|${p}`;
+  for (const r of appRows || []) if (r.status === undefined || r.status === "active") grants.set(keyOf(String(r.username), String(r.pine_id)), { username: String(r.username), pine: String(r.pine_id), expiration: r.expiration ?? null });
+  for (const r of tvRows || []) grants.set(keyOf(String(r.username), String(r.pine_id)), { username: String(r.username), pine: String(r.pine_id), expiration: r.expiration ?? null });
+
+  // ข้อมูลลูกค้าจากแถวแอปที่แก้ล่าสุดของคนนั้น
+  const profileOf = new Map<string, any>();
+  for (const r of appRows || []) {
+    const k = String(r.username || "").toLowerCase();
+    const cur = profileOf.get(k);
+    if (!cur || (Date.parse(r.updated_at || "") || 0) > (Date.parse(cur.updated_at || "") || 0)) profileOf.set(k, r);
+  }
+
   const byUser = new Map<string, BackfillCand>();
-  for (const r of srcRows || []) {
-    const exp = r.expiration ? Date.parse(r.expiration) : null;
+  for (const g of grants.values()) {
+    const exp = g.expiration ? Date.parse(g.expiration) : null;
     if (exp !== null && !(exp > nowMs)) continue;     // หมดอายุแล้วไม่นับ
-    const key = String(r.username || "").toLowerCase();
+    const key = g.username.toLowerCase();
     if (!key) continue;
-    const c = byUser.get(key) || { key, username: String(r.username), pines: new Set<string>(), lifetimePines: new Set<string>(), maxExp: 0, tier: "timed" as BackfillTier, profile: r };
-    c.pines.add(String(r.pine_id));
-    if (exp === null) c.lifetimePines.add(String(r.pine_id)); else c.maxExp = Math.max(c.maxExp, exp);
-    // ข้อมูลลูกค้า (ชื่อ/อีเมล/ไอดีเทรด) ใช้จากแถวที่แก้ล่าสุด
-    if ((Date.parse(r.updated_at || "") || 0) > (Date.parse(c.profile?.updated_at || "") || 0)) c.profile = r;
+    const c = byUser.get(key) || { key, username: g.username, pines: new Set<string>(), lifetimePines: new Set<string>(), maxExp: 0, tier: "timed" as BackfillTier, profile: profileOf.get(key) || { username: g.username } };
+    c.pines.add(g.pine);
+    if (exp === null) c.lifetimePines.add(g.pine); else c.maxExp = Math.max(c.maxExp, exp);
     byUser.set(key, c);
   }
   for (const c of byUser.values()) {
@@ -38,7 +57,7 @@ export function buildBackfill(srcRows: any[], tgtRows: any[], sources: string[],
   const pending = all.filter((c) => !hasTarget.has(c.key));
   const count = (t: BackfillTier) => pending.filter((c) => c.tier === t).length;
   return {
-    all, pending,
+    all, pending, hasTarget,
     summary: { candidates: all.length, already: all.length - pending.length, pending: pending.length,
       lifetime: count("lifetime"), decide: count("decide"), timed: count("timed") },
   };

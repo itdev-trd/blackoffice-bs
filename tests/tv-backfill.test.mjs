@@ -61,3 +61,26 @@ test("ข้อมูลลูกค้าใช้จากแถวที่�
   const rows = [row("x", STR, null, { trade_id: "old", updated_at: "2026-08-01T00:00:00Z" }), row("x", ORCA, null, { trade_id: "new", updated_at: "2026-09-20T00:00:00Z" })];
   assert.equal(buildBackfill(rows, [], [STR, ORCA], "any", NOW).pending[0].profile.trade_id, "new");
 });
+
+test("TradingView จริงชนะข้อมูลแอปที่ค้าง (เคส patie52546: แอปบอกหมด 6 ก.ย. แต่ TV มีทั้งสองตัวถึง 7 ต.ค.)", () => {
+  const app = [row("patie52546", STR, "2026-09-05T23:59:59Z", { trade_id: "335455070" })];
+  const tv = [
+    { username: "patie52546", pine_id: STR, expiration: "2026-10-07T07:03:22Z", status: "active" },
+    { username: "patie52546", pine_id: ORCA, expiration: "2026-10-07T07:03:28Z", status: "active" },
+  ];
+  const { pending } = buildBackfill(app, [], [STR, ORCA], "all", NOW, tv, []);
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0].profile.trade_id, "335455070");     // ข้อมูลลูกค้ายังมาจากแอป
+  assert.equal(backfillExpiration(pending[0], "month", NOW), "2026-10-07T07:03:28.000Z");
+});
+
+test("คนที่มีอยู่บน TradingView อย่างเดียว (ไม่มีแถวในแอป) ก็ได้ด้วย", () => {
+  const tv = [{ username: "ghost", pine_id: STR, expiration: null, status: "active" }];
+  const { pending } = buildBackfill([], [], [STR, ORCA], "any", NOW, tv, []);
+  assert.deepEqual(pending.map((c) => [c.key, c.tier]), [["ghost", "decide"]]);
+});
+
+test("TradingView บอกว่ามีสคริปต์ใหม่แล้ว = ข้าม แม้แอปไม่มีแถว", () => {
+  const { pending } = buildBackfill([row("bob", STR, null)], [], [STR], "any", NOW, [], [{ username: "BOB", pine_id: "PUB;new", expiration: null, status: "active" }]);
+  assert.equal(pending.length, 0);
+});
