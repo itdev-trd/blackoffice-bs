@@ -20,6 +20,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { hasFullData, authorizeRequest } from "../_shared/permissions.ts";
 import { readJsonBody } from "../_shared/security.ts";
+import { buildBackfill, backfillExpiration } from "../_shared/tv-backfill.ts";
 import { tvValidate, tvListUsers, tvCheckAccess, tvGrant, tvRevoke, tvPing,
   tvExtend,
 } from "../_shared/tradingview-direct.ts";
@@ -779,6 +780,90 @@ Deno.serve(async (req) => {
       // n8n ไม่มีฟิลด์ exists → ใช้การมี username เหมือนเดิม
       const exists = typeof res?.exists === "boolean" ? res.exists : !!res?.username;
       return json({ ok: true, exists, username: exists ? (res?.username || u) : null });
+    }
+
+    // ---- ให้สิทธิ์สคริปต์ใหม่ "ย้อนหลัง" กับลูกค้าที่มีสิทธิ์สคริปต์เดิมอยู่ ----
+    // ใช้ตอนแบรนด์เพิ่มอินดิเคเตอร์ตัวใหม่ แล้วอยากให้ลูกค้าเดิมได้ด้วยทุกคน
+    //   body: { target_pine, source_pines[], mode: "any" | "all", dry_run?, after?, batch? }
+    //   · any = มีสิทธิ์ตัวเดิมอย่างน้อย 1 ตัว · all = ต้องมีครบทุกตัวที่เลือก
+    //   · นับเฉพาะสิทธิ์ที่ยังไม่หมดอายุ · วันหมดอายุของตัวใหม่ = วันที่ไกลที่สุดของตัวเดิม (มีตลอดชีพสักตัว = ตลอดชีพ)
+    //   · ข้ามคนที่มีสิทธิ์ตัวใหม่อยู่แล้ว · ทำทีละชุด (after = username ล่าสุดที่ทำแล้ว) หน้าเว็บวนเรียกต่อเอง
+    //   · dry_run = นับ/ดูรายชื่ออย่างเดียว ไม่ยิง TradingView
+    if (action === "backfill_script") {
+      if (!isAdmin) return json({ ok: false, error: "เฉพาะแอดมิน" }, 403);
+      const target = String(body?.target_pine || "").trim();
+      const sources: string[] = Array.isArray(body?.source_pines) ? [...new Set(body.source_pines.map(String).filter((x: string) => x && x !== target))] as string[] : [];
+      const mode = body?.mode === "all" ? "all" : "any";
+      if (!target || !sources.length) return json({ ok: false, error: "เลือกสคริปต์ใหม่ และสคริปต์เดิมอย่างน้อย 1 ตัว" });
+      const nowMs = Date.now();
+      const nowIso = new Date(nowMs).toISOString();
+
+      // อ่านสิทธิ์ที่ยัง active ของสคริปต์เดิมทั้งหมด (แบ่งหน้า — PostgREST คืนได้ทีละ 1,000)
+      const srcRows: any[] = [];
+      for (let from = 0; from < 50_000; from += 1000) {
+        const { data, error } = await db.from("tv_access")
+          .select("username, pine_id, expiration, display_name, email, trade_id, lot, contact_channel, member_type, broker, phone, country, telegram, updated_at")
+          .in("pine_id", sources).eq("status", "active").range(from, from + 999);
+        if (error) return json({ ok: false, error: error.message });
+        srcRows.push(...(data ?? []));
+        if ((data ?? []).length < 1000) break;
+      }
+      const { data: tgtRows } = await db.from("tv_access").select("username, status, expiration").eq("pine_id", target);
+
+      const { pending: pendingList, summary } = buildBackfill(srcRows, tgtRows ?? [], sources, mode, nowMs);
+      const pending = pendingList.map((c) => [c.key, c] as const);
+
+      if (body?.dry_run === true) {
+        return json({ ok: true, dry_run: true, ...summary,
+          sample: pendingList.slice(0, 20).map((c) => ({ username: c.username, expiration: backfillExpiration(c), from: [...c.pines] })) });
+      }
+
+      const after = String(body?.after || "").toLowerCase();
+      const batchSize = Math.min(25, Math.max(1, Number(body?.batch) || 10));
+      const batch = pending.filter(([k]) => k > after).slice(0, batchSize);
+      const brand_id = await pineBrandId(target);
+      const cookie = await getBrandCookie(brand_id);
+      const grantEmail = auth.permission?.email || null;
+      let grantedBy = grantEmail;
+      if (grantEmail) {
+        const { data: np } = await db.from("user_permissions").select("nickname").eq("email", grantEmail).maybeSingle();
+        if (np?.nickname) grantedBy = np.nickname;
+      }
+      const deadline = Date.now() + 100_000;
+      const failed: { username: string; error: string }[] = [];
+      let okCount = 0;
+      let last = after;
+      for (const [key, c] of batch) {
+        if (Date.now() > deadline) break;
+        const expiration = backfillExpiration(c);
+        try {
+          const res = await callTv({ action: "grant", username: c.username, pine_id: target, expiration }, cookie, { actor: grantEmail, brand_id });
+          if (!res?.ok) throw new Error(res?.error || "ให้สิทธิ์ไม่สำเร็จ");
+          const realUser = res.username || c.username;
+          if (res?.already === true) {
+            const ext = await callTv({ action: "extend", username: realUser, pine_id: target, expiration }, cookie, { actor: grantEmail, brand_id });
+            if (!ext?.ok) throw new Error(`มีสิทธิ์อยู่แล้วแต่ตั้งวันหมดอายุไม่สำเร็จ: ${ext?.error || ""}`);
+          }
+          const p = c.profile || {};
+          const { error: upErr } = await db.from("tv_access").upsert({
+            username: realUser, pine_id: target, brand_id,
+            display_name: p.display_name ?? null, email: p.email ?? null, trade_id: p.trade_id ?? null, lot: p.lot ?? null,
+            contact_channel: p.contact_channel ?? null, member_type: p.member_type ?? null, broker: p.broker ?? "XM",
+            phone: p.phone ?? null, country: p.country ?? null, telegram: p.telegram ?? null,
+            expiration, status: "active", last_granted_at: nowIso, last_synced_at: nowIso, last_error: null,
+            granted_by: grantedBy ? `${grantedBy} (ย้อนหลัง)` : "ให้สิทธิ์ย้อนหลัง", granted_at: nowIso, updated_at: nowIso,
+          }, { onConflict: "username,pine_id" });
+          if (upErr) throw new Error(`ให้สิทธิ์บน TradingView แล้ว แต่บันทึกไม่สำเร็จ: ${upErr.message}`);
+          okCount++;
+        } catch (e) {
+          failed.push({ username: c.username, error: String(e instanceof Error ? e.message : e) });
+        }
+        last = key;
+        await new Promise((r) => setTimeout(r, 250));   // เว้นจังหวะ กัน TradingView ตัดเพราะยิงถี่
+      }
+      const remaining = pending.filter(([k]) => k > last).length;
+      return json({ ok: true, ...summary, processed: okCount + failed.length, granted: okCount, failed,
+        next_after: remaining ? last : null, remaining, done: remaining === 0 });
     }
 
     // renew: true = "ต่ออายุ" (ปุ่มต่ออายุหน้าแชท) — ต่างจากการให้สิทธิ์ใหม่ 2 อย่าง

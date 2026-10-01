@@ -1,7 +1,7 @@
 "use client";
 
 import { compressImage, STORAGE_CACHE_SECONDS } from "@/lib/utils/image";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Sparkles,
   CheckCircle2,
@@ -924,9 +924,133 @@ function TvAdminSettingsPanel() {
           </div>
         </div>
       )}
+      <TvBackfillPanel scripts={scripts} />
     </div>
   );
 }
+
+// ให้สิทธิ์สคริปต์ใหม่ย้อนหลัง — แบรนด์เพิ่มอินดิเคเตอร์ตัวใหม่ แล้วอยากให้ลูกค้าเดิมได้ด้วยทุกคน
+// ขั้นแรกกด "ตรวจรายชื่อ" (dry run ไม่ยิง TradingView) ดูจำนวนก่อน แล้วค่อยกดให้สิทธิ์ ระบบทำทีละชุดจนครบ
+function TvBackfillPanel({ scripts }) {
+  const [target, setTarget] = useState("");
+  const [sources, setSources] = useState([]);
+  const [mode, setMode] = useState("any");
+  const [preview, setPreview] = useState(null);
+  const [run, setRun] = useState(null);   // { running, granted, failed: [], total, remaining, stopped }
+  const [err, setErr] = useState("");
+  const stopRef = useRef(false);
+  // ค่าเริ่มต้น: สคริปต์ใหม่สุด = เป้าหมาย · ตัวอื่นในแบรนด์เดียวกัน = ต้นทาง
+  useEffect(() => {
+    if (target || !scripts.length) return;
+    const newest = [...scripts].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
+    setTarget(newest.pine_id);
+    setSources(scripts.filter((s) => s.pine_id !== newest.pine_id && s.brand_id === newest.brand_id).map((s) => s.pine_id));
+  }, [scripts]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setPreview(null); setRun(null); }, [target, sources.join(","), mode]);
+  const nameOf = (pid) => scripts.find((s) => s.pine_id === pid)?.name || pid;
+  const body = (extra) => ({ action: "backfill_script", target_pine: target, source_pines: sources, mode, ...extra });
+
+  async function check() {
+    setErr(""); setPreview({ loading: true });
+    const { data, error } = await supabase.functions.invoke("tradingview", { body: body({ dry_run: true }) });
+    if (error || !data?.ok) { setPreview(null); setErr(data?.error || (error ? await readFunctionErrorMessage(error) : "") || "ตรวจไม่สำเร็จ"); return; }
+    setPreview(data);
+  }
+  async function start() {
+    if (!preview?.pending) return;
+    if (!confirm(`ให้สิทธิ์ "${nameOf(target)}" กับลูกค้า ${preview.pending} คน?\n\nวันหมดอายุ = วันที่ไกลที่สุดของสคริปต์เดิมแต่ละคน (${preview.lifetime} คนได้ตลอดชีพ)`)) return;
+    stopRef.current = false; setErr("");
+    let after = null, granted = 0, failed = [];
+    setRun({ running: true, granted, failed, total: preview.pending, remaining: preview.pending });
+    for (let guard = 0; guard < 500; guard++) {
+      if (stopRef.current) { setRun((r) => ({ ...r, running: false, stopped: true })); return; }
+      const { data, error } = await supabase.functions.invoke("tradingview", { body: body({ after, batch: 10 }) });
+      if (error || !data?.ok) { setErr(data?.error || (error ? await readFunctionErrorMessage(error) : "") || "ให้สิทธิ์ไม่สำเร็จ"); setRun((r) => ({ ...r, running: false, stopped: true })); return; }
+      granted += data.granted || 0;
+      failed = [...failed, ...(data.failed || [])];
+      setRun({ running: !data.done, granted, failed, total: preview.pending, remaining: data.remaining });
+      if (data.done) return;
+      after = data.next_after;
+    }
+  }
+  if (scripts.length < 2) return null;
+  return (
+    <div className="rounded-xl border border-slate-200 p-4 space-y-3">
+      <div>
+        <div className="font-semibold text-slate-800 text-sm">ให้สิทธิ์สคริปต์ใหม่ย้อนหลัง</div>
+        <p className="text-xs text-slate-500 mt-0.5">ลูกค้าที่มีสิทธิ์สคริปต์เดิม (ยังไม่หมดอายุ) จะได้สคริปต์ใหม่ด้วย · วันหมดอายุเท่ากับวันที่ไกลที่สุดของสคริปต์เดิม · ข้ามคนที่มีอยู่แล้ว</p>
+      </div>
+      <div className="grid sm:grid-cols-2 gap-3 text-sm">
+        <div>
+          <label className="text-xs text-slate-600">สคริปต์ใหม่ที่จะให้</label>
+          <select value={target} onChange={(e) => { setTarget(e.target.value); setSources((s) => s.filter((x) => x !== e.target.value)); }} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 bg-white">
+            {scripts.map((s) => <option key={s.pine_id} value={s.pine_id}>{s.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs text-slate-600">ลูกค้าที่มีสิทธิ์สคริปต์เหล่านี้</label>
+          <div className="mt-1 rounded-lg border border-slate-200 divide-y divide-slate-100">
+            {scripts.filter((s) => s.pine_id !== target).map((s) => (
+              <label key={s.pine_id} className="flex items-center gap-2 px-3 py-1.5 cursor-pointer">
+                <input type="checkbox" checked={sources.includes(s.pine_id)} onChange={() => setSources((x) => x.includes(s.pine_id) ? x.filter((y) => y !== s.pine_id) : [...x, s.pine_id])} />
+                {s.name}
+              </label>
+            ))}
+          </div>
+          {sources.length > 1 && (
+            <div className="mt-1.5 flex gap-3 text-xs text-slate-600">
+              <label className="flex items-center gap-1"><input type="radio" checked={mode === "any"} onChange={() => setMode("any")} /> มีอย่างน้อย 1 ตัว</label>
+              <label className="flex items-center gap-1"><input type="radio" checked={mode === "all"} onChange={() => setMode("all")} /> ต้องมีครบทุกตัว</label>
+            </div>
+          )}
+        </div>
+      </div>
+      {err && <div className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2">{err}</div>}
+      {!run && (
+        <div className="flex flex-wrap items-center gap-2">
+          <button onClick={check} disabled={!target || !sources.length || preview?.loading} className="rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50 disabled:opacity-50">
+            {preview?.loading ? "กำลังตรวจ..." : "1. ตรวจรายชื่อ"}
+          </button>
+          {preview && !preview.loading && (
+            <>
+              <span className="text-xs text-slate-600">
+                เข้าเงื่อนไข {preview.candidates} คน · มีอยู่แล้ว {preview.already} · <b className="text-slate-800">ต้องให้เพิ่ม {preview.pending} คน</b> (ตลอดชีพ {preview.lifetime})
+              </span>
+              <button onClick={start} disabled={!preview.pending} className="rounded-lg bg-brand-600 text-white px-3 py-2 text-sm font-medium hover:bg-brand-700 disabled:opacity-50">
+                2. ให้สิทธิ์ {preview.pending} คน
+              </button>
+            </>
+          )}
+        </div>
+      )}
+      {run && (
+        <div className="space-y-2 text-sm">
+          <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
+            <div className="h-full bg-brand-600 transition-all" style={{ width: `${run.total ? Math.round(((run.total - run.remaining) / run.total) * 100) : 100}%` }} />
+          </div>
+          <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
+            <span>สำเร็จ <b className="text-emerald-600">{run.granted}</b></span>
+            <span>ไม่สำเร็จ <b className="text-rose-600">{run.failed.length}</b></span>
+            <span>เหลือ {run.remaining}</span>
+            {run.running
+              ? <button onClick={() => { stopRef.current = true; }} className="rounded border border-slate-300 px-2 py-1">หยุดชั่วคราว</button>
+              : <button onClick={() => { setRun(null); check(); }} className="rounded border border-slate-300 px-2 py-1">{run.remaining || run.failed.length ? "ตรวจใหม่ / ทำต่อ" : "ตรวจอีกครั้ง"}</button>}
+          </div>
+          {!run.running && !run.remaining && !run.stopped && <div className="text-xs text-emerald-700">✓ เสร็จแล้ว</div>}
+          {run.failed.length > 0 && (
+            <details className="text-xs">
+              <summary className="cursor-pointer text-rose-600">ดูรายชื่อที่ไม่สำเร็จ ({run.failed.length}) — กด "ตรวจใหม่ / ทำต่อ" เพื่อลองใหม่</summary>
+              <ul className="mt-1 max-h-40 overflow-auto space-y-0.5">
+                {run.failed.map((f) => <li key={f.username}><b>{f.username}</b>: {f.error}</li>)}
+              </ul>
+            </details>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 
 function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages = null, onOpenChat }) {
   // allowedSettings = null → เห็นทุกหัวข้อ (admin) ; array → เห็นเฉพาะหัวข้อที่ได้รับสิทธิ์
