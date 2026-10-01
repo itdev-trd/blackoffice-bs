@@ -21,6 +21,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { hasFullData, authorizeRequest } from "../_shared/permissions.ts";
 import { readJsonBody } from "../_shared/security.ts";
 import { buildBackfill, backfillExpiration, choiceFor } from "../_shared/tv-backfill.ts";
+import { reconcileTvAccess } from "../_shared/tv-reconcile.ts";
 import { tvValidate, tvListUsers, tvCheckAccess, tvGrant, tvRevoke, tvPing,
   tvExtend,
 } from "../_shared/tradingview-direct.ts";
@@ -399,8 +400,10 @@ Deno.serve(async (req) => {
     }
 
     // ---- ซิงก์รายชื่อจริงจาก TradingView วันละครั้ง (service/cron เท่านั้น) ----
-    // สำคัญ: รายชื่อจาก TV เก็บใน tv_external_members เท่านั้น ไม่แตะ tv_access
-    // เพราะ tv_access เป็นประวัติการติดต่อ/การให้สิทธิ์ที่เกิดขึ้นผ่านแอป
+    // 1) เก็บ snapshot ลง tv_external_members
+    // 2) ปรับวันหมดอายุ/สถานะใน tv_access ให้ตรงกับ TradingView (ดูกติกาใน _shared/tv-reconcile.ts)
+    //    เดิมข้อ 2 ไม่มี — แอปโชว์ "มีสิทธิ์" กับวันหมดอายุเก่าค้างอยู่ 364 แถว
+    //    ทำเฉพาะตอนได้รายชื่อครบ (res.complete) เท่านั้น ไม่งั้นคนที่อยู่หน้าหลังจะโดนตีเป็นหมดอายุ
     if (action === "sync") {
       if (!isService) { const a = await authorizeRequest(req, { admin: true }); if (!a.ok) return json({ ok: false, error: a.error }, a.status); }
       const nowIso = new Date().toISOString();
@@ -438,10 +441,24 @@ Deno.serve(async (req) => {
           // ถ้า insert/upsert ล้มเหลว snapshot เดิมจะยังอยู่ ไม่กลายเป็นข้อมูลว่าง
           const { error: staleErr } = await db.from("tv_external_members")
             .delete().eq("pine_id", pineId).neq("synced_at", nowIso);
+          // ปรับ tv_access ให้ตรงกับ TradingView
+          const appRows: any[] = [];
+          for (let from = 0; from < 50_000; from += 1000) {
+            const { data, error } = await db.from("tv_access")
+              .select("id, username, status, expiration, tv_expiration, tv_access_verified").eq("pine_id", pineId).range(from, from + 999);
+            if (error) throw new Error(error.message);
+            appRows.push(...(data ?? []));
+            if ((data ?? []).length < 1000) break;
+          }
+          const patches = reconcileTvAccess(appRows, tvUsers, Date.now(), nowIso);
+          for (const { id, patch } of patches) {
+            const { error } = await db.from("tv_access").update(patch).eq("id", id);
+            if (!error) changed++;
+          }
           if (staleErr) throw new Error(staleErr.message);
           changed += snapshot.length;
           synced++;
-          results.push({ pine_id: pineId, brand_id: script.brand_id ?? null, ok: true, members: tvUsers.size, stored_in: "tv_external_members", pages: res.pages ?? null });
+          results.push({ pine_id: pineId, brand_id: script.brand_id ?? null, ok: true, members: tvUsers.size, stored_in: "tv_external_members", pages: res.pages ?? null, reconciled: patches.length });
         } catch (e) {
           failed++;
           const error = String(e instanceof Error ? e.message : e).slice(0, 500);
