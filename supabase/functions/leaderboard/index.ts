@@ -55,10 +55,13 @@ Deno.serve(async (req) => {
     if (allowedEmails.length && !allowedEmails.includes(auth.permission!.email.toLowerCase())) {
       return json({ ok: false, error: "ไม่มีสิทธิ์ดูกระดานแต้ม" }, 403);
     }
+    // LINE OA ไม่ผูกกับสิทธิ์เพจ (ใครตอบแชทได้ก็ตอบ LINE ได้ทุกบัญชี — ดู sync-conversations/ChatInboxTab)
+    // จึงไม่ตัดบัญชี LINE ทิ้งตอนกรองตามเพจที่ผู้ใช้จำกัดสิทธิ์มีสิทธิ์
+    const isLine = (pageId: string) => pageId.startsWith("line:");
     const permittedPages = hasFullData(auth.permission!)
       ? lbPages
       : (lbPages.length
-        ? lbPages.filter((pageId) => auth.permission!.allowedPages.includes(pageId))
+        ? lbPages.filter((pageId) => isLine(pageId) || auth.permission!.allowedPages.includes(pageId))
         : auth.permission!.allowedPages);
     if (!hasFullData(auth.permission!) && !permittedPages.length) {
       return json({ ok: true, board: [], total: 0, rows: 0 });

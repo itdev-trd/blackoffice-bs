@@ -149,8 +149,19 @@ function LeaderboardSettingsPanel() {
       setEmailsText((Array.isArray(v.emails) ? v.emails : []).join(", "));
       setPages(Array.isArray(v.pages) ? v.pages.map(String) : []);
     });
-    supabase.from("page_lead_config").select("page_id, page_name").order("page_name").then(({ data }) => {
-      setPageOpts((data || []).map((p) => ({ id: String(p.page_id), name: p.page_name || p.page_id })));
+    // บัญชี LINE OA ไม่ได้อยู่ใน page_lead_config (มีแต่เพจ Facebook) — เดิมเลยติ๊กให้นับแต้มไม่ได้
+    // ทั้งที่การตอบ LINE จากแอปถูกบันทึกลง reply_stats ครบอยู่แล้ว (page_id = "line:<id>")
+    Promise.all([
+      supabase.from("page_lead_config").select("page_id, page_name").order("page_name"),
+      supabase.from("chat_customers").select("page_id, page_name").eq("source", "line").limit(500),
+    ]).then(([fb, line]) => {
+      const seen = new Map();
+      for (const p of fb.data || []) seen.set(String(p.page_id), p.page_name || p.page_id);
+      for (const p of line.data || []) {
+        const id = String(p.page_id || "");
+        if (id && !seen.has(id)) seen.set(id, `${p.page_name || id} (LINE OA)`);
+      }
+      setPageOpts([...seen].map(([id, name]) => ({ id, name })));
     });
   }, []);
   const toggle = (id) => setPages((p) => p.includes(id) ? p.filter((x) => x !== id) : [...p, id]);
