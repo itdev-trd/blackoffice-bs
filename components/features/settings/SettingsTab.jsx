@@ -938,6 +938,9 @@ function TvBackfillPanel({ scripts }) {
   const [preview, setPreview] = useState(null);
   const [run, setRun] = useState(null);   // { running, granted, failed: [], total, remaining, stopped }
   const [err, setErr] = useState("");
+  // กลุ่ม "ตลอดชีพแค่บางตัว" — แอดมินเลือกทั้งกลุ่ม แล้วแก้รายคนได้
+  const [decideDefault, setDecideDefault] = useState("month");
+  const [overrides, setOverrides] = useState({});
   const stopRef = useRef(false);
   // ค่าเริ่มต้น: สคริปต์ใหม่สุด = เป้าหมาย · ตัวอื่นในแบรนด์เดียวกัน = ต้นทาง
   useEffect(() => {
@@ -946,9 +949,11 @@ function TvBackfillPanel({ scripts }) {
     setTarget(newest.pine_id);
     setSources(scripts.filter((s) => s.pine_id !== newest.pine_id && s.brand_id === newest.brand_id).map((s) => s.pine_id));
   }, [scripts]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { setPreview(null); setRun(null); }, [target, sources.join(","), mode]);
+  useEffect(() => { setPreview(null); setRun(null); setOverrides({}); }, [target, sources.join(","), mode]);
+  const choiceOf = (key) => overrides[key] || decideDefault;
+  const decideLifetime = (preview?.decide_list || []).filter((d) => choiceOf(d.key) === "lifetime").length;
   const nameOf = (pid) => scripts.find((s) => s.pine_id === pid)?.name || pid;
-  const body = (extra) => ({ action: "backfill_script", target_pine: target, source_pines: sources, mode, ...extra });
+  const body = (extra) => ({ action: "backfill_script", target_pine: target, source_pines: sources, mode, decide_default: decideDefault, decide_overrides: overrides, ...extra });
 
   async function check() {
     setErr(""); setPreview({ loading: true });
@@ -958,7 +963,11 @@ function TvBackfillPanel({ scripts }) {
   }
   async function start() {
     if (!preview?.pending) return;
-    if (!confirm(`ให้สิทธิ์ "${nameOf(target)}" กับลูกค้า ${preview.pending} คน?\n\nวันหมดอายุ = วันที่ไกลที่สุดของสคริปต์เดิมแต่ละคน (${preview.lifetime} คนได้ตลอดชีพ)`)) return;
+    const decideN = preview.decide || 0;
+    if (!confirm(`ให้สิทธิ์ "${nameOf(target)}" กับลูกค้า ${preview.pending} คน?\n\n`
+      + `• ตลอดชีพครบทุกตัว → ตลอดชีพ: ${preview.lifetime} คน\n`
+      + `• ตลอดชีพแค่บางตัว → ตลอดชีพ ${decideLifetime} คน · 1 เดือน ${decideN - decideLifetime} คน\n`
+      + `• ไม่มีตลอดชีพ → ตามวันหมดอายุที่ไกลที่สุด: ${preview.timed} คน`)) return;
     stopRef.current = false; setErr("");
     let after = null, granted = 0, failed = [];
     setRun({ running: true, granted, failed, total: preview.pending, remaining: preview.pending });
@@ -978,7 +987,7 @@ function TvBackfillPanel({ scripts }) {
     <div className="rounded-xl border border-slate-200 p-4 space-y-3">
       <div>
         <div className="font-semibold text-slate-800 text-sm">ให้สิทธิ์สคริปต์ใหม่ย้อนหลัง</div>
-        <p className="text-xs text-slate-500 mt-0.5">ลูกค้าที่มีสิทธิ์สคริปต์เดิม (ยังไม่หมดอายุ) จะได้สคริปต์ใหม่ด้วย · วันหมดอายุเท่ากับวันที่ไกลที่สุดของสคริปต์เดิม · ข้ามคนที่มีอยู่แล้ว</p>
+        <p className="text-xs text-slate-500 mt-0.5">ลูกค้าที่มีสิทธิ์สคริปต์เดิม (ยังไม่หมดอายุ) จะได้สคริปต์ใหม่ด้วย · ตลอดชีพครบทุกตัว = ตลอดชีพ · ตลอดชีพแค่บางตัว = เลือกเอง · ไม่มีตลอดชีพ = ตามวันหมดอายุที่ไกลที่สุด · ข้ามคนที่มีอยู่แล้ว</p>
       </div>
       <div className="grid sm:grid-cols-2 gap-3 text-sm">
         <div>
@@ -1014,12 +1023,52 @@ function TvBackfillPanel({ scripts }) {
           {preview && !preview.loading && (
             <>
               <span className="text-xs text-slate-600">
-                เข้าเงื่อนไข {preview.candidates} คน · มีอยู่แล้ว {preview.already} · <b className="text-slate-800">ต้องให้เพิ่ม {preview.pending} คน</b> (ตลอดชีพ {preview.lifetime})
+                เข้าเงื่อนไข {preview.candidates} คน · มีอยู่แล้ว {preview.already} · <b className="text-slate-800">ต้องให้เพิ่ม {preview.pending} คน</b>
               </span>
               <button onClick={start} disabled={!preview.pending} className="rounded-lg bg-brand-600 text-white px-3 py-2 text-sm font-medium hover:bg-brand-700 disabled:opacity-50">
                 2. ให้สิทธิ์ {preview.pending} คน
               </button>
             </>
+          )}
+        </div>
+      )}
+      {!run && preview && !preview.loading && preview.pending > 0 && (
+        <div className="space-y-2 text-xs">
+          <div className="grid sm:grid-cols-3 gap-2">
+            <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2"><b className="text-emerald-700">{preview.lifetime} คน</b> ตลอดชีพครบทุกตัว → <b>ตลอดชีพ</b></div>
+            <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2"><b className="text-amber-700">{preview.decide} คน</b> ตลอดชีพแค่บางตัว → <b>เลือกด้านล่าง</b></div>
+            <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2"><b className="text-slate-700">{preview.timed} คน</b> ไม่มีตลอดชีพ → <b>ตามวันหมดอายุที่ไกลที่สุด</b></div>
+          </div>
+          {preview.decide > 0 && (
+            <div className="rounded-lg border border-amber-200 p-3 space-y-2">
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="font-medium text-slate-700">ลูกค้าที่ตลอดชีพแค่บางตัว ({preview.decide} คน) ให้ทั้งกลุ่ม:</span>
+                <label className="flex items-center gap-1"><input type="radio" checked={decideDefault === "month"} onChange={() => setDecideDefault("month")} /> 1 เดือน (30 วัน)</label>
+                <label className="flex items-center gap-1"><input type="radio" checked={decideDefault === "lifetime"} onChange={() => setDecideDefault("lifetime")} /> ตลอดชีพ</label>
+                <span className="text-slate-500">→ ตลอดชีพ {decideLifetime} · 1 เดือน {preview.decide - decideLifetime}</span>
+              </div>
+              <details>
+                <summary className="cursor-pointer text-slate-600">เลือกรายคน (ถ้าบางคนต้องการต่างจากทั้งกลุ่ม)</summary>
+                <div className="mt-2 max-h-64 overflow-auto rounded border border-slate-200 divide-y divide-slate-100">
+                  {(preview.decide_list || []).map((d) => (
+                    <div key={d.key} className="flex items-center justify-between gap-2 px-2 py-1.5">
+                      <div className="min-w-0">
+                        <div className="font-medium text-slate-800 truncate">{d.username}{d.display_name ? <span className="font-normal text-slate-400"> · {d.display_name}</span> : null}</div>
+                        <div className="text-[11px] text-slate-500">
+                          ตลอดชีพ: {d.lifetime_pines.map(nameOf).join(", ")}
+                          {d.timed_pines.length ? ` · ${d.timed_pines.map(nameOf).join(", ")} ถึง ${d.max_expiration ? new Date(d.max_expiration).toLocaleDateString("th-TH") : "-"}` : " · ไม่มีตัวอื่น"}
+                        </div>
+                      </div>
+                      <select value={choiceOf(d.key)} onChange={(e) => setOverrides((o) => ({ ...o, [d.key]: e.target.value }))}
+                        className={`shrink-0 rounded border px-2 py-1 bg-white ${overrides[d.key] && overrides[d.key] !== decideDefault ? "border-amber-400" : "border-slate-300"}`}>
+                        <option value="month">1 เดือน</option>
+                        <option value="lifetime">ตลอดชีพ</option>
+                      </select>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            </div>
           )}
         </div>
       )}

@@ -1,37 +1,55 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildBackfill, backfillExpiration } from "../supabase/functions/_shared/tv-backfill.ts";
+import { buildBackfill, backfillExpiration, choiceFor } from "../supabase/functions/_shared/tv-backfill.ts";
 
 const NOW = Date.parse("2026-10-01T00:00:00Z");
-const STR = "PUB;str", ORCA = "PUB;orca", NEW = "PUB;new";
+const MONTH = "2026-10-31T00:00:00.000Z";
+const STR = "PUB;str", ORCA = "PUB;orca";
 const row = (username, pine_id, expiration, extra = {}) => ({ username, pine_id, expiration, updated_at: "2026-09-01T00:00:00Z", ...extra });
 
 const src = [
-  row("Alice", STR, "2026-11-01T00:00:00Z"), row("alice", ORCA, "2026-12-01T00:00:00Z"),   // ทั้งสองตัว ตัวพิมพ์ต่างกัน
-  row("bob", STR, null),                                                                    // ตลอดชีพ ตัวเดียว
+  row("Alice", STR, "2026-11-01T00:00:00Z"), row("alice", ORCA, "2026-12-01T00:00:00Z"),   // ไม่มีตลอดชีพ (ตัวพิมพ์ต่างกัน)
+  row("bob", STR, null),                                                                    // ตลอดชีพตัวเดียว ไม่มี Orca
   row("carol", ORCA, "2026-09-01T00:00:00Z"),                                               // หมดอายุแล้ว
-  row("dave", STR, "2026-10-20T00:00:00Z"), row("dave", ORCA, null),                        // มีตลอดชีพสักตัว
+  row("dave", STR, "2026-10-20T00:00:00Z"), row("dave", ORCA, null),                        // ตลอดชีพแค่ Orca
   row("erin", STR, "2026-10-15T00:00:00Z"),                                                 // มีตัวใหม่อยู่แล้ว
+  row("frank", STR, null), row("frank", ORCA, null),                                        // ตลอดชีพทั้งสองตัว
 ];
 const tgt = [{ username: "Erin", status: "active", expiration: null }];
+const build = (mode = "any") => buildBackfill(src, tgt, [STR, ORCA], mode, NOW);
+const byKey = (list) => Object.fromEntries(list.map((c) => [c.key, c]));
 
-test("โหมด 'อย่างน้อย 1 ตัว': ข้ามคนหมดอายุและคนที่มีตัวใหม่อยู่แล้ว", () => {
-  const { summary, pending } = buildBackfill(src, tgt, [STR, ORCA], "any", NOW);
-  assert.deepEqual(pending.map((c) => c.key), ["alice", "bob", "dave"]);
-  assert.deepEqual(summary, { candidates: 4, already: 1, pending: 3, lifetime: 2 });
+test("แบ่งกลุ่ม: ตลอดชีพครบ / ตลอดชีพบางตัว (ต้องตัดสินใจ) / ไม่มีตลอดชีพ · ข้ามหมดอายุและคนที่มีอยู่แล้ว", () => {
+  const { summary, pending } = build();
+  assert.deepEqual(pending.map((c) => [c.key, c.tier]), [["alice", "timed"], ["bob", "decide"], ["dave", "decide"], ["frank", "lifetime"]]);
+  assert.deepEqual(summary, { candidates: 5, already: 1, pending: 4, lifetime: 1, decide: 2, timed: 1 });
+});
+
+test("ตลอดชีพครบทั้ง One STR และ Orca = PO3 ตลอดชีพเสมอ ไม่สนตัวเลือก", () => {
+  const c = byKey(build().pending).frank;
+  assert.equal(backfillExpiration(c, "month", NOW), null);
+});
+
+test("ตลอดชีพแค่ตัวเดียว = ตามที่แอดมินเลือก (1 เดือน หรือ ตลอดชีพ)", () => {
+  const { bob, dave } = byKey(build().pending);
+  assert.equal(backfillExpiration(bob, "month", NOW), MONTH);
+  assert.equal(backfillExpiration(dave, "lifetime", NOW), null);
+});
+
+test("ไม่มีตลอดชีพ = วันหมดอายุที่ไกลที่สุดของตัวเดิม", () => {
+  assert.equal(backfillExpiration(byKey(build().pending).alice, "lifetime", NOW), "2026-12-01T00:00:00.000Z");
+});
+
+test("เลือกรายคนชนะค่าตั้งต้นของกลุ่ม", () => {
+  const { bob, dave } = byKey(build().pending);
+  const overrides = { dave: "lifetime" };
+  assert.equal(choiceFor(bob, "month", overrides), "month");
+  assert.equal(choiceFor(dave, "month", overrides), "lifetime");
+  assert.equal(choiceFor(bob, "month", { bob: "junk" }), "month");
 });
 
 test("โหมด 'ต้องมีครบทุกตัว'", () => {
-  const { pending } = buildBackfill(src, tgt, [STR, ORCA], "all", NOW);
-  assert.deepEqual(pending.map((c) => c.key), ["alice", "dave"]);
-});
-
-test("วันหมดอายุ = วันที่ไกลที่สุด · มีตลอดชีพสักตัว = ตลอดชีพ", () => {
-  const { pending } = buildBackfill(src, tgt, [STR, ORCA], "any", NOW);
-  const by = Object.fromEntries(pending.map((c) => [c.key, backfillExpiration(c)]));
-  assert.equal(by.alice, "2026-12-01T00:00:00.000Z");
-  assert.equal(by.bob, null);
-  assert.equal(by.dave, null);
+  assert.deepEqual(build("all").pending.map((c) => c.key), ["alice", "dave", "frank"]);
 });
 
 test("สิทธิ์ตัวใหม่ที่หมดอายุแล้ว = ยังต้องให้ใหม่", () => {

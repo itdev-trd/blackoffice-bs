@@ -20,7 +20,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { hasFullData, authorizeRequest } from "../_shared/permissions.ts";
 import { readJsonBody } from "../_shared/security.ts";
-import { buildBackfill, backfillExpiration } from "../_shared/tv-backfill.ts";
+import { buildBackfill, backfillExpiration, choiceFor } from "../_shared/tv-backfill.ts";
 import { tvValidate, tvListUsers, tvCheckAccess, tvGrant, tvRevoke, tvPing,
   tvExtend,
 } from "../_shared/tradingview-direct.ts";
@@ -786,7 +786,8 @@ Deno.serve(async (req) => {
     // ใช้ตอนแบรนด์เพิ่มอินดิเคเตอร์ตัวใหม่ แล้วอยากให้ลูกค้าเดิมได้ด้วยทุกคน
     //   body: { target_pine, source_pines[], mode: "any" | "all", dry_run?, after?, batch? }
     //   · any = มีสิทธิ์ตัวเดิมอย่างน้อย 1 ตัว · all = ต้องมีครบทุกตัวที่เลือก
-    //   · นับเฉพาะสิทธิ์ที่ยังไม่หมดอายุ · วันหมดอายุของตัวใหม่ = วันที่ไกลที่สุดของตัวเดิม (มีตลอดชีพสักตัว = ตลอดชีพ)
+    //   · นับเฉพาะสิทธิ์ที่ยังไม่หมดอายุ · วันหมดอายุตามกติกาใน _shared/tv-backfill.ts
+    //     (ตลอดชีพครบทุกตัว = ตลอดชีพ · ตลอดชีพบางตัว = แอดมินเลือก decide_default / decide_overrides · ไม่มี = วันไกลสุด)
     //   · ข้ามคนที่มีสิทธิ์ตัวใหม่อยู่แล้ว · ทำทีละชุด (after = username ล่าสุดที่ทำแล้ว) หน้าเว็บวนเรียกต่อเอง
     //   · dry_run = นับ/ดูรายชื่ออย่างเดียว ไม่ยิง TradingView
     if (action === "backfill_script") {
@@ -815,9 +816,16 @@ Deno.serve(async (req) => {
 
       if (body?.dry_run === true) {
         return json({ ok: true, dry_run: true, ...summary,
-          sample: pendingList.slice(0, 20).map((c) => ({ username: c.username, expiration: backfillExpiration(c), from: [...c.pines] })) });
+          // กลุ่มที่ต้องตัดสินใจ — ส่งรายชื่อครบให้หน้าเว็บเลือกรายคนได้
+          decide_list: pendingList.filter((c) => c.tier === "decide").map((c) => ({
+            key: c.key, username: c.username, display_name: c.profile?.display_name ?? null,
+            lifetime_pines: [...c.lifetimePines], timed_pines: [...c.pines].filter((p) => !c.lifetimePines.has(p)),
+            max_expiration: c.maxExp ? new Date(c.maxExp).toISOString() : null,
+          })) });
       }
 
+      const decideDefault = body?.decide_default === "lifetime" ? "lifetime" : "month";
+      const decideOverrides = (body?.decide_overrides && typeof body.decide_overrides === "object") ? body.decide_overrides as Record<string, unknown> : {};
       const after = String(body?.after || "").toLowerCase();
       const batchSize = Math.min(25, Math.max(1, Number(body?.batch) || 10));
       const batch = pending.filter(([k]) => k > after).slice(0, batchSize);
@@ -835,7 +843,7 @@ Deno.serve(async (req) => {
       let last = after;
       for (const [key, c] of batch) {
         if (Date.now() > deadline) break;
-        const expiration = backfillExpiration(c);
+        const expiration = backfillExpiration(c, choiceFor(c, decideDefault, decideOverrides), nowMs);
         try {
           const res = await callTv({ action: "grant", username: c.username, pine_id: target, expiration }, cookie, { actor: grantEmail, brand_id });
           if (!res?.ok) throw new Error(res?.error || "ให้สิทธิ์ไม่สำเร็จ");
