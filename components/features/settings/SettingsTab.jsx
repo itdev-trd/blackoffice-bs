@@ -941,6 +941,9 @@ function TvBackfillPanel({ scripts }) {
   // กลุ่ม "ตลอดชีพแค่บางตัว" — แอดมินเลือกทั้งกลุ่ม แล้วแก้รายคนได้
   const [decideDefault, setDecideDefault] = useState("month");
   const [overrides, setOverrides] = useState({});
+  const [confirming, setConfirming] = useState(false);
+  const [q, setQ] = useState("");
+  const [changedOnly, setChangedOnly] = useState(false);
   const stopRef = useRef(false);
   // ค่าเริ่มต้น: สคริปต์ใหม่สุด = เป้าหมาย · ตัวอื่นในแบรนด์เดียวกัน = ต้นทาง
   useEffect(() => {
@@ -949,7 +952,7 @@ function TvBackfillPanel({ scripts }) {
     setTarget(newest.pine_id);
     setSources(scripts.filter((s) => s.pine_id !== newest.pine_id && s.brand_id === newest.brand_id).map((s) => s.pine_id));
   }, [scripts]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { setPreview(null); setRun(null); setOverrides({}); }, [target, sources.join(","), mode]);
+  useEffect(() => { setPreview(null); setRun(null); setOverrides({}); setConfirming(false); }, [target, sources.join(","), mode]);
   const choiceOf = (key) => overrides[key] || decideDefault;
   const decideLifetime = (preview?.decide_list || []).filter((d) => choiceOf(d.key) === "lifetime").length;
   const nameOf = (pid) => scripts.find((s) => s.pine_id === pid)?.name || pid;
@@ -963,11 +966,7 @@ function TvBackfillPanel({ scripts }) {
   }
   async function start() {
     if (!preview?.pending) return;
-    const decideN = preview.decide || 0;
-    if (!confirm(`ให้สิทธิ์ "${nameOf(target)}" กับลูกค้า ${preview.pending} คน?\n\n`
-      + `• ตลอดชีพครบทุกตัว → ตลอดชีพ: ${preview.lifetime} คน\n`
-      + `• ตลอดชีพแค่บางตัว → ตลอดชีพ ${decideLifetime} คน · 1 เดือน ${decideN - decideLifetime} คน\n`
-      + `• ไม่มีตลอดชีพ → ตามวันหมดอายุที่ไกลที่สุด: ${preview.timed} คน`)) return;
+    setConfirming(false);
     stopRef.current = false; setErr("");
     let after = null, granted = 0, failed = [];
     setRun({ running: true, granted, failed, total: preview.pending, remaining: preview.pending });
@@ -982,117 +981,221 @@ function TvBackfillPanel({ scripts }) {
       after = data.next_after;
     }
   }
+
   if (scripts.length < 2) return null;
-  return (
-    <div className="rounded-xl border border-slate-200 p-4 space-y-3">
-      <div>
-        <div className="font-semibold text-slate-800 text-sm">ให้สิทธิ์สคริปต์ใหม่ย้อนหลัง</div>
-        <p className="text-xs text-slate-500 mt-0.5">ลูกค้าที่มีสิทธิ์สคริปต์เดิม (ยังไม่หมดอายุ) จะได้สคริปต์ใหม่ด้วย · ตลอดชีพครบทุกตัว = ตลอดชีพ · ตลอดชีพแค่บางตัว = เลือกเอง · ไม่มีตลอดชีพ = ตามวันหมดอายุที่ไกลที่สุด · ข้ามคนที่มีอยู่แล้ว</p>
+  const decideList = preview?.decide_list || [];
+  const decideMonth = (preview?.decide || 0) - decideLifetime;
+  const totalLifetime = (preview?.lifetime || 0) + decideLifetime;
+  const ql = q.trim().toLowerCase();
+  const shownDecide = decideList.filter((d) =>
+    (!changedOnly || (overrides[d.key] && overrides[d.key] !== decideDefault)) &&
+    (!ql || `${d.username} ${d.display_name || ""}`.toLowerCase().includes(ql)));
+  const changedCount = decideList.filter((d) => overrides[d.key] && overrides[d.key] !== decideDefault).length;
+  const pct = run?.total ? Math.round(((run.total - run.remaining) / run.total) * 100) : 0;
+  const thDate = (iso) => (iso ? new Date(iso).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" }) : "-");
+  const Step = ({ n, title, hint, done }) => (
+    <div className="flex items-start gap-3">
+      <div className={`w-7 h-7 shrink-0 rounded-full flex items-center justify-center text-xs font-bold ${done ? "bg-emerald-500 text-white" : "bg-slate-900 text-white"}`}>
+        {done ? <CheckCircle2 size={15} /> : n}
       </div>
-      <div className="grid sm:grid-cols-2 gap-3 text-sm">
-        <div>
-          <label className="text-xs text-slate-600">สคริปต์ใหม่ที่จะให้</label>
-          <select value={target} onChange={(e) => { setTarget(e.target.value); setSources((s) => s.filter((x) => x !== e.target.value)); }} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 bg-white">
-            {scripts.map((s) => <option key={s.pine_id} value={s.pine_id}>{s.name}</option>)}
-          </select>
+      <div className="min-w-0 pt-0.5">
+        <div className="text-sm font-semibold text-slate-800">{title}</div>
+        {hint && <div className="text-xs text-slate-500 mt-0.5">{hint}</div>}
+      </div>
+    </div>
+  );
+  const Seg = ({ value, onChange, options, size = "md" }) => (
+    <div className={`inline-flex rounded-lg bg-slate-100 p-0.5 ${size === "sm" ? "text-[11px]" : "text-xs"}`}>
+      {options.map(([v, label]) => (
+        <button key={v} type="button" onClick={() => onChange(v)}
+          className={`rounded-md font-medium transition ${size === "sm" ? "px-2 py-1" : "px-3 py-1.5"} ${value === v ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+  const Stat = ({ tone, n, title, rule }) => {
+    const t = { green: "border-emerald-200 bg-emerald-50/60 text-emerald-700", amber: "border-amber-200 bg-amber-50/60 text-amber-700", slate: "border-slate-200 bg-slate-50 text-slate-700" }[tone];
+    return (
+      <div className={`rounded-xl border p-3 ${t}`}>
+        <div className="text-2xl font-bold tabular-nums leading-none">{n}</div>
+        <div className="text-xs font-medium mt-1.5 text-slate-700">{title}</div>
+        <div className="text-[11px] text-slate-500 mt-0.5">→ {rule}</div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      {/* หัวการ์ด */}
+      <div className="flex items-start gap-3 px-5 py-4 border-b border-slate-100">
+        <div className="w-10 h-10 rounded-xl bg-brand-50 text-brand-700 flex items-center justify-center shrink-0"><Tv size={20} /></div>
+        <div className="min-w-0">
+          <h4 className="font-semibold text-slate-800">ให้สิทธิ์สคริปต์ใหม่ย้อนหลัง</h4>
+          <p className="text-xs text-slate-500 mt-0.5">ลูกค้าที่มีสิทธิ์สคริปต์เดิมและยังไม่หมดอายุ จะได้สคริปต์ใหม่ด้วย · ข้ามคนที่มีอยู่แล้ว · กดซ้ำได้ปลอดภัย</p>
         </div>
-        <div>
-          <label className="text-xs text-slate-600">ลูกค้าที่มีสิทธิ์สคริปต์เหล่านี้</label>
-          <div className="mt-1 rounded-lg border border-slate-200 divide-y divide-slate-100">
-            {scripts.filter((s) => s.pine_id !== target).map((s) => (
-              <label key={s.pine_id} className="flex items-center gap-2 px-3 py-1.5 cursor-pointer">
-                <input type="checkbox" checked={sources.includes(s.pine_id)} onChange={() => setSources((x) => x.includes(s.pine_id) ? x.filter((y) => y !== s.pine_id) : [...x, s.pine_id])} />
-                {s.name}
-              </label>
-            ))}
+      </div>
+
+      <div className="px-5 py-5 space-y-6">
+        {/* ขั้นที่ 1 */}
+        <section className="space-y-3">
+          <Step n={1} title="เลือกสคริปต์" done={!!preview && !preview.loading} />
+          <div className="ml-10 grid gap-3 lg:grid-cols-[1fr_auto_1.3fr] lg:items-end">
+            <div>
+              <label className="text-[11px] font-medium uppercase tracking-wide text-slate-400">สคริปต์ใหม่ที่จะให้</label>
+              <select value={target} onChange={(e) => { setTarget(e.target.value); setSources((s) => s.filter((x) => x !== e.target.value)); }}
+                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 focus:border-brand-500 focus:outline-none">
+                {scripts.map((s) => <option key={s.pine_id} value={s.pine_id}>{s.name}</option>)}
+              </select>
+            </div>
+            <div className="hidden lg:flex items-center justify-center pb-2.5 text-slate-300"><ChevronLeft size={18} /></div>
+            <div>
+              <label className="text-[11px] font-medium uppercase tracking-wide text-slate-400">ให้ลูกค้าที่มีสิทธิ์</label>
+              <div className="mt-1 flex flex-wrap items-center gap-2">
+                {scripts.filter((s) => s.pine_id !== target).map((s) => {
+                  const on = sources.includes(s.pine_id);
+                  return (
+                    <button key={s.pine_id} type="button" onClick={() => setSources((x) => on ? x.filter((y) => y !== s.pine_id) : [...x, s.pine_id])}
+                      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition ${on ? "border-brand-500 bg-brand-50 text-brand-700 font-medium" : "border-slate-300 text-slate-500 hover:border-slate-400"}`}>
+                      {on ? <CheckCircle2 size={14} /> : <Plus size={14} />} {s.name}
+                    </button>
+                  );
+                })}
+                {sources.length > 1 && <Seg value={mode} onChange={setMode} options={[["any", "มีอย่างน้อย 1 ตัว"], ["all", "ต้องมีครบทุกตัว"]]} />}
+              </div>
+            </div>
           </div>
-          {sources.length > 1 && (
-            <div className="mt-1.5 flex gap-3 text-xs text-slate-600">
-              <label className="flex items-center gap-1"><input type="radio" checked={mode === "any"} onChange={() => setMode("any")} /> มีอย่างน้อย 1 ตัว</label>
-              <label className="flex items-center gap-1"><input type="radio" checked={mode === "all"} onChange={() => setMode("all")} /> ต้องมีครบทุกตัว</label>
+          {!run && (
+            <div className="ml-10">
+              <button onClick={check} disabled={!target || !sources.length || preview?.loading}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                {preview?.loading ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />}
+                {preview && !preview.loading ? "ตรวจรายชื่อใหม่" : "ตรวจรายชื่อ"}
+              </button>
+              <span className="ml-3 text-xs text-slate-400">แค่นับจำนวน ยังไม่ให้สิทธิ์ใคร</span>
             </div>
           )}
-        </div>
-      </div>
-      {err && <div className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2">{err}</div>}
-      {!run && (
-        <div className="flex flex-wrap items-center gap-2">
-          <button onClick={check} disabled={!target || !sources.length || preview?.loading} className="rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50 disabled:opacity-50">
-            {preview?.loading ? "กำลังตรวจ..." : "1. ตรวจรายชื่อ"}
-          </button>
-          {preview && !preview.loading && (
-            <>
-              <span className="text-xs text-slate-600">
-                เข้าเงื่อนไข {preview.candidates} คน · มีอยู่แล้ว {preview.already} · <b className="text-slate-800">ต้องให้เพิ่ม {preview.pending} คน</b>
-              </span>
-              <button onClick={start} disabled={!preview.pending} className="rounded-lg bg-brand-600 text-white px-3 py-2 text-sm font-medium hover:bg-brand-700 disabled:opacity-50">
-                2. ให้สิทธิ์ {preview.pending} คน
-              </button>
-            </>
-          )}
-        </div>
-      )}
-      {!run && preview && !preview.loading && preview.pending > 0 && (
-        <div className="space-y-2 text-xs">
-          <div className="grid sm:grid-cols-3 gap-2">
-            <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3 py-2"><b className="text-emerald-700">{preview.lifetime} คน</b> ตลอดชีพครบทุกตัว → <b>ตลอดชีพ</b></div>
-            <div className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2"><b className="text-amber-700">{preview.decide} คน</b> ตลอดชีพแค่บางตัว → <b>เลือกด้านล่าง</b></div>
-            <div className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2"><b className="text-slate-700">{preview.timed} คน</b> ไม่มีตลอดชีพ → <b>ตามวันหมดอายุที่ไกลที่สุด</b></div>
-          </div>
-          {preview.decide > 0 && (
-            <div className="rounded-lg border border-amber-200 p-3 space-y-2">
-              <div className="flex flex-wrap items-center gap-3">
-                <span className="font-medium text-slate-700">ลูกค้าที่ตลอดชีพแค่บางตัว ({preview.decide} คน) ให้ทั้งกลุ่ม:</span>
-                <label className="flex items-center gap-1"><input type="radio" checked={decideDefault === "month"} onChange={() => setDecideDefault("month")} /> 1 เดือน (30 วัน)</label>
-                <label className="flex items-center gap-1"><input type="radio" checked={decideDefault === "lifetime"} onChange={() => setDecideDefault("lifetime")} /> ตลอดชีพ</label>
-                <span className="text-slate-500">→ ตลอดชีพ {decideLifetime} · 1 เดือน {preview.decide - decideLifetime}</span>
+        </section>
+
+        {err && <div className="ml-10 flex items-start gap-2 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700"><AlertTriangle size={15} className="mt-0.5 shrink-0" /> {err}</div>}
+
+        {/* ขั้นที่ 2 */}
+        {preview && !preview.loading && !run && (
+          <section className="space-y-3">
+            <Step n={2} title={<>ต้องให้สิทธิ์เพิ่ม <span className="text-brand-700">{preview.pending} คน</span></>}
+              hint={`เข้าเงื่อนไข ${preview.candidates} คน · มี ${nameOf(target)} อยู่แล้ว ${preview.already} คน`} done={!preview.decide} />
+            {preview.pending > 0 && (
+              <div className="ml-10 grid gap-2 sm:grid-cols-3">
+                <Stat tone="green" n={preview.lifetime} title="ตลอดชีพครบทุกตัว" rule="ตลอดชีพ" />
+                <Stat tone="amber" n={preview.decide} title="ตลอดชีพแค่บางตัว" rule="เลือกในขั้นที่ 3" />
+                <Stat tone="slate" n={preview.timed} title="ไม่มีตลอดชีพ" rule="ตามวันหมดอายุที่ไกลที่สุด" />
               </div>
-              <details>
-                <summary className="cursor-pointer text-slate-600">เลือกรายคน (ถ้าบางคนต้องการต่างจากทั้งกลุ่ม)</summary>
-                <div className="mt-2 max-h-64 overflow-auto rounded border border-slate-200 divide-y divide-slate-100">
-                  {(preview.decide_list || []).map((d) => (
-                    <div key={d.key} className="flex items-center justify-between gap-2 px-2 py-1.5">
-                      <div className="min-w-0">
-                        <div className="font-medium text-slate-800 truncate">{d.username}{d.display_name ? <span className="font-normal text-slate-400"> · {d.display_name}</span> : null}</div>
-                        <div className="text-[11px] text-slate-500">
-                          ตลอดชีพ: {d.lifetime_pines.map(nameOf).join(", ")}
-                          {d.timed_pines.length ? ` · ${d.timed_pines.map(nameOf).join(", ")} ถึง ${d.max_expiration ? new Date(d.max_expiration).toLocaleDateString("th-TH") : "-"}` : " · ไม่มีตัวอื่น"}
+            )}
+          </section>
+        )}
+
+        {/* ขั้นที่ 3 */}
+        {preview && !preview.loading && !run && preview.decide > 0 && (
+          <section className="space-y-3">
+            <Step n={3} title={`กลุ่มตลอดชีพแค่บางตัว ${preview.decide} คน ให้ ${nameOf(target)} แบบไหน?`} hint="เลือกทั้งกลุ่ม แล้วแก้รายคนได้ถ้าบางคนต้องการต่างออกไป · 1 เดือน = 30 วันนับจากวันที่กด" />
+            <div className="ml-10 rounded-xl border border-slate-200 overflow-hidden">
+              <div className="flex flex-wrap items-center gap-3 bg-slate-50 px-3 py-2.5 border-b border-slate-200">
+                <span className="text-xs font-medium text-slate-600">ทั้งกลุ่ม</span>
+                <Seg value={decideDefault} onChange={setDecideDefault} options={[["month", "1 เดือน"], ["lifetime", "ตลอดชีพ"]]} />
+                <span className="text-xs text-slate-500">ตลอดชีพ <b className="text-emerald-700">{decideLifetime}</b> · 1 เดือน <b className="text-slate-700">{decideMonth}</b></span>
+                <div className="ml-auto flex items-center gap-2">
+                  <div className="relative">
+                    <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหา username / ชื่อ"
+                      className="w-48 rounded-lg border border-slate-300 bg-white py-1.5 pl-7 pr-2 text-xs focus:border-brand-500 focus:outline-none" />
+                  </div>
+                  {changedCount > 0 && (
+                    <button type="button" onClick={() => setChangedOnly((v) => !v)}
+                      className={`rounded-lg border px-2 py-1.5 text-xs ${changedOnly ? "border-amber-400 bg-amber-50 text-amber-700" : "border-slate-300 text-slate-500"}`}>
+                      ต่างจากกลุ่ม {changedCount}
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="max-h-80 overflow-auto divide-y divide-slate-100">
+                {shownDecide.length === 0 && <div className="px-3 py-6 text-center text-xs text-slate-400">ไม่พบรายชื่อ</div>}
+                {shownDecide.map((d) => {
+                  const changed = overrides[d.key] && overrides[d.key] !== decideDefault;
+                  return (
+                    <div key={d.key} className={`flex items-center gap-3 px-3 py-2 ${changed ? "bg-amber-50/50" : ""}`}>
+                      <div className="w-8 h-8 shrink-0 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center text-xs font-semibold uppercase">{d.username.slice(0, 1)}</div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm text-slate-800 truncate"><span className="font-medium">{d.username}</span>{d.display_name ? <span className="text-slate-400"> · {d.display_name}</span> : null}</div>
+                        <div className="mt-0.5 flex flex-wrap gap-1">
+                          {d.lifetime_pines.map((p) => <span key={p} className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10.5px] text-emerald-700">{nameOf(p)} · ตลอดชีพ</span>)}
+                          {d.timed_pines.map((p) => <span key={p} className="rounded bg-slate-100 px-1.5 py-0.5 text-[10.5px] text-slate-600">{nameOf(p)} · ถึง {thDate(d.max_expiration)}</span>)}
                         </div>
                       </div>
-                      <select value={choiceOf(d.key)} onChange={(e) => setOverrides((o) => ({ ...o, [d.key]: e.target.value }))}
-                        className={`shrink-0 rounded border px-2 py-1 bg-white ${overrides[d.key] && overrides[d.key] !== decideDefault ? "border-amber-400" : "border-slate-300"}`}>
-                        <option value="month">1 เดือน</option>
-                        <option value="lifetime">ตลอดชีพ</option>
-                      </select>
+                      <Seg size="sm" value={choiceOf(d.key)} onChange={(v) => setOverrides((o) => ({ ...o, [d.key]: v }))} options={[["month", "1 เดือน"], ["lifetime", "ตลอดชีพ"]]} />
                     </div>
-                  ))}
-                </div>
-              </details>
+                  );
+                })}
+              </div>
             </div>
-          )}
-        </div>
-      )}
-      {run && (
-        <div className="space-y-2 text-sm">
-          <div className="h-2 rounded-full bg-slate-100 overflow-hidden">
-            <div className="h-full bg-brand-600 transition-all" style={{ width: `${run.total ? Math.round(((run.total - run.remaining) / run.total) * 100) : 100}%` }} />
-          </div>
-          <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
-            <span>สำเร็จ <b className="text-emerald-600">{run.granted}</b></span>
-            <span>ไม่สำเร็จ <b className="text-rose-600">{run.failed.length}</b></span>
-            <span>เหลือ {run.remaining}</span>
-            {run.running
-              ? <button onClick={() => { stopRef.current = true; }} className="rounded border border-slate-300 px-2 py-1">หยุดชั่วคราว</button>
-              : <button onClick={() => { setRun(null); check(); }} className="rounded border border-slate-300 px-2 py-1">{run.remaining || run.failed.length ? "ตรวจใหม่ / ทำต่อ" : "ตรวจอีกครั้ง"}</button>}
-          </div>
-          {!run.running && !run.remaining && !run.stopped && <div className="text-xs text-emerald-700">✓ เสร็จแล้ว</div>}
-          {run.failed.length > 0 && (
-            <details className="text-xs">
-              <summary className="cursor-pointer text-rose-600">ดูรายชื่อที่ไม่สำเร็จ ({run.failed.length}) — กด "ตรวจใหม่ / ทำต่อ" เพื่อลองใหม่</summary>
-              <ul className="mt-1 max-h-40 overflow-auto space-y-0.5">
-                {run.failed.map((f) => <li key={f.username}><b>{f.username}</b>: {f.error}</li>)}
-              </ul>
-            </details>
+          </section>
+        )}
+
+        {/* กำลังทำงาน / ผลลัพธ์ */}
+        {run && (
+          <section className="space-y-3">
+            <Step n={run.running ? "…" : 4} title={run.running ? `กำลังให้สิทธิ์ ${nameOf(target)}...` : run.remaining ? "หยุดไว้ชั่วคราว" : "ให้สิทธิ์เสร็จแล้ว"}
+              hint={run.running ? "เปิดหน้านี้ค้างไว้จนเสร็จ" : null} done={!run.running && !run.remaining} />
+            <div className="ml-10 rounded-xl border border-slate-200 p-4 space-y-3">
+              <div className="flex items-end justify-between gap-3">
+                <div className="text-3xl font-bold tabular-nums text-slate-900">{pct}%</div>
+                <div className="flex gap-4 text-xs text-right">
+                  <div><div className="text-lg font-semibold tabular-nums text-emerald-600">{run.granted}</div>สำเร็จ</div>
+                  <div><div className="text-lg font-semibold tabular-nums text-rose-600">{run.failed.length}</div>ไม่สำเร็จ</div>
+                  <div><div className="text-lg font-semibold tabular-nums text-slate-700">{run.remaining}</div>เหลือ</div>
+                </div>
+              </div>
+              <div className="h-2.5 rounded-full bg-slate-100 overflow-hidden">
+                <div className={`h-full transition-all duration-500 ${run.running ? "bg-brand-600" : run.remaining ? "bg-amber-500" : "bg-emerald-500"}`} style={{ width: `${pct}%` }} />
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {run.running
+                  ? <button onClick={() => { stopRef.current = true; }} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50">หยุดชั่วคราว</button>
+                  : <button onClick={() => { setRun(null); check(); }} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"><RefreshCw size={13} /> {run.remaining || run.failed.length ? "ตรวจใหม่ / ทำต่อ" : "ตรวจอีกครั้ง"}</button>}
+              </div>
+              {run.failed.length > 0 && (
+                <details className="rounded-lg bg-rose-50/60 px-3 py-2 text-xs">
+                  <summary className="cursor-pointer font-medium text-rose-700">ไม่สำเร็จ {run.failed.length} คน — กด "ตรวจใหม่ / ทำต่อ" เพื่อลองใหม่</summary>
+                  <ul className="mt-2 max-h-40 overflow-auto space-y-1">
+                    {run.failed.map((f) => <li key={f.username} className="text-slate-600"><b className="text-slate-800">{f.username}</b> — {f.error}</li>)}
+                  </ul>
+                </details>
+              )}
+            </div>
+          </section>
+        )}
+      </div>
+
+      {/* แถบยืนยันด้านล่าง */}
+      {preview && !preview.loading && !run && preview.pending > 0 && (
+        <div className="border-t border-slate-200 bg-slate-50 px-5 py-3">
+          {!confirming ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="text-xs text-slate-600">
+                จะให้ <b className="text-slate-800">{nameOf(target)}</b> {preview.pending} คน · ตลอดชีพ <b className="text-emerald-700">{totalLifetime}</b> · 1 เดือน <b>{decideMonth}</b> · ตามวันเดิม <b>{preview.timed}</b>
+              </div>
+              <button onClick={() => setConfirming(true)} className="ml-auto rounded-lg bg-brand-600 px-5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700">
+                ให้สิทธิ์ {preview.pending} คน
+              </button>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-3">
+              <AlertTriangle size={18} className="text-amber-500 shrink-0" />
+              <div className="text-sm text-slate-700">ยืนยันให้สิทธิ์ <b>{nameOf(target)}</b> กับลูกค้า <b>{preview.pending} คน</b> บน TradingView จริง?</div>
+              <div className="ml-auto flex gap-2">
+                <button onClick={() => setConfirming(false)} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm text-slate-600 hover:bg-slate-50">ยกเลิก</button>
+                <button onClick={start} className="rounded-lg bg-brand-600 px-5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700">ยืนยัน เริ่มให้สิทธิ์</button>
+              </div>
+            </div>
           )}
         </div>
       )}
