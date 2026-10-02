@@ -166,6 +166,10 @@ Deno.serve(async (req) => {
     if (payload.object !== "page" && payload.object !== "instagram") return new Response("ignored", { status: 200 });
 
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    // เพจที่ปิด "ซิงก์แชท" ไว้ (ตั้งค่า → เพจที่ซิงก์แชท) — ห้ามเก็บแชท/คอมเมนต์ทาง webhook ด้วย
+    // เดิมเช็คแค่ในงานซิงก์ดึงเอง webhook ยังเก็บต่อ ปิดซิงก์แล้วแชทก็ยังไหลเข้า (เจอกับเพจ Jr 1Shot ที่ใช้แค่วิเคราะห์แอด)
+    const { data: syncOffRows } = await admin.from("page_lead_config").select("page_id").eq("sync_enabled", false);
+    const syncOff = new Set((syncOffRows ?? []).map((r: any) => String(r.page_id)));
 
     // Instagram Messaging webhook ใช้ IG account id ที่ entry.id แต่ระบบกรองสิทธิ์ด้วย Facebook Page id
     // จึง map IG → Page ก่อนบันทึก และเก็บ source=instagram เพื่อแยกช่องทางใน Inbox
@@ -206,6 +210,7 @@ Deno.serve(async (req) => {
           continue;
         }
         const pageId = String(page.id);
+        if (syncOff.has(pageId)) continue;
         mappedPageIds.add(pageId);
         const pageName = page.name || page.instagram_business_account?.username || null;
 
@@ -431,6 +436,7 @@ Deno.serve(async (req) => {
 
     for (const entry of payload.entry || []) {
       const pageId = String(entry.id);
+      if (syncOff.has(pageId)) continue;
       for (const ev of entry.messaging || []) {
         const psid = ev.sender?.id ? String(ev.sender.id) : null;
         if (!psid) continue;

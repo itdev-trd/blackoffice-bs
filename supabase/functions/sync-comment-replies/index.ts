@@ -28,7 +28,10 @@ Deno.serve(async (req) => {
     const { data: stateRow } = await admin.from("settings").select("value").eq("key", SYNC_STATE_KEY).maybeSingle();
     const state = stateRow?.value || {};
     const lastByPage = state.last_by_page && typeof state.last_by_page === "object" ? state.last_by_page : {};
-    const duePageIds = pageIds.filter((id) => Date.now() - new Date(lastByPage[id] || 0).getTime() >= SYNC_COOLDOWN_MS);
+    // เพจที่ปิดซิงก์แชทไว้ = ไม่ดึงคอมเมนต์ด้วย (เช่นเพจที่เชื่อมไว้แค่วิเคราะห์แอด)
+    const { data: offRows } = await admin.from("page_lead_config").select("page_id").eq("sync_enabled", false);
+    const syncOff = new Set((offRows ?? []).map((r: any) => String(r.page_id)));
+    const duePageIds = pageIds.filter((id) => !syncOff.has(id) && Date.now() - new Date(lastByPage[id] || 0).getTime() >= SYNC_COOLDOWN_MS);
     if (!duePageIds.length) return json({ ok: true, checked: 0, reconciled: 0, skipped: "cooldown" });
     const checkedAt = new Date().toISOString();
     for (const id of duePageIds) lastByPage[id] = checkedAt;
