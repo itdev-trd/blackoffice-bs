@@ -8,7 +8,7 @@
 // token ถูกเก็บในตารางที่ฝั่ง client อ่านไม่ได้ (ดู migration app-secrets)
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { AD_LIBRARY_TOKEN_KEY, getMetaAppId, getMetaAppSecret, getMetaToken } from "../_shared/meta.ts";
+import { AD_LIBRARY_TOKEN_KEY, MESSAGING_PAGES_CACHE_KEY, getMetaAppId, getMetaAppSecret, getMetaToken } from "../_shared/meta.ts";
 import { authorizeRequest } from "../_shared/permissions.ts";
 import { readJsonBody } from "../_shared/security.ts";
 
@@ -144,6 +144,9 @@ Deno.serve(async (req) => {
       return r?.error ? { valid: false, error: r.error.error_user_msg || r.error.message } : { valid: true, name: r?.name ?? null, id: r?.id ?? appId };
     };
     const maskTail = (v: string) => (v.length > 4 ? `••••${v.slice(-4)}` : "••••");
+    // เปลี่ยน token = ต้องล้างแคช page token ที่แลกมาจาก token เดิม (แคชอยู่ 24 ชม. และใช้แบบ stale ตอน Meta ล่มด้วย)
+    // ไม่ล้าง = ระบบยังส่ง/อ่านด้วย page token ของแอปเดิมต่อไปอีกเป็นวัน ทั้งที่หน้าเว็บบอกว่าบันทึกแล้ว
+    const clearPagesCache = (key: string) => admin.from("app_secrets").delete().eq("key", key);
 
     if (action === "app_status") {
       const [appId, appSecret] = await Promise.all([getMetaAppId(), getMetaAppSecret()]);
@@ -213,12 +216,14 @@ Deno.serve(async (req) => {
       // ส่งค่าว่างมา = เลิกใช้ token แยก กลับไปใช้ token หลัก
       if (!tok) {
         await admin.from("app_secrets").delete().eq("key", "meta_messaging_token");
+        await clearPagesCache(MESSAGING_PAGES_CACHE_KEY);
         return new Response(JSON.stringify({ ok: true, cleared: true }), { headers: { ...corsHeaders, "content-type": "application/json" } });
       }
       const info = await inspectMessagingToken(tok);
       if (!info.valid) throw new Error(`token ใช้ไม่ได้: ${info.error || "ไม่ทราบสาเหตุ"}`);
       if (!info.pages?.length) throw new Error("token นี้ไม่เห็นเพจใดเลย (ต้องมีสิทธิ์ pages_show_list + pages_messaging และเป็นแอดมินเพจ)");
       await admin.from("app_secrets").upsert({ key: "meta_messaging_token", value: tok, updated_at: new Date().toISOString() });
+      await clearPagesCache(MESSAGING_PAGES_CACHE_KEY);
       return new Response(JSON.stringify({ ok: true, saved: true, ...info }), { headers: { ...corsHeaders, "content-type": "application/json" } });
     }
 
@@ -278,6 +283,7 @@ Deno.serve(async (req) => {
     if (!info.valid) throw new Error(`token ใช้ไม่ได้: ${info.error || "ไม่ทราบสาเหตุ"}`);
 
     await admin.from("app_secrets").upsert({ key: "meta_access_token", value: token, updated_at: new Date().toISOString() });
+    await clearPagesCache("meta_pages_cache");
 
     return new Response(JSON.stringify({ ok: true, saved: true, ...info }), { headers: { ...corsHeaders, "content-type": "application/json" } });
   } catch (err) {
