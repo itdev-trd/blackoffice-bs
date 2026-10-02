@@ -8,7 +8,7 @@
 // token ถูกเก็บในตารางที่ฝั่ง client อ่านไม่ได้ (ดู migration app-secrets)
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { AD_LIBRARY_TOKEN_KEY, MESSAGING_PAGES_CACHE_KEY, getMetaAppId, getMetaAppSecret, getMetaToken } from "../_shared/meta.ts";
+import { AD_LIBRARY_TOKEN_KEY, MESSAGING_PAGES_CACHE_KEY, WEBHOOK_VERIFY_TOKEN_KEY, getMessagingAppCreds, getMetaAppId, getMetaAppSecret, getMetaToken } from "../_shared/meta.ts";
 import { authorizeRequest } from "../_shared/permissions.ts";
 import { readJsonBody } from "../_shared/security.ts";
 
@@ -129,7 +129,7 @@ Deno.serve(async (req) => {
     //  เพราะได้ผลลัพธ์ของ action save ที่ไม่มีฟิลด์เหล่านั้น)
     // ห้ามเดา action ที่ไม่รู้จักเป็น "save": คำขอที่อ่าน body ไม่ได้ (เช่นหน้าตั้งค่ายิงสถานะพร้อมกัน 4 ตัว
     // แล้วมีตัวหนึ่งมาไม่ครบ) จะไปตกที่ save แล้วล้มเป็น 500 "กรุณาวาง token" — เจอจริงใน log
-    const ACTIONS = ["save", "status", "app_status", "save_app", "messaging_status", "save_messaging", "ad_library_status", "save_ad_library"];
+    const ACTIONS = ["save", "status", "app_status", "save_app", "messaging_status", "save_messaging", "ad_library_status", "save_ad_library", "messaging_app_status", "save_messaging_app"];
     const action = String(body?.action || "");
     if (!ACTIONS.includes(action)) {
       return new Response(JSON.stringify({ ok: false, error: `ไม่รู้จัก action "${action}"` }), { status: 400, headers: { ...corsHeaders, "content-type": "application/json" } });
@@ -199,6 +199,38 @@ Deno.serve(async (req) => {
       ]);
       return new Response(JSON.stringify({ ok: true, saved: true, app_id: appId, app_name: checked.valid ? checked.name : null, unverified: !checked.valid, error: checked.valid ? null : checked.error }),
         { headers: { ...corsHeaders, "content-type": "application/json" } });
+    }
+
+    // ---- แอป Meta แยกสำหรับตอบแชท: App ID/Secret + ข้อมูลที่ต้องกรอกในหน้า Webhooks ของแอปนั้น ----
+    // verify token สร้างให้ครั้งเดียวแล้วเก็บใน DB (meta-webhook รับทั้งตัวนี้และ META_VERIFY_TOKEN เดิม)
+    if (action === "messaging_app_status") {
+      const { appId, appSecret } = await getMessagingAppCreds();
+      const { data: vt } = await admin.from("app_secrets").select("value").eq("key", WEBHOOK_VERIFY_TOKEN_KEY).maybeSingle();
+      let verifyToken = String(vt?.value || "");
+      if (!verifyToken) {
+        verifyToken = "bs_" + Array.from(crypto.getRandomValues(new Uint8Array(18)), (b) => b.toString(16).padStart(2, "0")).join("");
+        await admin.from("app_secrets").upsert({ key: WEBHOOK_VERIFY_TOKEN_KEY, value: verifyToken, updated_at: new Date().toISOString() });
+      }
+      const checked = appId && appSecret ? await appInfo(appId, appSecret) : null;
+      return new Response(JSON.stringify({
+        ok: true, app_id: appId || null, has_app_secret: !!appSecret, app_secret_masked: appSecret ? maskTail(appSecret) : null,
+        valid: checked?.valid ?? null, app_name: checked?.valid ? checked.name : null, error: checked && !checked.valid ? checked.error : null,
+        callback_url: `${Deno.env.get("SUPABASE_URL")}/functions/v1/meta-webhook`, verify_token: verifyToken,
+      }), { headers: { ...corsHeaders, "content-type": "application/json" } });
+    }
+    if (action === "save_messaging_app") {
+      const appId = String(body.app_id || "").trim();
+      const appSecret = String(body.app_secret || "").trim();
+      if (!/^\d{10,20}$/.test(appId)) throw new Error("App ID ต้องเป็นตัวเลขล้วน");
+      if (!/^[A-Za-z0-9]{16,64}$/.test(appSecret)) throw new Error("App Secret ต้องเป็นตัวอักษร/ตัวเลขล้วน (คัดลอกจาก App settings → Basic)");
+      const checked = await appInfo(appId, appSecret);
+      if (!checked.valid) throw new Error(`App Secret ใช้กับ App ID ${appId} ไม่ได้: ${checked.error}`);
+      const nowIso = new Date().toISOString();
+      await admin.from("app_secrets").upsert([
+        { key: "meta_messaging_app_id", value: appId, updated_at: nowIso },
+        { key: "meta_messaging_app_secret", value: appSecret, updated_at: nowIso },
+      ]);
+      return new Response(JSON.stringify({ ok: true, saved: true, app_id: appId, app_name: checked.name }), { headers: { ...corsHeaders, "content-type": "application/json" } });
     }
 
     // ---- token สำหรับตอบแชทโดยเฉพาะ (แยกจาก token หลักที่ใช้งานโฆษณา) ----

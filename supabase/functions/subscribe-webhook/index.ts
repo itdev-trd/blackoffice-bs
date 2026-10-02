@@ -3,7 +3,7 @@
 //   action "subscribe" (ค่าเริ่มต้น) → POST /{page_id}/subscribed_apps ทุกเพจ
 //   action "status"                  → GET  /{page_id}/subscribed_apps ดูว่าผูกแล้วยัง
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { getMetaAppId, getMetaAppSecret, getMetaToken } from "../_shared/meta.ts";
+import { MESSAGING_PAGES_CACHE_KEY, getMessagingAppCreds, getMetaAppId, getMetaAppSecret, getMetaMessagingContext, getMetaToken, getWebhookVerifyTokens } from "../_shared/meta.ts";
 import { getMetaPages } from "../_shared/meta-pages.ts";
 import { authorizeRequest } from "../_shared/permissions.ts";
 import { getOrRefreshCommentAdMap, getSelectedCommentPageIds } from "../_shared/comment-realtime.ts";
@@ -117,6 +117,7 @@ Deno.serve(async (req) => {
       : body?.action === "sync_comments" ? "sync_comments"
       : body?.action === "discover" ? "discover"
       : body?.action === "connect_page" ? "connect_page"
+      : body?.action === "connect_messaging_app" ? "connect_messaging_app"
       : "subscribe";
     // allowService = เรียกจาก cron/สคริปต์หลังบ้านได้ด้วย (ผูก webhook ซ้ำหลังเปลี่ยน Meta app / ตรวจสุขภาพ)
     const auth = await authorizeRequest(req, action === "sync_comments"
@@ -144,6 +145,47 @@ Deno.serve(async (req) => {
     const token = await getMetaToken();
     if (!token) throw new Error("ยังไม่ได้ตั้งค่า Meta access token");
     const base = `https://graph.facebook.com/${GRAPH_VERSION}`;
+
+    // ---- connect_messaging_app: ผูก webhook + เพจทั้งหมดเข้ากับ "แอปตอบแชทแยก" ----
+    // 1) ระดับแอป: ตั้ง callback ของ object page (+instagram) ด้วย app token ของแอปตอบแชท
+    // 2) ระดับเพจ: subscribed_apps ด้วย page token ที่แลกจาก token ตอบแชท (page token บอก Meta เองว่าเป็นแอปไหน)
+    // ไม่ยุ่งกับแอปหลัก — คอมเมนต์ (feed) ยังรับผ่านแอปหลักเหมือนเดิม ข้อความที่มาซ้ำสองแอปถูกตัดด้วย mid อยู่แล้ว
+    if (action === "connect_messaging_app") {
+      const { appId, appSecret } = await getMessagingAppCreds();
+      if (!appId || !appSecret) return json({ ok: false, error: "ยังไม่ได้ใส่ App ID / App Secret ของแอปตอบแชท" });
+      const msg = await getMetaMessagingContext();
+      if (!msg.dedicated) return json({ ok: false, error: "ยังไม่ได้ตั้ง token ตอบแชท — สร้าง token จากแอปนี้แล้ววางในช่อง token ตอบแชทก่อน" });
+      const dbg = await fetchJson(`${base}/debug_token?input_token=${encodeURIComponent(msg.token)}&access_token=${encodeURIComponent(`${appId}|${appSecret}`)}`, undefined, admin);
+      const tokenApp = dbg?.data?.app_id ? String(dbg.data.app_id) : "";
+      if (tokenApp && tokenApp !== appId) {
+        return json({ ok: false, error: `token ตอบแชทที่ตั้งไว้ออกโดยแอป ${tokenApp} ไม่ใช่แอป ${appId} — สร้าง token ใหม่จากแอปนี้ก่อน` });
+      }
+      const verifyToken = (await getWebhookVerifyTokens()).slice(-1)[0] || "";
+      if (!verifyToken) return json({ ok: false, error: "ยังไม่มี verify token — เปิดหน้าตั้งค่าแอปตอบแชทใหม่อีกครั้ง" });
+      const appToken = `${appId}|${appSecret}`;
+      const callbackUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/meta-webhook`;
+      const sub = async (object: string, fields: string) => {
+        const form = new URLSearchParams({ object, callback_url: callbackUrl, fields, verify_token: verifyToken, include_values: "true" });
+        const r = await fetchJson(`${base}/${appId}/subscriptions?access_token=${encodeURIComponent(appToken)}`, {
+          method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: form.toString(),
+        }, admin, `subscribe_messaging_app_${object}`);
+        return r?.error ? { ok: false, error: r.error.error_user_msg || r.error.message } : { ok: r?.success === true };
+      };
+      const appPage = await sub("page", BASE_FIELDS);
+      const appIg = await sub("instagram", IG_MESSAGE_FIELDS);
+      const pagesData = await getMetaPages(base, msg.token, { forceRefresh: true, cacheKey: MESSAGING_PAGES_CACHE_KEY });
+      const visible = (pagesData?.data ?? []).filter((p: any) => p.access_token);
+      const { data: cfg } = await admin.from("page_lead_config").select("page_id, page_name, sync_enabled");
+      const pageResults: any[] = [];
+      for (const c of cfg ?? []) {
+        if (c.sync_enabled === false) { pageResults.push({ page_id: c.page_id, page: c.page_name, skipped: "ปิดซิงก์แชทอยู่" }); continue; }
+        const p = visible.find((x: any) => String(x.id) === String(c.page_id));
+        if (!p) { pageResults.push({ page_id: c.page_id, page: c.page_name, ok: false, error: "token ตอบแชทมองไม่เห็นเพจนี้ — มอบสิทธิ์เพจให้ผู้ใช้/System User ที่ออก token" }); continue; }
+        const r = await fetchJson(`${base}/${p.id}/subscribed_apps?subscribed_fields=${encodeURIComponent(BASE_FIELDS)}&access_token=${p.access_token}`, { method: "POST" }, admin, "subscribe_messaging_app_page");
+        pageResults.push({ page_id: p.id, page: p.name, ok: r?.success === true, error: r?.error?.error_user_msg || r?.error?.message || null });
+      }
+      return json({ ok: appPage.ok && pageResults.every((r) => r.ok !== false), action, app_id: appId, app_webhook: { page: appPage, instagram: appIg }, pages: pageResults });
+    }
 
     // ---- discover: "เพจไหนที่ token นี้มองเห็นบ้าง" ใช้แสดงในปุ่ม "เพิ่มการเชื่อมต่อเพจ" ----
     // ต้อง forceRefresh เสมอเพราะแอดมินกดปุ่มนี้ก็ต่อเมื่อคาดว่ามีเพจใหม่ (เพิ่งมอบสิทธิ์ในฝั่ง Meta มา)

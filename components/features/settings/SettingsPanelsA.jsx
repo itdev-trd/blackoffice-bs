@@ -529,6 +529,111 @@ export function MetaTokenPanel() {
   );
 }
 
+// แอป Meta แยกสำหรับตอบแชท — ไม่พึ่ง Besight Backend (แอปหลักยังใช้กับงานโฆษณา/คอมเมนต์ตามเดิม)
+// ระบบรับ webhook ได้ทั้งสองแอป (ตรวจลายเซ็นด้วย App Secret ของแต่ละแอป) และส่งข้อความด้วย token ของแอปนี้
+export function MessagingAppPanel() {
+  const [st, setSt] = useState(null);
+  const [appId, setAppId] = useState("");
+  const [appSecret, setAppSecret] = useState("");
+  const [busy, setBusy] = useState("");
+  const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
+  const [copied, setCopied] = useState("");
+  const [connect, setConnect] = useState(null);
+  async function load() {
+    const { data } = await supabase.functions.invoke("set-meta-token", { body: { action: "messaging_app_status" } });
+    if (data?.ok) { setSt(data); if (data.app_id) setAppId(data.app_id); }
+  }
+  useEffect(() => { load(); }, []);
+  async function save() {
+    setBusy("save"); setErr(""); setMsg("");
+    const { data, error } = await supabase.functions.invoke("set-meta-token", { body: { action: "save_messaging_app", app_id: appId.trim(), app_secret: appSecret.trim() } });
+    setBusy("");
+    if (error || !data?.ok) { setErr(data?.error || (error ? await readFunctionErrorMessage(error) : "") || "บันทึกไม่สำเร็จ"); return; }
+    setAppSecret(""); setMsg(`บันทึกแล้ว · แอป: ${data.app_name || data.app_id}`); load();
+  }
+  async function bind() {
+    setBusy("bind"); setErr(""); setConnect(null);
+    const { data, error } = await supabase.functions.invoke("subscribe-webhook", { body: { action: "connect_messaging_app" } });
+    setBusy("");
+    if (error || !data) { setErr(error ? await readFunctionErrorMessage(error) : "ผูกไม่สำเร็จ"); return; }
+    if (data.ok === false && !data.pages) { setErr(data.error || "ผูกไม่สำเร็จ"); return; }
+    setConnect(data);
+  }
+  async function copy(key, text) {
+    try { await navigator.clipboard.writeText(text); setCopied(key); setTimeout(() => setCopied(""), 1500); } catch { /* ไม่มีสิทธิ์ clipboard */ }
+  }
+  // เรียกเป็นฟังก์ชัน ไม่ใช่ <Step> — คอมโพเนนต์ที่ประกาศใน render ทำให้ช่องพิมพ์ด้านในหลุดโฟกัสทุกครั้งที่พิมพ์
+  const step = (n, done, title, children) => (
+    <div className="flex gap-3">
+      <div className={`w-6 h-6 shrink-0 rounded-full flex items-center justify-center text-[11px] font-bold ${done ? "bg-emerald-500 text-white" : "bg-slate-200 text-slate-600"}`}>{done ? <CheckCircle2 size={13} /> : n}</div>
+      <div className="min-w-0 flex-1 space-y-2 pb-1"><div className="text-sm font-medium text-slate-800">{title}</div>{children}</div>
+    </div>
+  );
+  const copyRow = (k, label, value) => (
+    <div>
+      <div className="text-[11px] text-slate-500">{label}</div>
+      <div className="mt-0.5 flex items-center gap-2">
+        <code className="flex-1 min-w-0 truncate rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs">{value || "…"}</code>
+        <button type="button" onClick={() => copy(k, value)} disabled={!value} className="shrink-0 inline-flex items-center gap-1 rounded-md border border-slate-300 px-2 py-1.5 text-xs hover:bg-slate-50 disabled:opacity-50">
+          <Copy size={12} /> {copied === k ? "คัดลอกแล้ว" : "คัดลอก"}
+        </button>
+      </div>
+    </div>
+  );
+  const saved = !!(st?.app_id && st?.has_app_secret && st?.valid);
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
+      <div>
+        <h3 className="font-semibold text-slate-800">แอปแยกสำหรับตอบแชท</h3>
+        <p className="text-xs text-slate-500 mt-0.5">ใช้แอป Meta อีกตัวรับและตอบแชทโดยไม่พึ่ง Besight Backend · แอปหลักยังใช้กับโฆษณาและคอมเมนต์ตามเดิม · ตอบลูกค้าจริงได้เมื่อแอปนี้ผ่าน App Review (pages_messaging แบบ Advanced Access)</p>
+      </div>
+      {err && <div className="text-sm text-rose-600 bg-rose-50 rounded-lg px-3 py-2">{err}</div>}
+      {msg && <div className="text-sm text-emerald-700 bg-emerald-50 rounded-lg px-3 py-2">{msg}</div>}
+      <div className="space-y-4">
+        {step(1, saved, "ใส่ App ID และ App Secret ของแอปใหม่ (App settings → Basic)", <>
+          {saved && <div className="text-xs text-emerald-700">ใช้งานได้ · {st.app_name || st.app_id} · Secret {st.app_secret_masked}</div>}
+          {st?.error && <div className="text-xs text-rose-600">{st.error}</div>}
+          <div className="grid gap-2 sm:grid-cols-[1fr_1.4fr_auto]">
+            <input value={appId} onChange={(e) => setAppId(e.target.value)} placeholder="App ID เช่น 1402467742069528" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+            <input value={appSecret} onChange={(e) => setAppSecret(e.target.value)} type="password" autoComplete="off" placeholder={saved ? "วาง App Secret ใหม่ถ้าจะเปลี่ยน" : "App Secret"} className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+            <button onClick={save} disabled={!!busy || !appId.trim() || !appSecret.trim()} className="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">
+              {busy === "save" ? <Loader2 size={14} className="animate-spin" /> : "บันทึก"}
+            </button>
+          </div>
+        </>)}
+        {step(2, false, <>ใส่ 2 ค่านี้ในแอปใหม่ที่ Messenger API settings → <b>Configure webhooks</b> แล้วกด "Verify and save"</>, <>
+          {copyRow("cb", "Callback URL", st?.callback_url)}
+          {copyRow("vt", "Verify token", st?.verify_token)}
+        </>)}
+        {step(3, false, <>สร้าง token: Business Settings → ผู้ใช้ระบบ → สร้าง token โดย<b>เลือกแอปใหม่</b> แล้ววางในช่อง "token ตอบแชท" ด้านล่าง</>, <>
+          <div className="text-[11px] text-slate-500">สิทธิ์ที่ต้องติ๊ก: pages_messaging, pages_show_list, pages_manage_metadata, pages_read_engagement, business_management (ตอบ IG ด้วย: instagram_basic, instagram_manage_messages) · ผู้ใช้ระบบต้องได้รับมอบสิทธิ์เพจทุกเพจที่จะตอบ</div>
+        </>)}
+        {step(4, !!connect?.ok, "ผูกเพจทั้งหมดเข้ากับแอปใหม่", <>
+          <button onClick={bind} disabled={!!busy || !saved} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50 disabled:opacity-50">
+            {busy === "bind" ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} ผูกเพจกับแอปนี้
+          </button>
+          {connect && (
+            <div className="rounded-lg border border-slate-200 divide-y divide-slate-100 text-xs">
+              <div className="px-3 py-2 flex items-center gap-2">
+                {connect.app_webhook?.page?.ok ? <CheckCircle2 size={14} className="text-emerald-600" /> : <XCircle size={14} className="text-rose-600" />}
+                Webhook ระดับแอป {connect.app_webhook?.page?.ok ? "ตั้งแล้ว" : `ไม่สำเร็จ: ${connect.app_webhook?.page?.error || connect.error || ""}`}
+              </div>
+              {(connect.pages || []).map((p) => (
+                <div key={p.page_id} className="px-3 py-2 flex items-center gap-2">
+                  {p.skipped ? <AlertTriangle size={14} className="text-slate-400" /> : p.ok ? <CheckCircle2 size={14} className="text-emerald-600" /> : <XCircle size={14} className="text-rose-600" />}
+                  <span className="font-medium text-slate-700">{p.page || p.page_id}</span>
+                  <span className="text-slate-500">{p.skipped || (p.ok ? "ผูกแล้ว" : p.error)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </>)}
+      </div>
+    </div>
+  );
+}
+
 // token แยกสำหรับ "ตอบแชท" — ทางออกเดียวที่ตอบลูกค้าจริงได้โดยไม่ต้องรอ App Review
 //
 // Meta ตรวจระดับสิทธิ์ pages_messaging ที่ "แอปที่ออก token" ไม่ใช่ที่ตัวโค้ดหรือชนิด token

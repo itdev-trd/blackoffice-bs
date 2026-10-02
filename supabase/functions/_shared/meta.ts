@@ -151,3 +151,25 @@ export async function getMetaAppId(): Promise<string> {
   cachedAppIdAt = now;
   return cachedAppId;
 }
+
+// ---- แอป Meta แยกสำหรับ "ตอบแชท" (ไม่พึ่ง Besight Backend) ----
+// เก็บใน app_secrets: meta_messaging_app_id / meta_messaging_app_secret · ไม่มี env fallback
+// ใช้ 2 ที่: (1) ตรวจลายเซ็น webhook ที่แอปนี้ส่งมา (2) ผูก webhook/เพจเข้ากับแอปนี้
+export async function getMessagingAppCreds(): Promise<{ appId: string; appSecret: string }> {
+  const [appId, appSecret] = await Promise.all([readSecretRow("meta_messaging_app_id"), readSecretRow("meta_messaging_app_secret")]);
+  return { appId: appId.trim(), appSecret: appSecret.trim() };
+}
+
+// App Secret ทุกตัวที่ webhook อาจเซ็นมา — แอปหลัก + แอปตอบแชท (ถ้าตั้งไว้)
+// Meta เซ็น x-hub-signature-256 ด้วย secret ของแอปที่ส่ง event นั้น เพจเดียวผูกได้หลายแอป
+export async function getWebhookAppSecrets(): Promise<string[]> {
+  const [main, msg] = await Promise.all([getMetaAppSecret(), getMessagingAppCreds()]);
+  return [...new Set([main, msg.appSecret].filter(Boolean))];
+}
+
+// verify token ตอนกด "ตรวจสอบยืนยัน" ใน Meta — รับทั้งของเดิมใน env และตัวที่ระบบสร้างเก็บไว้ใน DB
+export const WEBHOOK_VERIFY_TOKEN_KEY = "meta_webhook_verify_token";
+export async function getWebhookVerifyTokens(): Promise<string[]> {
+  const fromDb = await readSecretRow(WEBHOOK_VERIFY_TOKEN_KEY);
+  return [...new Set([Deno.env.get("META_VERIFY_TOKEN") || "", fromDb.trim()].filter(Boolean))];
+}

@@ -6,7 +6,7 @@
 // ตั้ง secret:  META_VERIFY_TOKEN (ตั้งเอง, ใส่ให้ตรงกับ Meta), META_APP_SECRET (ตรวจลายเซ็น)
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { getMetaAppSecret, getMetaToken } from "../_shared/meta.ts";
+import { getMetaToken, getWebhookAppSecrets, getWebhookVerifyTokens } from "../_shared/meta.ts";
 import { getMetaPages } from "../_shared/meta-pages.ts";
 import { getSelectedCommentPageIds, resolveCommentAds } from "../_shared/comment-realtime.ts";
 import { MAX_TRANSCRIPT_ITEMS } from "../_shared/transcript-cap.ts";
@@ -127,8 +127,9 @@ Deno.serve(async (req) => {
     const mode = u.searchParams.get("hub.mode");
     const tok = u.searchParams.get("hub.verify_token");
     const challenge = u.searchParams.get("hub.challenge") || "";
-    const verifyToken = Deno.env.get("META_VERIFY_TOKEN") || "";
-    if (mode === "subscribe" && verifyToken && tok === verifyToken) return new Response(challenge, { status: 200 });
+    // แอปหลักใช้ META_VERIFY_TOKEN ใน env · แอปตอบแชทแยกใช้ตัวที่ระบบสร้างเก็บใน DB — รับได้ทั้งคู่
+    const verifyTokens = await getWebhookVerifyTokens();
+    if (mode === "subscribe" && tok && verifyTokens.includes(tok)) return new Response(challenge, { status: 200 });
     return new Response("forbidden", { status: 403 });
   }
   if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
@@ -136,13 +137,15 @@ Deno.serve(async (req) => {
   try {
     const raw = await req.text();
     // ตั้งจากหน้าเว็บได้ (app_secrets.meta_app_secret) ไม่งั้น fallback env — ย้าย Meta app ได้โดยไม่ต้องแก้ env
-    const secret = await getMetaAppSecret();
-    if (!secret) {
+    // ลองทุก App Secret ที่ตั้งไว้ (แอปหลัก + แอปตอบแชทแยก) — ผ่านตัวใดตัวหนึ่ง = มาจากแอปของเราจริง
+    const secrets = await getWebhookAppSecrets();
+    if (!secrets.length) {
       console.error("META_APP_SECRET is required for webhook signature verification");
       return new Response("webhook not configured", { status: 503 });
     }
     const sigHeader = req.headers.get("x-hub-signature-256");
-    const ok = await verifySig(raw, sigHeader, secret);
+    let ok = false;
+    for (const sec of secrets) { if (await verifySig(raw, sigHeader, sec)) { ok = true; break; } }
     if (!ok) {
       // ลายเซ็นไม่ตรง = META_APP_SECRET ในโปรเจกต์นี้ไม่ใช่ของแอปที่ Meta ส่งมา (เช่นเพิ่งย้ายไปใช้แอปอื่น)
       // อาการจะเหมือน "webhook ไม่เข้า" เป๊ะ ๆ ทั้งที่ Meta ส่งมาแล้ว จึงต้องบันทึกไว้ให้ตรวจได้

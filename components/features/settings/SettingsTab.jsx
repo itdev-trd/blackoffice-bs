@@ -45,6 +45,7 @@ import {
   CiStyleUploader,
   MetaTokenPanel,
   MetaMessagingTokenPanel,
+  MessagingAppPanel,
   MetaAdLibraryTokenPanel,
   MetaAppPanel,
   LineOAPanel,
@@ -1470,6 +1471,7 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
       {section === "knowledge" && <KnowledgeBasePanel allowedPages={allowedPages} />}
       {section === "ai_prompts" && <AiPromptsPanel />}
       {section === "meta" && <MetaTokenPanel />}
+      {section === "meta" && <MessagingAppPanel />}
       {section === "meta" && <MetaMessagingTokenPanel />}
       {section === "meta" && <MetaAdLibraryTokenPanel />}
       {section === "meta" && <MetaAppPanel />}
