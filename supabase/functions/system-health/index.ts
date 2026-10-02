@@ -16,6 +16,7 @@ import { authorizeRequest } from "../_shared/permissions.ts";
 import { readJsonBody } from "../_shared/security.ts";
 import { getMetaAppId, getMetaAppSecret, getMetaToken } from "../_shared/meta.ts";
 import { tvCheckAccess } from "../_shared/tradingview-direct.ts";
+import { getOpenAIKey, openAIErrorText } from "../_shared/openai.ts";
 import { expiryStatus, worsened, overall, type HealthCheck } from "../_shared/health-rules.ts";
 
 const GRAPH = "https://graph.facebook.com/v22.0";
@@ -76,6 +77,28 @@ async function runChecks(admin: any): Promise<HealthCheck[]> {
     checks.push(r.ok
       ? { key, label, status: "ok", detail: "ล็อกอินอยู่ ใช้ให้สิทธิ์ได้" }
       : { key, label, status: "error", detail: String(r.error || "เรียก TradingView ไม่สำเร็จ") });
+  }
+
+  // 3.5) OpenAI — แปลข้อความตอบลูกค้าต่างชาติต้องใช้ ถ้าเครดิตหมด แอดมินส่งหาลูกค้าที่ไม่ได้พิมพ์ไทยไม่ได้เลย
+  // ยิงคำขอเล็กที่สุด (1 token) วันละ 24 ครั้ง เสียเงินแทบเป็นศูนย์ — ตรวจเครดิตได้ทางเดียวคือเรียกจริง
+  const oaKey = await getOpenAIKey();
+  if (!oaKey) {
+    checks.push({ key: "openai", label: "OpenAI (แปลข้อความ/AI)", status: "error", detail: "ยังไม่ได้ตั้งคีย์ OpenAI" });
+  } else {
+    try {
+      const r = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST", signal: AbortSignal.timeout(15_000),
+        headers: { "content-type": "application/json", authorization: `Bearer ${oaKey}` },
+        body: JSON.stringify({ model: "gpt-4o-mini", max_tokens: 1, messages: [{ role: "user", content: "ok" }] }),
+      });
+      const body = await r.text();
+      // ไม่มีสิทธิ์โมเดลนี้ (404) แปลว่าคีย์ยังใช้ได้ — สิ่งที่เราสนคือเครดิต/คีย์เสีย
+      checks.push(r.ok || r.status === 404
+        ? { key: "openai", label: "OpenAI (แปลข้อความ/AI)", status: "ok", detail: "ใช้งานได้ มีเครดิต" }
+        : { key: "openai", label: "OpenAI (แปลข้อความ/AI)", status: r.status >= 500 ? "warn" : "error", detail: openAIErrorText(r.status, body) });
+    } catch (e) {
+      checks.push({ key: "openai", label: "OpenAI (แปลข้อความ/AI)", status: "warn", detail: `ตรวจไม่สำเร็จ: ${String(e instanceof Error ? e.message : e).slice(0, 120)}` });
+    }
   }
 
   // 4) ซิงก์แชท Messenger ยังเดินไหม — cron recent เรียกทุกนาที ประทับเวลาไว้ต่อเพจ

@@ -11,7 +11,7 @@ import { authorizeRequest } from "../_shared/permissions.ts";
 import { getLineConfig, lineApi } from "../_shared/line.ts";
 import { readJsonBody } from "../_shared/security.ts";
 import { MAX_TRANSCRIPT_ITEMS } from "../_shared/transcript-cap.ts";
-import { getOpenAIKey } from "../_shared/openai.ts";
+import { getOpenAIKey, openAIErrorText } from "../_shared/openai.ts";
 
 const GRAPH_VERSION = "v22.0"; // v19 หมดอายุแล้ว (sunset ต้นปี 2026)
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`;
@@ -180,7 +180,7 @@ async function openaiJson(
       messages: [{ role: "system", content: sys }, { role: "user", content: user }],
     }),
   });
-  if (!resp.ok) throw new Error(`OpenAI ${resp.status}: ${await resp.text()}`);
+  if (!resp.ok) throw new Error(openAIErrorText(resp.status, await resp.text()));
   const data = await resp.json();
   try { return JSON.parse(data.choices?.[0]?.message?.content || "{}"); } catch { return {}; }
 }
