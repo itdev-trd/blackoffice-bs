@@ -105,37 +105,6 @@ export function ChatSyncConfigPanel() {
   }
   useEffect(() => { void loadConnectedPages(); }, []);
 
-  // ---- เพิ่มการเชื่อมต่อเพจ ----
-  // "discover" ดึงรายชื่อเพจทั้งหมดที่ token นี้มองเห็นจาก Meta สด ๆ (ไม่ใช่แคช) แล้วเทียบกับ
-  // page_lead_config ว่าเพจไหนเชื่อมต่อแล้ว/ยังไม่เชื่อม — เพจใหม่จะโผล่ที่นี่ได้ก็ต่อเมื่อถูกมอบสิทธิ์
-  // ให้ token/System User ในฝั่ง Meta Business ก่อนแล้ว (ระบบมองไม่เห็นเพจที่ Meta ไม่ได้ให้สิทธิ์มา)
-  const [discovering, setDiscovering] = useState(false);
-  const [discoverPages, setDiscoverPages] = useState(null);   // null = ยังไม่กด, [] = กดแล้วแต่ไม่พบเพจใหม่
-  const [discoverError, setDiscoverError] = useState("");
-  const [connectingPageId, setConnectingPageId] = useState("");
-  const [connectResults, setConnectResults] = useState({});   // page_id -> { ok, error, warning }
-  async function runDiscover() {
-    setDiscovering(true); setDiscoverError(""); setDiscoverPages(null);
-    const { data, error } = await supabase.functions.invoke("subscribe-webhook", { body: { action: "discover" } });
-    setDiscovering(false);
-    if (error || !data?.ok) { setDiscoverError(data?.error || await readFunctionErrorMessage(error) || "ดึงรายชื่อเพจไม่สำเร็จ"); return; }
-    setDiscoverPages(data.pages || []);
-  }
-  async function connectPage(pageId, pageName) {
-    setConnectingPageId(pageId);
-    setConnectResults((r) => { const n = { ...r }; delete n[pageId]; return n; });
-    const { data, error } = await supabase.functions.invoke("subscribe-webhook", { body: { action: "connect_page", page_id: pageId } });
-    setConnectingPageId("");
-    if (error || !data?.ok) {
-      const msg = data?.error || (await readFunctionErrorMessage(error)) || "เชื่อมต่อไม่สำเร็จ";
-      setConnectResults((r) => ({ ...r, [pageId]: { ok: false, error: msg } }));
-      return;
-    }
-    setConnectResults((r) => ({ ...r, [pageId]: { ok: true, warning: data.app_webhook_warning || null } }));
-    setDiscoverPages((list) => (list || []).map((p) => (p.id === pageId ? { ...p, connected: true } : p)));
-    logActivity("connect_page", { page_id: pageId, page_name: pageName });
-    void loadConnectedPages();
-  }
   async function testLabels() {
     setLabelTesting(true); setLabelTest(null);
     const { data, error } = await supabase.functions.invoke("page-labels", { body: labelPageId ? { page_id: labelPageId } : {} });
@@ -259,64 +228,7 @@ export function ChatSyncConfigPanel() {
         <p className="text-xs text-slate-500 mt-0.5">ตั้งค่าการเชื่อมต่อและปริมาณการซิงก์แชท โดยไม่กรอกข้อมูลหรือเปลี่ยนสถานะลูกค้าอัตโนมัติ</p>
       </div>
 
-      {/* เพิ่มการเชื่อมต่อเพจ — เพจใหม่ต้องถูกมอบสิทธิ์ให้ token/System User ของระบบในฝั่ง Meta Business
-          ก่อนเสมอ (ทำในเว็บนี้ให้ไม่ได้ Meta เป็นคนคุมสิทธิ์) กดปุ่มนี้แค่ "ตรวจดู" ว่า token เห็นเพจไหนบ้าง
-          แล้วเลือกเชื่อมเฉพาะเพจที่ต้องการ — ต่างจาก "ผูกเพจกับ webhook" ด้านล่างที่ทำกับทุกเพจพร้อมกัน */}
-      <div className="rounded-xl border border-sky-200 bg-sky-50/40 p-4 space-y-3">
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div>
-            <div className="text-sm font-medium text-slate-800">เพิ่มการเชื่อมต่อเพจ</div>
-            <p className="text-[11px] text-slate-500 mt-0.5">
-              เพจใหม่ (Facebook/Instagram) ต้อง <span className="font-medium text-slate-700">มอบสิทธิ์ให้ระบบก่อนในฝั่ง Meta Business Suite</span>
-              {" "}(Business Settings → Users → มอบสิทธิ์เพจให้ผู้ใช้/System User ที่ตั้ง token ไว้ในหน้าตั้งค่านี้)
-              {" "}จากนั้นกลับมากดปุ่มนี้เพื่อดึงรายชื่อเพจที่ token มองเห็นสด ๆ แล้วเลือกเชื่อมเฉพาะเพจที่ต้องการ
-            </p>
-          </div>
-          <button onClick={runDiscover} disabled={discovering}
-            className="shrink-0 bg-sky-700 text-white rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-sky-800 disabled:opacity-60 flex items-center gap-1.5">
-            {discovering ? <Loader2 className="animate-spin" size={14} /> : <Search size={14} />} ตรวจหาเพจใหม่
-          </button>
-        </div>
-        {discoverError && <div className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2">{discoverError}</div>}
-        {discoverPages && (
-          discoverPages.length === 0 ? (
-            <div className="text-xs text-slate-400 py-2 text-center">token นี้ไม่เห็นเพจเลย — เช็คว่า token ในตั้งค่า Meta ยังใช้ได้และถูกมอบสิทธิ์เพจแล้ว</div>
-          ) : (
-            <div className="border border-slate-200 bg-white rounded-lg divide-y divide-slate-100 max-h-72 overflow-y-auto">
-              {discoverPages.map((p) => {
-                const res = connectResults[p.id];
-                return (
-                  <div key={p.id} className="flex items-center justify-between gap-3 px-3 py-2 flex-wrap">
-                    <div className="flex items-center gap-2 min-w-0">
-                      {p.picture ? (
-                        <img src={p.picture} alt="" className="w-7 h-7 rounded-full shrink-0 object-cover" />
-                      ) : (
-                        <span className="w-7 h-7 rounded-full bg-slate-100 shrink-0" />
-                      )}
-                      <div className="min-w-0">
-                        <div className="text-sm text-slate-800 truncate">{p.name}</div>
-                        <div className="text-[10px] text-slate-400">{p.id}{p.has_instagram ? " · มี Instagram ผูกอยู่" : ""}</div>
-                      </div>
-                    </div>
-                    <div className="shrink-0">
-                      {p.connected || res?.ok ? (
-                        <span className="text-xs text-emerald-600 font-medium flex items-center gap-1"><CheckCircle2 size={13} /> เชื่อมต่อแล้ว</span>
-                      ) : (
-                        <button onClick={() => connectPage(p.id, p.name)} disabled={connectingPageId === p.id}
-                          className="bg-emerald-700 text-white rounded-lg px-2.5 py-1 text-xs font-medium hover:bg-emerald-800 disabled:opacity-60 flex items-center gap-1">
-                          {connectingPageId === p.id ? <Loader2 className="animate-spin" size={12} /> : <Plus size={12} />} เชื่อมต่อ
-                        </button>
-                      )}
-                      {res?.ok === false && <div className="text-[10px] text-rose-600 mt-0.5 max-w-[220px] text-right">{res.error}</div>}
-                      {res?.ok && res.warning && <div className="text-[10px] text-amber-600 mt-0.5 max-w-[220px] text-right">{res.warning}</div>}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )
-        )}
-      </div>
+      <ConnectPagesBox onConnected={() => void loadConnectedPages()} />
 
       {/* Dataset ของ Conversion Leads — Meta กำหนดว่า 1 เพจ = 1 dataset จึงต้องดึงแยกรายเพจ */}
       <div className="rounded-xl border border-brand-200 bg-brand-50/40 p-4 space-y-2">
@@ -689,6 +601,125 @@ export function ChatSyncConfigPanel() {
 }
 
 // เลือกเพจที่ให้ระบบซิงก์ — เก็บเฉพาะสวิตช์ที่ยังจำเป็น
+
+// ---- เพิ่มเพจเข้าระบบ ----
+// "ตรวจหาเพจ" (subscribe-webhook action discover) ดึงรายชื่อเพจที่ token มองเห็นสด ๆ จาก Meta แล้วเทียบว่าเพจไหนเชื่อมแล้ว
+// เพจจะโผล่ที่นี่ได้ก็ต่อเมื่อถูกมอบสิทธิ์ให้ System User ในฝั่ง Meta Business ก่อนแล้ว (Meta คุมสิทธิ์ ทำจากเว็บนี้ไม่ได้)
+// ใช้ทั้งหน้า "เพจที่ซิงก์แชท" และ "ตั้งค่าการซิงก์แชท"
+export function ConnectPagesBox({ onConnected, defaultOpen = false }) {
+  const [open, setOpen] = useState(defaultOpen);
+  const [discovering, setDiscovering] = useState(false);
+  const [pages, setPages] = useState(null);
+  const [err, setErr] = useState("");
+  const [busyId, setBusyId] = useState("");
+  const [results, setResults] = useState({});       // page_id -> { ok, error, warning, sync }
+  const [syncChat, setSyncChat] = useState({});     // page_id -> bool (ค่าเริ่มต้น = ซิงก์)
+  async function discover() {
+    setOpen(true); setDiscovering(true); setErr(""); setPages(null);
+    const { data, error } = await supabase.functions.invoke("subscribe-webhook", { body: { action: "discover" } });
+    setDiscovering(false);
+    if (error || !data?.ok) { setErr(data?.error || (error ? await readFunctionErrorMessage(error) : "") || "ดึงรายชื่อเพจไม่สำเร็จ"); return; }
+    setPages(data.pages || []);
+  }
+  async function connect(p) {
+    setBusyId(p.id);
+    setResults((r) => { const n = { ...r }; delete n[p.id]; return n; });
+    const { data, error } = await supabase.functions.invoke("subscribe-webhook", { body: { action: "connect_page", page_id: p.id } });
+    if (error || !data?.ok) {
+      const msg = data?.error || (error ? await readFunctionErrorMessage(error) : "") || "เชื่อมต่อไม่สำเร็จ";
+      setBusyId("");
+      setResults((r) => ({ ...r, [p.id]: { ok: false, error: msg } }));
+      return;
+    }
+    // ไม่อยากดึงแชทของเพจนี้ (เช่นใช้แค่ยิงแอด/ดูรีพอร์ต) — ปิดซิงก์ทันทีหลังลงทะเบียน ก่อนรอบซิงก์ถัดไปจะมาถึง
+    const wantSync = syncChat[p.id] !== false;
+    if (!wantSync) await supabase.from("page_lead_config").update({ sync_enabled: false, updated_at: new Date().toISOString() }).eq("page_id", p.id);
+    setBusyId("");
+    setResults((r) => ({ ...r, [p.id]: { ok: true, warning: data.app_webhook_warning || null, sync: wantSync } }));
+    setPages((list) => (list || []).map((x) => (x.id === p.id ? { ...x, connected: true } : x)));
+    logActivity("connect_page", { page_id: p.id, page_name: p.name, sync_chat: wantSync });
+    onConnected?.();
+  }
+  const fresh = (pages || []).filter((p) => !p.connected || results[p.id]?.ok);
+  const connected = (pages || []).filter((p) => p.connected && !results[p.id]?.ok);
+  return (
+    <div className="rounded-xl border border-sky-200 bg-sky-50/40 overflow-hidden">
+      <div className="flex items-center justify-between gap-3 flex-wrap p-4">
+        <div className="flex items-start gap-3 min-w-0">
+          <div className="w-9 h-9 rounded-lg bg-sky-100 text-sky-700 flex items-center justify-center shrink-0"><Plus size={18} /></div>
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-slate-800">เพิ่มเพจเข้าระบบ</div>
+            <p className="text-[11px] text-slate-500 mt-0.5">มอบสิทธิ์เพจให้ System User ใน Meta Business ก่อน แล้วกด "ตรวจหาเพจ" เพื่อเลือกเชื่อมต่อ</p>
+          </div>
+        </div>
+        <button onClick={discover} disabled={discovering}
+          className="shrink-0 bg-sky-700 text-white rounded-lg px-3 py-2 text-xs font-semibold hover:bg-sky-800 disabled:opacity-60 flex items-center gap-1.5">
+          {discovering ? <Loader2 className="animate-spin" size={14} /> : <Search size={14} />} ตรวจหาเพจ
+        </button>
+      </div>
+      {open && (
+        <div className="border-t border-sky-100 bg-white px-4 py-3 space-y-3">
+          {!pages && !err && !discovering && (
+            <ol className="text-xs text-slate-600 space-y-1 list-decimal pl-4">
+              <li>เข้า business.facebook.com → การตั้งค่า → บัญชี → <b>เพจ</b> → เพิ่มเพจเข้าพอร์ตโฟลิโอธุรกิจ</li>
+              <li>ไปที่ ผู้ใช้ → <b>ผู้ใช้ระบบ</b> → besight-backend → มอบหมายสินทรัพย์ → เลือกเพจ เปิดสิทธิ์ "ควบคุมทั้งหมด"</li>
+              <li>กลับมากด "ตรวจหาเพจ" ด้านบน แล้วกดเชื่อมต่อ</li>
+            </ol>
+          )}
+          {discovering && <div className="flex items-center gap-2 text-xs text-slate-500"><Loader2 size={14} className="animate-spin" /> กำลังถาม Meta ว่าระบบเห็นเพจไหนบ้าง...</div>}
+          {err && <div className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2">{err}</div>}
+          {pages && (fresh.length === 0 ? (
+            <div className="text-xs text-slate-500 rounded-lg bg-slate-50 px-3 py-2.5">
+              ไม่มีเพจใหม่ — ระบบเห็นแค่เพจที่เชื่อมไว้แล้ว ถ้าเพิ่งเพิ่มเพจใน Meta ให้เช็คว่ามอบสิทธิ์ให้ <b>besight-backend</b> แล้ว (ข้อ 2)
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {fresh.map((p) => {
+                const res = results[p.id];
+                return (
+                  <div key={p.id} className={`rounded-lg border px-3 py-2.5 ${res?.ok ? "border-emerald-200 bg-emerald-50/50" : "border-slate-200"}`}>
+                    <div className="flex items-center gap-3 flex-wrap">
+                      {p.picture ? <img src={p.picture} alt="" className="w-9 h-9 rounded-full shrink-0 object-cover" /> : <span className="w-9 h-9 rounded-full bg-slate-100 shrink-0" />}
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-medium text-slate-800 truncate">{p.name}</div>
+                        <div className="text-[10.5px] text-slate-400">ID {p.id}{p.has_instagram ? " · มี Instagram ผูกอยู่" : ""}</div>
+                      </div>
+                      {res?.ok ? (
+                        <span className="text-xs text-emerald-700 font-semibold flex items-center gap-1"><CheckCircle2 size={14} /> เชื่อมต่อแล้ว{res.sync ? "" : " (ไม่ซิงก์แชท)"}</span>
+                      ) : (
+                        <div className="flex items-center gap-3">
+                          <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
+                            <input type="checkbox" checked={syncChat[p.id] !== false} onChange={(e) => setSyncChat((x) => ({ ...x, [p.id]: e.target.checked }))} />
+                            ดึงแชทของเพจนี้
+                          </label>
+                          <button onClick={() => connect(p)} disabled={busyId === p.id}
+                            className="bg-emerald-700 text-white rounded-lg px-3 py-1.5 text-xs font-semibold hover:bg-emerald-800 disabled:opacity-60 flex items-center gap-1">
+                            {busyId === p.id ? <Loader2 className="animate-spin" size={12} /> : <Plus size={12} />} เชื่อมต่อ
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    {res?.ok === false && <div className="mt-1.5 text-[11px] text-rose-600">{res.error}</div>}
+                    {res?.ok && res.warning && <div className="mt-1.5 text-[11px] text-amber-600">{res.warning}</div>}
+                    {res?.ok && (
+                      <div className="mt-1.5 text-[11px] text-slate-500">
+                        {res.sync ? "แชทจะเริ่มเข้ามาภายในไม่กี่นาที · " : ""}ถ้าจะให้นับแต้มเพจนี้ ไปติ๊กที่ ตั้งค่า → กระดานแต้ม
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+          {connected.length > 0 && (
+            <div className="text-[11px] text-slate-400">เชื่อมไว้แล้ว: {connected.map((p) => p.name).join(", ")}</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function PageLeadConfigPanel() {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState("");
@@ -716,6 +747,7 @@ export function PageLeadConfigPanel() {
         <h3 className="font-semibold text-slate-800">เพจที่ซิงก์แชท</h3>
         <p className="text-xs text-slate-500 mt-0.5">เปิดเฉพาะเพจที่ต้องการให้ระบบดึงแชทเข้ามา ฟังก์ชันกำหนดข้อมูลเพื่อเปลี่ยนสถานะอัตโนมัติถูกนำออกแล้ว</p>
       </div>
+      <ConnectPagesBox onConnected={load} />
       {error && <div className="text-sm text-rose-600 bg-rose-50 rounded-lg px-3 py-2">{error}</div>}
       {rows === null ? (
         <Spinner label="กำลังโหลด..." />
