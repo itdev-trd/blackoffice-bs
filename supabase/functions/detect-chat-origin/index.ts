@@ -10,7 +10,7 @@
 //   - ดึง targeting ทีละแอดที่ไม่ซ้ำ (ลูกค้า 100 คนจากแอดเดียว = ยิง Meta ครั้งเดียว)
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { getMetaToken } from "../_shared/meta.ts";
+import { getMetaToken, getMetaTokenForNode } from "../_shared/meta.ts";
 import { authorizeRequest } from "../_shared/permissions.ts";
 import { readJsonBody } from "../_shared/security.ts";
 
@@ -88,7 +88,7 @@ Deno.serve(async (req) => {
 
     for (const adId of adIds) {
       const res = await fetchJson(
-        `${GRAPH_BASE}/${adId}?fields=adset{targeting{geo_locations}}&access_token=${token}`
+        `${GRAPH_BASE}/${adId}?fields=adset{targeting{geo_locations}}&access_token=${await getMetaTokenForNode(adId) || token}`
       );
       adsChecked++;
       if (res?.error) { adCountry[adId] = null; skipped[adId] = res.error.message || "อ่าน targeting ไม่ได้"; continue; }

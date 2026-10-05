@@ -8,7 +8,7 @@
 // token ถูกเก็บในตารางที่ฝั่ง client อ่านไม่ได้ (ดู migration app-secrets)
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { AD_LIBRARY_TOKEN_KEY, MESSAGING_PAGES_CACHE_KEY, WEBHOOK_VERIFY_TOKEN_KEY, getMessagingAppCreds, getMetaAppId, getMetaAppSecret, getMetaToken } from "../_shared/meta.ts";
+import { ACCOUNT_TOKEN_MAP_KEY, AD_LIBRARY_TOKEN_KEY, EXTRA_TOKENS_KEY, MESSAGING_PAGES_CACHE_KEY, WEBHOOK_VERIFY_TOKEN_KEY, getMessagingAppCreds, getMetaAppId, getMetaAppSecret, getMetaToken } from "../_shared/meta.ts";
 import { authorizeRequest } from "../_shared/permissions.ts";
 import { readJsonBody } from "../_shared/security.ts";
 
@@ -129,7 +129,7 @@ Deno.serve(async (req) => {
     //  เพราะได้ผลลัพธ์ของ action save ที่ไม่มีฟิลด์เหล่านั้น)
     // ห้ามเดา action ที่ไม่รู้จักเป็น "save": คำขอที่อ่าน body ไม่ได้ (เช่นหน้าตั้งค่ายิงสถานะพร้อมกัน 4 ตัว
     // แล้วมีตัวหนึ่งมาไม่ครบ) จะไปตกที่ save แล้วล้มเป็น 500 "กรุณาวาง token" — เจอจริงใน log
-    const ACTIONS = ["save", "status", "app_status", "save_app", "messaging_status", "save_messaging", "ad_library_status", "save_ad_library", "messaging_app_status", "save_messaging_app"];
+    const ACTIONS = ["save", "status", "app_status", "save_app", "messaging_status", "save_messaging", "ad_library_status", "save_ad_library", "messaging_app_status", "save_messaging_app", "extra_list", "extra_save", "extra_delete"];
     const action = String(body?.action || "");
     if (!ACTIONS.includes(action)) {
       return new Response(JSON.stringify({ ok: false, error: `ไม่รู้จัก action "${action}"` }), { status: 400, headers: { ...corsHeaders, "content-type": "application/json" } });
@@ -292,6 +292,73 @@ Deno.serve(async (req) => {
         }, { onConflict: "key" });
       }
       return new Response(JSON.stringify({ ok: true, saved: true, ...info }), { headers: { ...corsHeaders, "content-type": "application/json" } });
+    }
+
+    // ---- token เพิ่มเติมแยกตาม Business Portfolio (ดูบัญชีโฆษณาของ portfolio อื่นโดยไม่ต้องแชร์ข้ามธุรกิจ) ----
+    // ค่า token ไม่เคยถูกส่งกลับหน้าเว็บ — คืนแค่ชื่อ/ธุรกิจ/จำนวนบัญชี/4 ตัวท้าย
+    const readExtras = async (): Promise<any[]> => {
+      const { data: row } = await admin.from("app_secrets").select("value").eq("key", EXTRA_TOKENS_KEY).maybeSingle();
+      try { const v = JSON.parse(String(row?.value || "[]")); return Array.isArray(v) ? v : []; } catch (_e) { return []; }
+    };
+    const writeExtras = async (list: any[]) => {
+      const nowIso = new Date().toISOString();
+      await admin.from("app_secrets").upsert({ key: EXTRA_TOKENS_KEY, value: JSON.stringify(list), updated_at: nowIso });
+      // รายชื่อบัญชี/แผนที่บัญชี→token ต้องสร้างใหม่ ไม่งั้นหน้าเว็บยังเห็นชุดเดิมไปอีก 10 นาที
+      await admin.from("app_secrets").delete().in("key", ["meta_accounts_cache", ACCOUNT_TOKEN_MAP_KEY]);
+    };
+    const inspectPortfolioToken = async (tok: string) => {
+      const me = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/me?fields=id,name,business{id,name}&access_token=${tok}`).then((r) => r.json()).catch(() => ({ error: { message: "เรียก Meta ไม่สำเร็จ" } }));
+      if (me?.error) return { valid: false, error: String(me.error.error_user_msg || me.error.message) };
+      const acc = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/me/adaccounts?fields=account_id,name&limit=200&access_token=${tok}`).then((r) => r.json()).catch(() => ({}));
+      const accounts = Array.isArray(acc?.data) ? acc.data.map((a: any) => ({ id: String(a.account_id), name: String(a.name || a.account_id) })) : [];
+      let expires_at: number | null = null;
+      try {
+        const dbg = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/debug_token?input_token=${tok}&access_token=${tok}`).then((r) => r.json());
+        expires_at = dbg?.data?.expires_at ?? null;
+      } catch (_e) { /* best-effort */ }
+      return { valid: true, owner_name: me?.name || null, business_id: me?.business?.id || null, business_name: me?.business?.name || null, accounts, accounts_error: acc?.error?.message || null, expires_at };
+    };
+    const publicExtra = (t: any, info?: any) => ({
+      id: t.id, label: t.label, business_id: t.business_id ?? null, business_name: t.business_name ?? null,
+      owner_name: t.owner_name ?? null, added_at: t.added_at ?? null, token_masked: maskTail(String(t.token || "")),
+      ...(info ? { valid: info.valid, error: info.error ?? null, accounts: info.accounts ?? [], expires_at: info.expires_at ?? null } : {}),
+    });
+
+    if (action === "extra_list") {
+      const list = await readExtras();
+      // ตรวจสดทุกตัวว่ายังใช้ได้ไหม (ไม่กี่ตัว ยิงขนานได้)
+      const infos = await Promise.all(list.map((t) => inspectPortfolioToken(String(t.token || ""))));
+      return new Response(JSON.stringify({ ok: true, tokens: list.map((t, i) => publicExtra(t, infos[i])) }), { headers: { ...corsHeaders, "content-type": "application/json" } });
+    }
+
+    if (action === "extra_save") {
+      const tok = String(body.token || "").trim();
+      if (!tok) throw new Error("กรุณาวาง token");
+      const info: any = await inspectPortfolioToken(tok);
+      if (!info.valid) throw new Error(`token ใช้ไม่ได้: ${info.error || "ไม่ทราบสาเหตุ"}`);
+      if (!info.accounts.length) throw new Error(`token นี้ไม่เห็นบัญชีโฆษณาเลย${info.accounts_error ? ` (${info.accounts_error})` : ""} — ตอนสร้าง token ต้องมอบหมายบัญชีโฆษณาให้ผู้ใช้ระบบ และติ๊กสิทธิ์ ads_read / ads_management`);
+      if (tok === (await getMetaToken())) throw new Error("token นี้คือ token หลักที่ใช้อยู่แล้ว");
+      const list = await readExtras();
+      // portfolio เดิมวาง token ใหม่ = แทนที่ตัวเก่า (เช่น ต่ออายุ/สร้างใหม่) ไม่ซ้อนกันหลายตัว
+      const idx = list.findIndex((t) => t.token === tok || (info.business_id && t.business_id === info.business_id));
+      const entry = {
+        id: idx >= 0 ? list[idx].id : `tk_${crypto.randomUUID().slice(0, 8)}`,
+        label: String(body.label || "").trim() || info.business_name || info.owner_name || "portfolio",
+        token: tok, business_id: info.business_id, business_name: info.business_name, owner_name: info.owner_name,
+        added_at: new Date().toISOString(),
+      };
+      if (idx >= 0) list[idx] = entry; else list.push(entry);
+      await writeExtras(list);
+      return new Response(JSON.stringify({ ok: true, saved: true, replaced: idx >= 0, token: publicExtra(entry, info) }), { headers: { ...corsHeaders, "content-type": "application/json" } });
+    }
+
+    if (action === "extra_delete") {
+      const id = String(body.id || "");
+      const list = await readExtras();
+      const next = list.filter((t) => t.id !== id);
+      if (next.length === list.length) throw new Error("ไม่พบ token นี้");
+      await writeExtras(next);
+      return new Response(JSON.stringify({ ok: true, deleted: true }), { headers: { ...corsHeaders, "content-type": "application/json" } });
     }
 
     if (action === "status") {

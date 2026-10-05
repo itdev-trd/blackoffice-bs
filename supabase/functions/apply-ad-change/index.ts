@@ -6,7 +6,7 @@
 // Secrets: META_ACCESS_TOKEN
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { getMetaToken } from "../_shared/meta.ts";
+import { getMetaTokenForNode } from "../_shared/meta.ts";
 import { authorizeRequest } from "../_shared/permissions.ts";
 
 const GRAPH_VERSION = "v22.0"; // อัปจาก v19 (sunset ต้นปี 2026)
@@ -41,12 +41,11 @@ Deno.serve(async (req) => {
     if (!auth.ok) {
       return new Response(JSON.stringify({ ok: false, error: auth.error }), { status: auth.status, headers: { ...corsHeaders, "content-type": "application/json" } });
     }
-    const token = await getMetaToken();
-    if (!token) throw new Error("ยังไม่ได้ตั้งค่า Meta access token (ตั้งได้ในหน้าตั้งค่า)");
-
-    const { action, target_type, target_id, value } = await req.json();
+    const { action, target_type, target_id, value, ad_account_id } = await req.json();
     if (!ALLOWED_ACTIONS.includes(action)) throw new Error("action ไม่ถูกต้อง");
     if (!target_id) throw new Error("ต้องส่ง target_id");
+    const token = await getMetaTokenForNode(target_id, ad_account_id);
+    if (!token) throw new Error("ยังไม่ได้ตั้งค่า Meta access token (ตั้งได้ในหน้าตั้งค่า)");
 
     if (action === "pause" || action === "resume") {
       // ใช้ได้กับ campaign / adset / ad

@@ -4,7 +4,7 @@
 //
 // Secrets: META_ACCESS_TOKEN
 
-import { getMetaToken } from "../_shared/meta.ts";
+import { getMetaTokenForAccount } from "../_shared/meta.ts";
 import { authorizeRequest, normAcc } from "../_shared/permissions.ts";
 import { cacheGet, cacheSet, listCacheTtlMs } from "../_shared/meta-cache.ts";
 import { errorResponse, readJsonBody } from "../_shared/security.ts";
@@ -25,11 +25,11 @@ Deno.serve(async (req) => {
     const auth = await authorizeRequest(req, { tab: ["analyze", "campaigns", "overview"] });
     if (!auth.ok) return new Response(JSON.stringify({ ok: false, error: auth.error }), { status: auth.status, headers: { ...corsHeaders, "content-type": "application/json" } });
 
-    const token = await getMetaToken();
-    if (!token) throw new Error("ยังไม่ได้ตั้งค่า Meta access token (ตั้งได้ในหน้าตั้งค่า)");
-
     const { ad_account_id, refresh, date_preset, time_range } = await readJsonBody(req, 32 * 1024);
     if (!ad_account_id) throw new Error("ต้องส่ง ad_account_id");
+    // บัญชีจาก portfolio อื่นใช้ token ของ portfolio นั้น (ดู getMetaTokenForAccount)
+    const token = await getMetaTokenForAccount(ad_account_id);
+    if (!token) throw new Error("ยังไม่ได้ตั้งค่า Meta access token (ตั้งได้ในหน้าตั้งค่า)");
 
     // สิทธิ์: analyze_only เข้าถึงได้เฉพาะบัญชีใน allowlist (กันฝั่ง server)
     const perm = auth.permission;

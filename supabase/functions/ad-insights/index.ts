@@ -5,7 +5,7 @@
 // Secrets: META_ACCESS_TOKEN
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { getMetaToken } from "../_shared/meta.ts";
+import { getMetaTokenForNode } from "../_shared/meta.ts";
 import { authorizeRequest } from "../_shared/permissions.ts";
 import { canAccessMetaNodes } from "../_shared/meta-authorization.ts";
 
@@ -81,7 +81,7 @@ Deno.serve(async (req) => {
     if (!ad_id) throw new Error("ต้องส่ง ad_id");
     const auth = await authorizeRequest(req, { tab: ["campaigns", "analyze", "overview"], allowService: true });
     if (!auth.ok) return new Response(JSON.stringify({ ok: false, error: auth.error }), { status: auth.status, headers: { ...corsHeaders, "content-type": "application/json" } });
-    META_TOKEN = await getMetaToken();
+    META_TOKEN = await getMetaTokenForNode(ad_id);
     if (!META_TOKEN) throw new Error("ยังไม่ได้ตั้งค่า Meta access token (ตั้งได้ในหน้าตั้งค่า)");
     // service role (cron prefetch) = เข้าถึงได้หมด ไม่ต้องเช็คสิทธิ์รายบัญชี
     if (auth.permission && !auth.isService && !(await canAccessMetaNodes(auth.permission, META_TOKEN, [ad_id], GRAPH_VERSION))) {

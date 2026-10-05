@@ -529,6 +529,124 @@ export function MetaTokenPanel() {
   );
 }
 
+// token ของ Business Portfolio อื่น — System User อยู่ได้ธุรกิจเดียว token หลักจึงเห็นแค่บัญชีโฆษณาของธุรกิจตัวเอง
+// วาง token ของแต่ละ portfolio ไว้ที่นี่ได้หลายตัว ระบบเลือก token ให้ตรงบัญชีเองทุกหน้า (แคมเปญ/วิเคราะห์/ปิดเปิดแอด)
+export function PortfolioTokensPanel() {
+  const [list, setList] = useState(null);
+  const [token, setToken] = useState("");
+  const [label, setLabel] = useState("");
+  const [busy, setBusy] = useState("");
+  const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
+  const [showHow, setShowHow] = useState(false);
+
+  async function load() {
+    const { data, error } = await supabase.functions.invoke("set-meta-token", { body: { action: "extra_list" } });
+    if (error || !data?.ok) { setList([]); return; }
+    setList(data.tokens || []);
+  }
+  useEffect(() => { load(); }, []);
+
+  async function save() {
+    if (!token.trim()) return;
+    setBusy("save"); setErr(""); setMsg("");
+    const { data, error } = await supabase.functions.invoke("set-meta-token", { body: { action: "extra_save", token: token.trim(), label: label.trim() } });
+    setBusy("");
+    if (error) { setErr(await readFunctionErrorMessage(error)); return; }
+    if (!data?.ok) { setErr(data?.error || "บันทึกไม่สำเร็จ"); return; }
+    const t = data.token || {};
+    setMsg(`${data.replaced ? "แทนที่ token เดิมของ" : "เพิ่ม"} ${t.label} แล้ว · เห็นบัญชีโฆษณา ${t.accounts?.length || 0} บัญชี: ${(t.accounts || []).map((a) => a.name).join(", ")}`);
+    setToken(""); setLabel("");
+    load();
+  }
+
+  async function remove(t) {
+    if (!confirm(`ลบ token ของ "${t.label}"?\nบัญชีโฆษณาของ portfolio นี้จะหายจากระบบ`)) return;
+    setBusy(t.id); setErr(""); setMsg("");
+    const { data, error } = await supabase.functions.invoke("set-meta-token", { body: { action: "extra_delete", id: t.id } });
+    setBusy("");
+    if (error || !data?.ok) { setErr(data?.error || (await readFunctionErrorMessage(error)) || "ลบไม่สำเร็จ"); return; }
+    setMsg(`ลบ ${t.label} แล้ว`);
+    load();
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-3">
+      <div>
+        <h3 className="font-semibold text-slate-800 flex items-center gap-1.5"><KeyRound size={16} /> token ของ Business Portfolio อื่น</h3>
+        <p className="text-xs text-slate-500 mt-1">
+          token หลักเห็นเฉพาะบัญชีโฆษณาของ portfolio ตัวเอง — อยากดึงบัญชีจาก portfolio อื่น (เช่น ADS 1Shot, Forex Advertiser)
+          ให้วาง token ของ portfolio นั้นเพิ่มที่นี่ ระบบจะเลือก token ให้ตรงบัญชีเองทุกหน้า
+        </p>
+      </div>
+
+      {list === null ? (
+        <div className="text-xs text-slate-400 flex items-center gap-1.5"><Loader2 size={12} className="animate-spin" /> กำลังตรวจ token...</div>
+      ) : list.length === 0 ? (
+        <div className="text-xs text-slate-400">ยังไม่มี token เพิ่ม — ใช้แค่ token หลัก</div>
+      ) : (
+        <div className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+          {list.map((t) => {
+            const exp = t.expires_at ? new Date(t.expires_at * 1000).toLocaleDateString("th-TH") : null;
+            return (
+              <div key={t.id} className="flex items-start gap-3 px-3 py-2.5">
+                <div className="min-w-0 flex-1 text-sm">
+                  <div className="font-medium text-slate-800">
+                    {t.label}
+                    <span className="ml-1.5 font-mono text-[11px] text-slate-400">{t.token_masked}</span>
+                  </div>
+                  <div className="text-[11.5px] text-slate-500">
+                    {t.business_name ? `ธุรกิจ: ${t.business_name}` : ""}{t.business_id ? ` (${t.business_id})` : ""}
+                    {t.owner_name ? ` · ผู้ใช้: ${t.owner_name}` : ""}
+                    {exp ? ` · หมดอายุ ${exp}` : t.valid ? " · ไม่หมดอายุ" : ""}
+                  </div>
+                  {t.valid ? (
+                    <div className="text-[11.5px] text-emerald-700">● ใช้ได้ · บัญชีโฆษณา {t.accounts?.length || 0}: {(t.accounts || []).map((a) => a.name).join(", ") || "—"}</div>
+                  ) : (
+                    <div className="text-[11.5px] text-rose-600">● ใช้ไม่ได้: {t.error || "ไม่ทราบสาเหตุ"} — สร้าง token ใหม่แล้ววางทับได้เลย</div>
+                  )}
+                </div>
+                <button onClick={() => remove(t)} disabled={!!busy} title="ลบ token นี้" className="shrink-0 text-slate-400 hover:text-rose-600 disabled:opacity-50">
+                  {busy === t.id ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="grid gap-2 sm:grid-cols-[1fr_2fr]">
+        <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="ชื่อเรียก (ไม่ใส่ = ใช้ชื่อธุรกิจ)"
+          className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+        <PasswordInput placeholder="วาง System User token ของ portfolio อื่น..." value={token} onChange={(e) => setToken(e.target.value)}
+          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" autoComplete="off" />
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <button onClick={save} disabled={!!busy || !token.trim()} className="bg-brand-600 text-white rounded-lg px-4 py-2 text-sm font-medium hover:bg-brand-700 disabled:opacity-60 flex items-center gap-2">
+          {busy === "save" ? <Loader2 className="animate-spin" size={16} /> : null} เพิ่ม token
+        </button>
+        <button onClick={() => setShowHow((v) => !v)} className="text-xs text-brand-600 hover:underline">
+          {showHow ? "ซ่อนวิธีสร้าง token" : "วิธีสร้าง token ของ portfolio อื่น"}
+        </button>
+        {msg && <span className="text-sm text-emerald-700">{msg}</span>}
+      </div>
+      {err && <div className="text-sm text-rose-600 bg-rose-50 rounded-lg px-3 py-2">{err}</div>}
+
+      {showHow && (
+        <ol className="list-decimal space-y-1.5 rounded-lg bg-slate-50 px-4 py-3 pl-8 text-[12.5px] text-slate-600">
+          <li>เข้า <b>business.facebook.com/settings</b> แล้วสลับ (มุมซ้ายบน) ไปที่ portfolio ที่ต้องการ เช่น <b>ADS 1Shot</b> — ต้องเป็นแอดมินของ portfolio นั้น</li>
+          <li><b>ผู้ใช้ → ผู้ใช้ระบบ (System users) → เพิ่ม</b> ตั้งชื่อ เช่น “blackoffice” บทบาท <b>แอดมิน</b> (ถ้ามีอยู่แล้วใช้ตัวเดิมได้)</li>
+          <li>เลือกผู้ใช้ระบบนั้น → <b>มอบหมายสินทรัพย์ → บัญชีโฆษณา</b> → ติ๊กบัญชีที่ต้องการ (เช่น IB Protential Shares - E) → เปิด <b>จัดการบัญชีโฆษณา (สิทธิ์เต็ม)</b></li>
+          <li>เมนู <b>บัญชี → แอป</b> → ตรวจว่ามีแอป Meta ตัวเดียวกับที่ใช้สร้าง token หลัก ถ้าไม่มีให้ <b>เพิ่ม → เชื่อมต่อ App ID</b> (แอปนั้นต้องเป็นของ portfolio นี้ หรือแชร์มาให้)</li>
+          <li>กลับไปที่ผู้ใช้ระบบ → <b>สร้างโทเค็นใหม่</b> → เลือกแอป → วันหมดอายุเลือก <b>ไม่มีวันหมดอายุ</b> → ติ๊กสิทธิ์ <span className="font-mono">ads_read</span>, <span className="font-mono">ads_management</span>, <span className="font-mono">business_management</span> → สร้าง</li>
+          <li>คัดลอก token มาวางช่องด้านบน แล้วกด <b>เพิ่ม token</b> — ระบบตรวจกับ Meta ก่อนบันทึก และบอกว่าเห็นบัญชีไหนบ้าง</li>
+          <li>ไปหน้าแคมเปญ กด <b>ดึงบัญชีเพิ่ม</b> บัญชีของ portfolio นี้จะขึ้นในรายการเลือกบัญชี</li>
+        </ol>
+      )}
+    </div>
+  );
+}
+
 // แอป Meta แยกสำหรับตอบแชท — ไม่พึ่ง Besight Backend (แอปหลักยังใช้กับงานโฆษณา/คอมเมนต์ตามเดิม)
 // ระบบรับ webhook ได้ทั้งสองแอป (ตรวจลายเซ็นด้วย App Secret ของแต่ละแอป) และส่งข้อความด้วย token ของแอปนี้
 export function MessagingAppPanel() {

@@ -3,7 +3,7 @@
 // นี่คือ gate เดียวที่อนุญาตให้เงินไหลออกเพิ่ม — ต้องมีคนกดอนุมัติเสมอ ไม่มีทางเรียกอัตโนมัติได้จากที่อื่น
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { getMetaToken } from "../_shared/meta.ts";
+import { getMetaTokenForNode } from "../_shared/meta.ts";
 import { authorizeRequest } from "../_shared/permissions.ts";
 
 const corsHeaders = {
@@ -52,7 +52,7 @@ Deno.serve(async (req) => {
 
     const newBudget = row.suggested_budget_thb;
     if (!newBudget || !row.adset_id) throw new Error("ไม่มีค่างบที่เสนอ หรือไม่มี adset_id");
-    const META_TOKEN = await getMetaToken();
+    const META_TOKEN = await getMetaTokenForNode(row.adset_id);
 
     const resp = await fetch(
       `https://graph.facebook.com/${GRAPH_VERSION}/${row.adset_id}?access_token=${META_TOKEN}`,

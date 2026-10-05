@@ -6,7 +6,7 @@
 // Secrets: META_ACCESS_TOKEN, ANTHROPIC_API_KEY (claude), IMAGE_API_KEY (openai)
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { getMetaToken } from "../_shared/meta.ts";
+import { getMetaTokenForNode } from "../_shared/meta.ts";
 import { getPromptOverride, withOverride } from "../_shared/ai-prompts.ts";
 import { authorizeRequest } from "../_shared/permissions.ts";
 import { getOpenAIKey } from "../_shared/openai.ts";
@@ -89,11 +89,11 @@ async function fetchJson(url: string) {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
-    const token = await getMetaToken();
-    if (!token) throw new Error("ยังไม่ได้ตั้งค่า Meta access token (ตั้งได้ในหน้าตั้งค่า)");
-
-    const { campaign_ids, date_preset, time_range, text_model, use_ai } = await req.json();
+    const { campaign_ids, date_preset, time_range, text_model, use_ai, ad_account_id } = await req.json();
     if (!Array.isArray(campaign_ids) || campaign_ids.length === 0) throw new Error("ต้องส่ง campaign_ids อย่างน้อย 1 รายการ");
+    // แคมเปญที่เลือกมาด้วยกันอยู่บัญชีเดียวกันเสมอ (เลือกจากหน้าบัญชีเดียว) — ใช้ token ของบัญชีนั้น
+    const token = await getMetaTokenForNode(campaign_ids[0], ad_account_id);
+    if (!token) throw new Error("ยังไม่ได้ตั้งค่า Meta access token (ตั้งได้ในหน้าตั้งค่า)");
     const auth = await authorizeRequest(req, { tab: ["analyze", "overview"] });
     if (!auth.ok) return new Response(JSON.stringify({ ok: false, error: auth.error }), { status: auth.status, headers: { ...corsHeaders, "content-type": "application/json" } });
     if (auth.permission && !(await canAccessMetaNodes(auth.permission, token, campaign_ids, GRAPH_VERSION))) {

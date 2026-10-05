@@ -1,6 +1,6 @@
 // supabase/functions/ad-source-details/index.ts
 // รับ { ad_ids: string[] } → คืนรายละเอียดแอดแต่ละตัว: ชื่อแคมเปญ/ชุดโฆษณา/โฆษณา + รูป/วิดีโอ
-import { getMetaToken } from "../_shared/meta.ts";
+import { getMetaToken, getMetaTokenForNode } from "../_shared/meta.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { authorizeRequest } from "../_shared/permissions.ts";
 import { cacheGet, cacheSet } from "../_shared/meta-cache.ts";
@@ -54,8 +54,8 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const adIds: string[] = Array.isArray(body?.ad_ids) ? body.ad_ids.map(String).filter(Boolean).slice(0, 20) : [];
     if (!adIds.length) return json({ ok: true, ads: [] });
-    const token = await getMetaToken();
-    if (!token) throw new Error("ยังไม่ได้ตั้งค่า Meta access token");
+    const mainToken = await getMetaToken();
+    if (!mainToken) throw new Error("ยังไม่ได้ตั้งค่า Meta access token");
     const base = `https://graph.facebook.com/${GRAPH}`;
 
     const ads = await Promise.all(adIds.map(async (adId) => {
@@ -66,6 +66,8 @@ Deno.serve(async (req) => {
         const db = await cacheGet(`adsrc:${adId}`, AD_SRC_TTL_MS);
         if (db?.payload) { adCache.set(adId, { at: Date.now(), value: db.payload }); return db.payload; }
         const fields = "name,effective_status,adset{name},campaign{name},creative{id,thumbnail_url,image_url,video_id,object_type}";
+        // แอดจาก portfolio อื่นต้องใช้ token ของ portfolio นั้น (ไม่มี token เพิ่ม = token หลัก ไม่ยิงเพิ่ม)
+        const token = await getMetaTokenForNode(adId) || mainToken;
         const a = await gj(`${base}/${adId}?fields=${encodeURIComponent(fields)}&access_token=${token}`);
         // อ่านแอดจาก Graph ไม่ได้ (แอดถูกลบ หรือ token ไม่มีสิทธิ์บัญชีโฆษณานั้น)
         // → ใช้ข้อมูลที่ Meta แถมมากับ event referral ตอนลูกค้ากดจากแอด (ads_context_data)

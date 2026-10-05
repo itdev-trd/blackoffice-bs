@@ -7,7 +7,7 @@
 // token มาจาก app_secrets (ตั้งในหน้าเว็บ) หรือ env META_ACCESS_TOKEN
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { getMetaToken } from "../_shared/meta.ts";
+import { getMetaTokenForNode } from "../_shared/meta.ts";
 import { authorizeRequest } from "../_shared/permissions.ts";
 import { canAccessMetaNodes } from "../_shared/meta-authorization.ts";
 import { cacheGet, cacheSet, listCacheTtlMs } from "../_shared/meta-cache.ts";
@@ -26,11 +26,10 @@ const corsHeaders = {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
-    const token = await getMetaToken();
-    if (!token) throw new Error("ยังไม่ได้ตั้งค่า Meta access token (ตั้งได้ในหน้าตั้งค่า)");
-
-    const { parent_id, level, date_preset, time_range, refresh } = await req.json();
+    const { parent_id, level, date_preset, time_range, refresh, ad_account_id } = await req.json();
     if (!parent_id) throw new Error("ต้องส่ง parent_id");
+    const token = await getMetaTokenForNode(parent_id, ad_account_id);
+    if (!token) throw new Error("ยังไม่ได้ตั้งค่า Meta access token (ตั้งได้ในหน้าตั้งค่า)");
     const auth = await authorizeRequest(req, { tab: ["campaigns", "analyze", "overview"] });
     if (!auth.ok) return new Response(JSON.stringify({ ok: false, error: auth.error }), { status: auth.status, headers: { ...corsHeaders, "content-type": "application/json" } });
     if (auth.permission && !(await canAccessMetaNodes(auth.permission, token, [parent_id], GRAPH_VERSION))) {

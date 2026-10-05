@@ -146,7 +146,8 @@ export default function AdsTable() {
         path.length === 0
           ? await supabase.functions.invoke("list-campaigns", { body: { ad_account_id: adAccountId, ...body } })
           : await supabase.functions.invoke("list-children", {
-              body: { level: path.length === 1 ? "adsets" : "ads", parent_id: path[path.length - 1].id, ...body },
+              // ad_account_id = บอกเซิร์ฟเวอร์ว่าใช้ token ของ portfolio ไหน (บัญชีจาก portfolio อื่น)
+              body: { level: path.length === 1 ? "adsets" : "ads", parent_id: path[path.length - 1].id, ad_account_id: adAccountId, ...body },
             });
       setLoading(false);
       if (fnErr || data?.ok === false) {
@@ -176,6 +177,7 @@ export default function AdsTable() {
         action: turningOn ? "resume" : "pause",
         target_id: row.id,
         target_type: level === "campaign" ? "campaign" : level === "adsets" ? "adset" : "ad",
+        ad_account_id: adAccountId,
       },
     });
     setBusyId("");

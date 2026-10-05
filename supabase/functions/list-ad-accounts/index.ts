@@ -8,7 +8,7 @@
 // token มาจาก app_secrets (ตั้งในหน้าเว็บ) หรือ env META_ACCESS_TOKEN
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { getMetaToken } from "../_shared/meta.ts";
+import { ACCOUNT_TOKEN_MAP_KEY, getAllMetaTokens } from "../_shared/meta.ts";
 import { authorizeRequest, normAcc } from "../_shared/permissions.ts";
 import { errorResponse, readJsonBody } from "../_shared/security.ts";
 
@@ -68,8 +68,9 @@ Deno.serve(async (req) => {
       return (list || []).filter((a: any) => allow.has(normAcc(a.account_id)));
     };
 
-    const token = await getMetaToken();
-    if (!token) throw new Error("ยังไม่ได้ตั้งค่า Meta access token (ตั้งได้ในหน้าตั้งค่า)");
+    // token หลัก + token ของ portfolio อื่นที่เพิ่มไว้ (ดู _shared/meta.ts) — แต่ละบัญชีจำไว้ว่ามาจาก token ไหน
+    const tokens = await getAllMetaTokens();
+    if (!tokens.length) throw new Error("ยังไม่ได้ตั้งค่า Meta access token (ตั้งได้ในหน้าตั้งค่า)");
     const base = `https://graph.facebook.com/${GRAPH_VERSION}`;
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const body = await readJsonBody(req, 32 * 1024);
@@ -88,9 +89,11 @@ Deno.serve(async (req) => {
     }
 
     const byId: Record<string, any> = {};
-    const add = (a: any, business?: string) => {
+    const tokenOf: Record<string, string> = {};
+    const add = (a: any, tokenId: string, business?: string) => {
       if (!a?.account_id) return;
       const biz = business || a.business?.name || null;
+      if (!tokenOf[a.account_id]) tokenOf[a.account_id] = tokenId;   // token หลักมาก่อนเสมอ = ได้สิทธิ์ก่อน
       if (!byId[a.account_id]) {
         byId[a.account_id] = {
           account_id: a.account_id, name: a.name, currency: a.currency, timezone: a.timezone_name,
@@ -100,52 +103,65 @@ Deno.serve(async (req) => {
     };
 
     let rateLimited = false;
-
-    // 1) แหล่งหลัก: /me/adaccounts (User token มักครบอยู่แล้ว)
-    const direct = await pageEdge(`${base}/me/adaccounts?fields=${ACC_FIELDS}&limit=500&access_token=${token}`);
-    direct.rows.forEach((a) => add(a));
-    if (isRateLimit(direct.error)) rateLimited = true;
-
-    // 2) ไล่รายธุรกิจ "เฉพาะเมื่อบัญชีตรงน้อย" (เคส System User) เพื่อลดการยิง API
-    //    กดปุ่ม "ดึงบัญชีเพิ่ม" (refresh) = ไล่ทุกธุรกิจเสมอ เพราะแอดมินตั้งใจหาบัญชีที่ยังไม่ขึ้น
     let enumerated = false;
-    if ((forceRefresh || Object.keys(byId).length < 5) && !rateLimited) {
-      const biz = await pageEdge(`${base}/me/businesses?fields=id,name&limit=100&access_token=${token}`, 2);
-      if (isRateLimit(biz.error)) rateLimited = true;
-      const bizMap: Record<string, string> = {};
-      biz.rows.forEach((b: any) => { if (b.id) bizMap[b.id] = b.name; });
-      direct.rows.forEach((a: any) => { if (a.business?.id) bizMap[a.business.id] = a.business.name; });
-      const entries = Object.entries(bizMap).slice(0, 40);
-      enumerated = entries.length > 0;
-      await mapLimit(entries, 3, async ([bid, bname]) => {
-        const owned = await pageEdge(`${base}/${bid}/owned_ad_accounts?fields=${ACC_FIELDS}&limit=500&access_token=${token}`, 1);
-        const client = await pageEdge(`${base}/${bid}/client_ad_accounts?fields=${ACC_FIELDS}&limit=500&access_token=${token}`, 1);
-        if (isRateLimit(owned.error) || isRateLimit(client.error)) rateLimited = true;
-        owned.rows.forEach((a: any) => add(a, bname as string));
-        client.rows.forEach((a: any) => add(a, bname as string));
-      });
-    }
+    const perToken: { id: string; label: string; count: number; business: { id: string; name: string } | null; error: string | null }[] = [];
 
-    // ธุรกิจเจ้าของ token (System User อยู่ได้ธุรกิจเดียว) — ใช้บอกแอดมินว่าต้องแชร์บัญชีโฆษณาให้ Business ID ไหน
-    let tokenBusiness: { id: string; name: string } | null = null;
-    if (forceRefresh) {
-      try {
-        const me = await fetch(`${base}/me?fields=name,business{id,name}&access_token=${token}`).then((r) => r.json());
-        if (me?.business?.id) tokenBusiness = { id: me.business.id, name: me.business.name };
-      } catch (_e) { /* ไม่มีก็แค่ไม่โชว์ Business ID */ }
+    for (const t of tokens) {
+      const token = t.token;
+      const before = Object.keys(byId).length;
+      // 1) แหล่งหลัก: /me/adaccounts (User token มักครบอยู่แล้ว)
+      const direct = await pageEdge(`${base}/me/adaccounts?fields=${ACC_FIELDS}&limit=500&access_token=${token}`);
+      direct.rows.forEach((a) => add(a, t.id));
+      if (isRateLimit(direct.error)) rateLimited = true;
+
+      // 2) ไล่รายธุรกิจ "เฉพาะเมื่อบัญชีตรงน้อย" (เคส System User) เพื่อลดการยิง API
+      //    กดปุ่ม "ดึงบัญชีเพิ่ม" (refresh) = ไล่ทุกธุรกิจเสมอ เพราะแอดมินตั้งใจหาบัญชีที่ยังไม่ขึ้น
+      if ((forceRefresh || direct.rows.length < 5) && !rateLimited) {
+        const biz = await pageEdge(`${base}/me/businesses?fields=id,name&limit=100&access_token=${token}`, 2);
+        if (isRateLimit(biz.error)) rateLimited = true;
+        const bizMap: Record<string, string> = {};
+        biz.rows.forEach((b: any) => { if (b.id) bizMap[b.id] = b.name; });
+        direct.rows.forEach((a: any) => { if (a.business?.id) bizMap[a.business.id] = a.business.name; });
+        const entries = Object.entries(bizMap).slice(0, 40);
+        if (entries.length) enumerated = true;
+        await mapLimit(entries, 3, async ([bid, bname]) => {
+          const owned = await pageEdge(`${base}/${bid}/owned_ad_accounts?fields=${ACC_FIELDS}&limit=500&access_token=${token}`, 1);
+          const client = await pageEdge(`${base}/${bid}/client_ad_accounts?fields=${ACC_FIELDS}&limit=500&access_token=${token}`, 1);
+          if (isRateLimit(owned.error) || isRateLimit(client.error)) rateLimited = true;
+          owned.rows.forEach((a: any) => add(a, t.id, bname as string));
+          client.rows.forEach((a: any) => add(a, t.id, bname as string));
+        });
+      }
+
+      // ธุรกิจเจ้าของ token (System User อยู่ได้ธุรกิจเดียว) — ใช้บอกแอดมินว่าต้องแชร์บัญชีให้ Business ID ไหน
+      let business: { id: string; name: string } | null = null;
+      if (forceRefresh) {
+        try {
+          const me = await fetch(`${base}/me?fields=name,business{id,name}&access_token=${token}`).then((r) => r.json());
+          if (me?.business?.id) business = { id: me.business.id, name: me.business.name };
+        } catch (_e) { /* ไม่มีก็แค่ไม่โชว์ Business ID */ }
+      }
+      perToken.push({ id: t.id, label: t.label, count: Object.keys(byId).length - before, business, error: direct.error?.message ?? null });
     }
+    const tokenBusiness = perToken.find((p) => p.id === "main")?.business ?? null;
 
     const accounts = Object.values(byId).sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || "")));
     const payload = {
       count: accounts.length,
       accounts,
       token_business: tokenBusiness,
-      debug: { direct_count: direct.rows.length, enumerated, rate_limited: rateLimited, direct_error: direct.error?.message ?? null },
+      tokens: perToken,
+      debug: { enumerated, rate_limited: rateLimited, tokens: perToken.length },
     };
 
     // เก็บ cache (ถ้าไม่โดน rate limit จนได้ข้อมูลน้อยผิดปกติ)
     if (accounts.length > 0) {
-      await admin.from("app_secrets").upsert({ key: "meta_accounts_cache", value: JSON.stringify(payload), updated_at: new Date().toISOString() });
+      const nowIso = new Date().toISOString();
+      await admin.from("app_secrets").upsert([
+        { key: "meta_accounts_cache", value: JSON.stringify(payload), updated_at: nowIso },
+        // ฟังก์ชันอื่นอ่าน map นี้เพื่อเลือก token ให้ตรงบัญชี (getMetaTokenForAccount)
+        { key: ACCOUNT_TOKEN_MAP_KEY, value: JSON.stringify(tokenOf), updated_at: nowIso },
+      ]);
     }
 
     const visibleAccounts = restrictAccounts(payload.accounts);

@@ -14,7 +14,7 @@
 //   IMAGE_API_KEY       (OpenAI key — ใช้เมื่อ text_model = "openai")
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { getMetaToken } from "../_shared/meta.ts";
+import { getMetaToken, getMetaTokenForNode } from "../_shared/meta.ts";
 import { getPromptOverride, withOverride } from "../_shared/ai-prompts.ts";
 import { authorizeRequest } from "../_shared/permissions.ts";
 import { getOpenAIKey } from "../_shared/openai.ts";
@@ -110,8 +110,8 @@ function computeVerdict(spend: number, cpa: number | null, cfg: Record<string, n
 
 // ดึง insight สดจาก Meta สำหรับแอดหนึ่งตัว — คืน null ถ้าดึงไม่ได้/ไม่มี token
 async function fetchMetaInsight(adId: string) {
-  const token = META_TOKEN;
-  if (!token || !adId) return null;
+  if (!META_TOKEN || !adId) return null;
+  const token = await getMetaTokenForNode(adId) || META_TOKEN;
   try {
     const url =
       `https://graph.facebook.com/${GRAPH_VERSION}/${adId}` +

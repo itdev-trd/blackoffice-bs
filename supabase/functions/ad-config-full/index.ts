@@ -1,7 +1,7 @@
 // supabase/functions/ad-config-full/index.ts
 // ดึงรายละเอียดการตั้งค่า "เต็มทั้งหมด" ของ node แบบลำดับชั้น (แคมเปญ + ชุดโฆษณา + โฆษณา)
 // ไม่ตัดข้อมูล — ความสนใจมีเท่าไหร่ส่งคืนครบ
-import { getMetaToken } from "../_shared/meta.ts";
+import { getMetaTokenForNode } from "../_shared/meta.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { authorizeRequest } from "../_shared/permissions.ts";
 import { canAccessMetaNodes } from "../_shared/meta-authorization.ts";
@@ -95,7 +95,7 @@ Deno.serve(async (req) => {
     if (!node_id) throw new Error("ต้องส่ง node_id");
     const auth = await authorizeRequest(req, { tab: ["campaigns", "analyze"] });
     if (!auth.ok) return new Response(JSON.stringify({ ok: false, error: auth.error }), { status: auth.status, headers: { ...corsHeaders, "content-type": "application/json" } });
-    const token = await getMetaToken();
+    const token = await getMetaTokenForNode(node_id);
     if (!token) throw new Error("ยังไม่ได้ตั้งค่า Meta access token");
     if (auth.permission && !(await canAccessMetaNodes(auth.permission, token, [node_id], GRAPH_VERSION))) {
       return new Response(JSON.stringify({ ok: false, error: "ไม่มีสิทธิ์เข้าถึงบัญชีโฆษณานี้" }), { status: 403, headers: { ...corsHeaders, "content-type": "application/json" } });

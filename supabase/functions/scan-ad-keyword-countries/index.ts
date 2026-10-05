@@ -1,4 +1,4 @@
-import { getMetaToken } from "../_shared/meta.ts";
+import { getMetaTokenForAccount } from "../_shared/meta.ts";
 import { authorizeRequest, normAcc } from "../_shared/permissions.ts";
 import { errorResponse, readJsonBody } from "../_shared/security.ts";
 
@@ -76,7 +76,7 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: false, error: "คุณไม่มีสิทธิ์ตรวจบัญชีโฆษณานี้" }), { status: 403, headers: { ...corsHeaders, "content-type": "application/json" } });
     }
 
-    const token = await getMetaToken();
+    const token = await getMetaTokenForAccount(accountId);
     if (!token) throw new Error("ยังไม่ได้ตั้งค่า Meta access token");
     const campaignPage = await graphPage(`/act_${accountId}/campaigns?fields=id,name,status,effective_status&limit=200`, token);
     const campaigns = campaignPage.rows.slice(0, MAX_CAMPAIGNS);

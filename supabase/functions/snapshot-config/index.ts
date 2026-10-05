@@ -1,7 +1,7 @@
 // supabase/functions/snapshot-config/index.ts
 // เก็บ snapshot การตั้งค่าปัจจุบันของ node (campaign/adset/ad) ลง ad_config_snapshots
 // บันทึกเฉพาะเมื่อค่าเปลี่ยนจากเวอร์ชันล่าสุด (เทียบ hash) — เรียกตอนเปิดแดชบอร์ด
-import { getMetaToken } from "../_shared/meta.ts";
+import { getMetaTokenForNode } from "../_shared/meta.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { authorizeRequest } from "../_shared/permissions.ts";
 
@@ -25,7 +25,7 @@ Deno.serve(async (req) => {
 
     const { node_id, level } = await req.json();
     if (!node_id || !level) throw new Error("ต้องส่ง node_id และ level");
-    const token = await getMetaToken();
+    const token = await getMetaTokenForNode(node_id);
     if (!token) throw new Error("ยังไม่ได้ตั้งค่า Meta access token");
     const base = `https://graph.facebook.com/${GRAPH_VERSION}`;
 

@@ -44,6 +44,7 @@ import {
   BrandAssetUploader,
   CiStyleUploader,
   MetaTokenPanel,
+  PortfolioTokensPanel,
   MetaMessagingTokenPanel,
   MessagingAppPanel,
   MetaAdLibraryTokenPanel,
@@ -1471,6 +1472,7 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
       {section === "knowledge" && <KnowledgeBasePanel allowedPages={allowedPages} />}
       {section === "ai_prompts" && <AiPromptsPanel />}
       {section === "meta" && <MetaTokenPanel />}
+      {section === "meta" && <PortfolioTokensPanel />}
       {section === "meta" && <MessagingAppPanel />}
       {section === "meta" && <MetaMessagingTokenPanel />}
       {section === "meta" && <MetaAdLibraryTokenPanel />}

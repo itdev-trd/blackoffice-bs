@@ -10,7 +10,7 @@
 //   TELEGRAM_CHAT_ID     (ไม่บังคับ)
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { getMetaToken } from "../_shared/meta.ts";
+import { getMetaToken, getMetaTokenForNode } from "../_shared/meta.ts";
 import { authorizeRequest } from "../_shared/permissions.ts";
 
 let META_TOKEN = "";
@@ -97,11 +97,13 @@ Deno.serve(async (req) => {
     // และรวม field effective_status กับ insights ไว้ใน request เดียวกัน (field expansion) แทนที่จะยิง 2 ครั้งต่อแอด
     async function processAd(row: Record<string, any>) {
       if (!row.ad_id) return null;
+      // แอดจาก portfolio อื่นใช้ token ของ portfolio นั้น (ไม่มี token เพิ่ม = token หลัก)
+      const tok = await getMetaTokenForNode(row.ad_id) || META_TOKEN;
 
       const url =
         `https://graph.facebook.com/${GRAPH_VERSION}/${row.ad_id}` +
         `?fields=effective_status,insights.date_preset(today){spend,actions}` +
-        `&access_token=${META_TOKEN}`;
+        `&access_token=${tok}`;
       const resp = await fetch(url);
       const data = await resp.json();
 
@@ -196,7 +198,7 @@ Deno.serve(async (req) => {
           const reason = `สงสัยแชทผี: เริ่มแชท ${conversations} ครั้ง แต่ตอบกลับจริงแค่ ${replies} (อัตราตอบ ${Math.round((replyRate ?? 0) * 100)}% ต่ำกว่าเกณฑ์ ${Math.round((ghostCfg.min_reply_rate ?? 0.4) * 100)}%)`;
           if (ghostCfg.action === "auto_pause" && row.status === "active") {
             await fetch(
-              `https://graph.facebook.com/${GRAPH_VERSION}/${row.ad_id}?access_token=${META_TOKEN}`,
+              `https://graph.facebook.com/${GRAPH_VERSION}/${row.ad_id}?access_token=${tok}`,
               { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ status: "PAUSED" }) }
             );
             await supabaseAdmin
@@ -245,7 +247,7 @@ Deno.serve(async (req) => {
 
       if (verdict === "underperform") {
         await fetch(
-          `https://graph.facebook.com/${GRAPH_VERSION}/${row.ad_id}?access_token=${META_TOKEN}`,
+          `https://graph.facebook.com/${GRAPH_VERSION}/${row.ad_id}?access_token=${tok}`,
           {
             method: "POST",
             headers: { "content-type": "application/json" },

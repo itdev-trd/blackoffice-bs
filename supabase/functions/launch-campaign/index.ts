@@ -9,7 +9,7 @@
 //   META_ACCESS_TOKEN   (System User long-lived token ที่มีสิทธิ์ ads_management)
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { getMetaToken } from "../_shared/meta.ts";
+import { getMetaToken, getMetaTokenForAccount } from "../_shared/meta.ts";
 import { authorizeRequest } from "../_shared/permissions.ts";
 
 const corsHeaders = {
@@ -342,6 +342,8 @@ Deno.serve(async (req) => {
       throw new Error("ยังตั้งค่า ad_account_id / page_id ไม่ครบในหน้า 'ตั้งค่า' ของเว็บแอป");
     }
     const actAccount = `act_${cfg.ad_account_id}`;
+    // บัญชีจาก portfolio อื่นต้องยิงด้วย token ของ portfolio นั้น
+    META_TOKEN_VALUE = await getMetaTokenForAccount(cfg.ad_account_id) || META_TOKEN_VALUE;
     const defaultDailyBudget = cfg.daily_budget_thb || 300;
     const targeting = buildTargeting(cfg, launchCfg, ghostCfg);
     const objective = resolveObjective(launchCfg);

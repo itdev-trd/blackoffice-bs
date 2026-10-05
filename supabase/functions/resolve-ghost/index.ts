@@ -5,7 +5,7 @@
 // นี่คือ gate ของโหมด "alert" — ระบบจะไม่หยุดแอดเองจนกว่าแอดมินจะกดยืนยันที่นี่
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { getMetaToken } from "../_shared/meta.ts";
+import { getMetaTokenForNode } from "../_shared/meta.ts";
 import { authorizeRequest } from "../_shared/permissions.ts";
 
 const corsHeaders = {
@@ -44,7 +44,7 @@ Deno.serve(async (req) => {
 
     if (action === "pause") {
       if (!row.ad_id) throw new Error("แอดนี้ไม่มี ad_id ให้หยุด");
-      const META_TOKEN = await getMetaToken();
+      const META_TOKEN = await getMetaTokenForNode(row.ad_id);
       const resp = await fetch(
         `https://graph.facebook.com/${GRAPH_VERSION}/${row.ad_id}?access_token=${META_TOKEN}`,
         { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ status: "PAUSED" }) }

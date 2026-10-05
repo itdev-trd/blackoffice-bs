@@ -173,3 +173,97 @@ export async function getWebhookVerifyTokens(): Promise<string[]> {
   const fromDb = await readSecretRow(WEBHOOK_VERIFY_TOKEN_KEY);
   return [...new Set([Deno.env.get("META_VERIFY_TOKEN") || "", fromDb.trim()].filter(Boolean))];
 }
+
+// ---------- token เพิ่มเติม "แยกตาม Business Portfolio" (งานโฆษณา) ----------
+//
+// ทำไมต้องมี: token หลักเป็น System User ซึ่งอยู่ได้แค่ธุรกิจเดียว — บัญชีโฆษณาที่อยู่ portfolio อื่น
+// (เช่น ADS 1Shot, Forex Advertiser) จะมองไม่เห็นเลยจนกว่าจะแชร์ข้ามธุรกิจ
+// แทนที่จะต้องแชร์ทุกบัญชี ให้วาง System User token ของแต่ละ portfolio ไว้ที่นี่ได้หลายตัว
+// แล้วระบบเลือก token ให้เองตามบัญชีโฆษณา/แคมเปญ/ชุดโฆษณา/โฆษณาที่กำลังเรียก
+//
+// เก็บใน app_secrets:
+//   meta_extra_tokens       = JSON [{ id, label, token, business_id, business_name, owner_name, added_at }]
+//   meta_account_token_map  = JSON { [account_id]: token_id }   (list-ad-accounts เขียนให้ทุกครั้งที่ดึงใหม่)
+// token_id "main" = token หลัก · ไม่มี token เพิ่มเลย = ทุกฟังก์ชันทำงานเหมือนเดิมทุกอย่าง (ไม่ยิงอะไรเพิ่ม)
+export const EXTRA_TOKENS_KEY = "meta_extra_tokens";
+export const ACCOUNT_TOKEN_MAP_KEY = "meta_account_token_map";
+export type ExtraToken = { id: string; label: string; token: string; business_id?: string | null; business_name?: string | null; owner_name?: string | null; added_at?: string };
+
+const EXTRA_CACHE_MS = 60 * 1000;   // สั้น เพราะเพิ่ม/ลบ token แล้วควรมีผลเกือบทันที
+let cachedExtra: ExtraToken[] = [];
+let cachedExtraAt = 0;
+let cachedAccMap: Record<string, string> = {};
+let cachedAccMapAt = 0;
+
+export async function getExtraMetaTokens(): Promise<ExtraToken[]> {
+  const now = Date.now();
+  if (now - cachedExtraAt < EXTRA_CACHE_MS) return cachedExtra;
+  let list: ExtraToken[] = [];
+  try {
+    const raw = await readSecretRow(EXTRA_TOKENS_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (Array.isArray(parsed)) list = parsed.filter((t) => t && t.id && t.token);
+  } catch (_e) { /* JSON เสีย = ถือว่าไม่มี */ }
+  cachedExtra = list;
+  cachedExtraAt = now;
+  return list;
+}
+
+// token ทั้งหมดที่ใช้กับงานโฆษณาได้ เรียง token หลักก่อนเสมอ
+export async function getAllMetaTokens(): Promise<{ id: string; label: string; token: string }[]> {
+  const main = await getMetaToken();
+  const extras = await getExtraMetaTokens();
+  const out: { id: string; label: string; token: string }[] = [];
+  if (main) out.push({ id: "main", label: "token หลัก", token: main });
+  for (const t of extras) if (t.token !== main) out.push({ id: t.id, label: t.label || t.business_name || t.id, token: t.token });
+  return out;
+}
+
+async function getAccountTokenMap(): Promise<Record<string, string>> {
+  const now = Date.now();
+  if (now - cachedAccMapAt < EXTRA_CACHE_MS) return cachedAccMap;
+  let map: Record<string, string> = {};
+  try {
+    const raw = await readSecretRow(ACCOUNT_TOKEN_MAP_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    if (parsed && typeof parsed === "object") map = parsed;
+  } catch (_e) { /* ไม่มี map = ใช้ token หลัก */ }
+  cachedAccMap = map;
+  cachedAccMapAt = now;
+  return map;
+}
+
+// token ของบัญชีโฆษณานี้ — ดูจาก map ที่ list-ad-accounts สร้างไว้ ไม่เจอ = token หลัก
+export async function getMetaTokenForAccount(accountId: unknown): Promise<string> {
+  const extras = await getExtraMetaTokens();
+  if (!extras.length) return await getMetaToken();
+  const acc = String(accountId ?? "").replace(/^act_/, "").trim();
+  if (acc) {
+    const tid = (await getAccountTokenMap())[acc];
+    const hit = tid && tid !== "main" ? extras.find((t) => t.id === tid) : null;
+    if (hit) return hit.token;
+  }
+  return await getMetaToken();
+}
+
+// token ที่เข้าถึง object นี้ได้ (แคมเปญ/ชุดโฆษณา/โฆษณา/ครีเอทีฟ) — ฟังก์ชันที่ได้แค่ node id
+// ไม่มี token เพิ่ม = คืน token หลักทันที (ไม่ยิงเพิ่ม) · มี = ลองทีละตัวว่าตัวไหนอ่านได้ แล้วจำไว้ในรอบนี้
+const nodeTokenCache = new Map<string, string>();
+export async function getMetaTokenForNode(nodeId: unknown, accountHint?: unknown): Promise<string> {
+  const extras = await getExtraMetaTokens();
+  if (!extras.length) return await getMetaToken();
+  if (accountHint) return await getMetaTokenForAccount(accountHint);
+  const id = String(nodeId ?? "").trim();
+  if (!id) return await getMetaToken();
+  if (id.startsWith("act_")) return await getMetaTokenForAccount(id);
+  const cached = nodeTokenCache.get(id);
+  if (cached) return cached;
+  const all = await getAllMetaTokens();
+  for (const t of all) {
+    try {
+      const r = await fetch(`https://graph.facebook.com/v22.0/${id}?fields=id&access_token=${t.token}`).then((x) => x.json());
+      if (r && !r.error) { nodeTokenCache.set(id, t.token); return t.token; }
+    } catch (_e) { /* ลองตัวถัดไป */ }
+  }
+  return all[0]?.token || "";
+}
