@@ -307,16 +307,24 @@ Deno.serve(async (req) => {
       await admin.from("app_secrets").delete().in("key", ["meta_accounts_cache", ACCOUNT_TOKEN_MAP_KEY]);
     };
     const inspectPortfolioToken = async (tok: string) => {
-      const me = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/me?fields=id,name,business{id,name}&access_token=${tok}`).then((r) => r.json()).catch(() => ({ error: { message: "เรียก Meta ไม่สำเร็จ" } }));
+      const me = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/me?fields=id,name&access_token=${tok}`).then((r) => r.json()).catch(() => ({ error: { message: "เรียก Meta ไม่สำเร็จ" } }));
       if (me?.error) return { valid: false, error: String(me.error.error_user_msg || me.error.message) };
-      const acc = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/me/adaccounts?fields=account_id,name&limit=200&access_token=${tok}`).then((r) => r.json()).catch(() => ({}));
-      const accounts = Array.isArray(acc?.data) ? acc.data.map((a: any) => ({ id: String(a.account_id), name: String(a.name || a.account_id) })) : [];
+      // field "business" มีเฉพาะ System User — token ของคน (user token) ขอแล้ว Meta ตอบ #100 ทั้งคำขอ
+      // จึงแยกถามต่างหาก และไม่ถือว่า error ถ้าไม่มี
+      const bizRes = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/me?fields=business{id,name}&access_token=${tok}`).then((r) => r.json()).catch(() => ({}));
+      const acc = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/me/adaccounts?fields=account_id,name,business{id,name}&limit=200&access_token=${tok}`).then((r) => r.json()).catch(() => ({}));
+      const rows = Array.isArray(acc?.data) ? acc.data : [];
+      const accounts = rows.map((a: any) => ({ id: String(a.account_id), name: String(a.name || a.account_id), business: a.business?.name || null }));
+      // user token ไม่มีธุรกิจของตัวเอง — ถ้าบัญชีที่เห็นอยู่ธุรกิจเดียวกันหมด ใช้ธุรกิจนั้นเป็นชื่อ
+      const bizNames = [...new Set(rows.map((a: any) => a.business?.id ? `${a.business.id}|${a.business.name}` : "").filter(Boolean))] as string[];
+      const ownBiz = bizRes?.business?.id ? { id: String(bizRes.business.id), name: String(bizRes.business.name || "") }
+        : bizNames.length === 1 ? { id: bizNames[0].split("|")[0], name: bizNames[0].split("|").slice(1).join("|") } : null;
       let expires_at: number | null = null;
       try {
         const dbg = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/debug_token?input_token=${tok}&access_token=${tok}`).then((r) => r.json());
         expires_at = dbg?.data?.expires_at ?? null;
       } catch (_e) { /* best-effort */ }
-      return { valid: true, owner_name: me?.name || null, business_id: me?.business?.id || null, business_name: me?.business?.name || null, accounts, accounts_error: acc?.error?.message || null, expires_at };
+      return { valid: true, owner_name: me?.name || null, business_id: ownBiz?.id || null, business_name: ownBiz?.name || null, accounts, system_user: !!bizRes?.business?.id, accounts_error: acc?.error?.message || null, expires_at };
     };
     const publicExtra = (t: any, info?: any) => ({
       id: t.id, label: t.label, business_id: t.business_id ?? null, business_name: t.business_name ?? null,
@@ -340,11 +348,12 @@ Deno.serve(async (req) => {
       if (tok === (await getMetaToken())) throw new Error("token นี้คือ token หลักที่ใช้อยู่แล้ว");
       const list = await readExtras();
       // portfolio เดิมวาง token ใหม่ = แทนที่ตัวเก่า (เช่น ต่ออายุ/สร้างใหม่) ไม่ซ้อนกันหลายตัว
-      const idx = list.findIndex((t) => t.token === tok || (info.business_id && t.business_id === info.business_id));
+      // แทนที่ด้วย business_id เฉพาะ System User (ของจริงของธุรกิจนั้น) — user token เดาธุรกิจจากบัญชีที่เห็น อาจไปทับตัวอื่นผิด
+      const idx = list.findIndex((t) => t.token === tok || (info.system_user && t.system_user && info.business_id && t.business_id === info.business_id));
       const entry = {
         id: idx >= 0 ? list[idx].id : `tk_${crypto.randomUUID().slice(0, 8)}`,
         label: String(body.label || "").trim() || info.business_name || info.owner_name || "portfolio",
-        token: tok, business_id: info.business_id, business_name: info.business_name, owner_name: info.owner_name,
+        token: tok, business_id: info.business_id, business_name: info.business_name, owner_name: info.owner_name, system_user: !!info.system_user,
         added_at: new Date().toISOString(),
       };
       if (idx >= 0) list[idx] = entry; else list.push(entry);
