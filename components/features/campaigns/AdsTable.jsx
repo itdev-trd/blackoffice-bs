@@ -9,7 +9,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  Loader2, RefreshCw, ChevronRight, Play, Pause, AlertTriangle, ChevronLeft, ExternalLink,
+  Loader2, RefreshCw, ChevronRight, Play, Pause, AlertTriangle, ChevronLeft, ExternalLink, Plus, X,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { readFunctionErrorMessage } from "@/lib/utils/errors";
@@ -94,6 +94,30 @@ export default function AdsTable() {
       .then(({ data }) => setAccounts(Array.isArray(data?.accounts) ? data.accounts : []))
       .catch(() => setAccounts([]));
   }, []);
+
+  // ดึงบัญชีโฆษณาเพิ่ม — ข้ามแคช 10 นาทีแล้วไล่ทุก Business Portfolio ที่ token เข้าถึง
+  // บัญชีที่ไม่ขึ้นแม้กดแล้ว = token ไม่มีสิทธิ์ (ไม่ใช่บั๊ก) จึงบอกวิธีให้สิทธิ์ใน Meta ไปด้วย
+  const [accBusy, setAccBusy] = useState(false);
+  const [accMsg, setAccMsg] = useState(null);   // { ok, text, help?, businessId?, businessName? }
+  async function fetchMoreAccounts() {
+    setAccBusy(true); setAccMsg(null);
+    const { data, error: fnErr } = await supabase.functions.invoke("list-ad-accounts", { body: { refresh: true } });
+    setAccBusy(false);
+    if (fnErr || !data?.ok) { setAccMsg({ ok: false, text: data?.error || (await readFunctionErrorMessage(fnErr)) || "ดึงบัญชีไม่สำเร็จ" }); return; }
+    const next = Array.isArray(data.accounts) ? data.accounts : [];
+    const before = new Set(accounts.map((a) => String(a.account_id)));
+    const added = next.filter((a) => !before.has(String(a.account_id)));
+    setAccounts(next);
+    const biz = data.token_business;
+    setAccMsg({
+      ok: true,
+      text: added.length
+        ? `✓ พบบัญชีใหม่ ${added.length} บัญชี: ${added.map((a) => a.name || a.account_id).join(", ")} (ทั้งหมด ${next.length})`
+        : `ไม่พบบัญชีใหม่ — ตอนนี้ระบบเห็น ${next.length} บัญชี`,
+      help: !added.length,
+      businessId: biz?.id, businessName: biz?.name,
+    });
+  }
 
   function pickAccount(id) {
     setAdAccountId(id);
@@ -271,6 +295,14 @@ export default function AdsTable() {
               })}
             </select>
           )}
+          <button
+            onClick={fetchMoreAccounts}
+            disabled={accBusy}
+            title="ดึงรายชื่อบัญชีโฆษณาจาก Meta ใหม่ทั้งหมด (ไม่ใช้แคช)"
+            className="flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            {accBusy ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} ดึงบัญชีเพิ่ม
+          </button>
           <div className="flex flex-wrap gap-1 rounded-control border border-slate-200 bg-slate-100 p-1">
             {RANGES.map(([v, l]) => (
               <button
@@ -294,6 +326,27 @@ export default function AdsTable() {
         </div>
       </div>
 
+      {accMsg && (
+        <div className={`relative border-b px-4 py-2.5 pr-10 text-sm ${accMsg.ok ? "border-emerald-100 bg-emerald-50/60 text-slate-700" : "border-rose-100 bg-rose-50 text-rose-700"}`}>
+          <button onClick={() => setAccMsg(null)} className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600" title="ปิด"><X size={14} /></button>
+          <div className="font-medium">{accMsg.text}</div>
+          {accMsg.help && (
+            <div className="mt-1.5 space-y-0.5 text-[12.5px] text-slate-600">
+              <div>บัญชีที่อยู่คนละ Business Portfolio กับ token ของระบบจะไม่ขึ้น ต้องให้สิทธิ์ใน Meta ก่อน:</div>
+              <ol className="list-decimal space-y-0.5 pl-5">
+                <li>
+                  เปิด Business Settings ของ portfolio ที่เป็นเจ้าของบัญชี (เช่น ADS 1Shot) → บัญชีโฆษณา → เลือกบัญชี → <b>มอบหมายพาร์ทเนอร์</b>
+                  {accMsg.businessId
+                    ? <> → ใส่ Business ID <b className="font-mono select-all">{accMsg.businessId}</b>{accMsg.businessName ? ` (${accMsg.businessName})` : ""}</>
+                    : <> → ใส่ Business ID ของ portfolio ที่สร้าง token ของระบบ</>}
+                </li>
+                <li>เปิด Business Settings ของ {accMsg.businessName || "portfolio ที่สร้าง token"} → ผู้ใช้ระบบ (System users) → เลือกผู้ใช้ของ token → <b>มอบหมายสินทรัพย์</b> → เลือกบัญชีนั้น</li>
+                <li>กลับมากด "ดึงบัญชีเพิ่ม" อีกครั้ง</li>
+              </ol>
+            </div>
+          )}
+        </div>
+      )}
       {error && <div className="border-b border-rose-100 bg-rose-50 px-4 py-2.5 text-sm text-rose-700">{error}</div>}
 
       {/* มือถือ: การ์ด / คอม: ตาราง */}

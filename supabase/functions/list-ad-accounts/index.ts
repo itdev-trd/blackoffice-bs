@@ -107,8 +107,9 @@ Deno.serve(async (req) => {
     if (isRateLimit(direct.error)) rateLimited = true;
 
     // 2) ไล่รายธุรกิจ "เฉพาะเมื่อบัญชีตรงน้อย" (เคส System User) เพื่อลดการยิง API
+    //    กดปุ่ม "ดึงบัญชีเพิ่ม" (refresh) = ไล่ทุกธุรกิจเสมอ เพราะแอดมินตั้งใจหาบัญชีที่ยังไม่ขึ้น
     let enumerated = false;
-    if (byId && Object.keys(byId).length < 5 && !rateLimited) {
+    if ((forceRefresh || Object.keys(byId).length < 5) && !rateLimited) {
       const biz = await pageEdge(`${base}/me/businesses?fields=id,name&limit=100&access_token=${token}`, 2);
       if (isRateLimit(biz.error)) rateLimited = true;
       const bizMap: Record<string, string> = {};
@@ -125,10 +126,20 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ธุรกิจเจ้าของ token (System User อยู่ได้ธุรกิจเดียว) — ใช้บอกแอดมินว่าต้องแชร์บัญชีโฆษณาให้ Business ID ไหน
+    let tokenBusiness: { id: string; name: string } | null = null;
+    if (forceRefresh) {
+      try {
+        const me = await fetch(`${base}/me?fields=name,business{id,name}&access_token=${token}`).then((r) => r.json());
+        if (me?.business?.id) tokenBusiness = { id: me.business.id, name: me.business.name };
+      } catch (_e) { /* ไม่มีก็แค่ไม่โชว์ Business ID */ }
+    }
+
     const accounts = Object.values(byId).sort((a: any, b: any) => String(a.name || "").localeCompare(String(b.name || "")));
     const payload = {
       count: accounts.length,
       accounts,
+      token_business: tokenBusiness,
       debug: { direct_count: direct.rows.length, enumerated, rate_limited: rateLimited, direct_error: direct.error?.message ?? null },
     };
 
