@@ -418,8 +418,8 @@ function AdDashboardModal({ ad, ai, onClose, onNavigate }) {
       const { campaignName, rows } = await fetchCampaignTree(ad, data, range);
       if (!rows.length) { alert("ไม่พบโฆษณาในแคมเปญนี้ (หรือดึงข้อมูลไม่สำเร็จ)"); return; }
       if (fmt === "pdf") exportTrackerPdf(campaignName, rows);
-      else if (fmt === "excel") await exportTrackerExcel(campaignName, rows);
-      else await exportTrackerCsv(campaignName, rows);
+      else if (fmt === "excel") await exportTrackerExcel(campaignName, rows, range);
+      else await exportTrackerCsv(campaignName, rows, range);
     } catch (error) {
       alert(`สร้างไฟล์ไม่สำเร็จ: ${error?.message || error}`);
     } finally { setTrackerBusy(false); }
@@ -1554,8 +1554,8 @@ function CampaignOverviewView({ initialResult, campaignIds, range, textModel, on
       const { title, rows } = await fetchCampaignsTree(camps, exportRange(), (n, total) => setTrackerBusy(`กำลังดึง ${n}/${total} แคมเปญ...`));
       if (!rows.length) { alert("ไม่พบโฆษณาในแคมเปญที่เลือก (หรือดึงข้อมูลไม่สำเร็จ)"); return; }
       setTrackerBusy("กำลังสร้างไฟล์...");
-      if (fmt === "excel") await exportTrackerExcel(title, rows);
-      else await exportTrackerCsv(title, rows);
+      if (fmt === "excel") await exportTrackerExcel(title, rows, exportRange());
+      else await exportTrackerCsv(title, rows, exportRange());
     } catch (error) {
       alert(`สร้างไฟล์ไม่สำเร็จ: ${error?.message || error}`);
     } finally { setTrackerBusy(""); }
@@ -2278,8 +2278,8 @@ async function fetchCampaignsTree(campaigns, range, onProgress) {
 // CSV ใช้คอลัมน์/ตัวเลขชุดเดียวกับไฟล์ Excel (รายงานผล Ads) — เดิมเป็นเทมเพลตเก่า 12 คอลัมน์
 // (ID โฆษณา/BG/คงเหลือ/ยอดซื้อ) เปิดใน Google Sheets แล้วไม่ตรงกับ Excel ที่ทีมใช้
 // CSV ใส่สี/รูป/รวมเซลล์ไม่ได้ ช่อง "ภาพ ADS" จึงเป็นลิงก์รูป และชื่อแคมเปญ/ชุดโฆษณาโชว์เฉพาะแถวแรกของกลุ่ม
-async function exportTrackerCsv(campaignName, rows) {
-  const { byAd } = await fetchTrackerLeadStats(rows);
+async function exportTrackerCsv(campaignName, rows, range) {
+  const { byAd } = await fetchTrackerLeadStats(rows, range);
   const enriched = enrichTrackerRows(rows, byAd);
   const esc = (v) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const n2 = (v) => (Number(v) || 0).toFixed(2);
@@ -2352,7 +2352,17 @@ async function imageDataForWorkbook(url) {
 const dmyToIso = (s) => { const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(String(s || "")); return m ? `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}` : null; };
 // สถานะที่ถือว่า "เปิดบัญชีแล้ว" — ชุดเดียวกับ SHEET_STATUS ในหน้าจัดการลูกค้า (CustomerDatabaseTab)
 const TRACKER_OPENED_STAGES = new Set(["converted", "account_opened"]);
-const isOpenedStage = (row) => TRACKER_OPENED_STAGES.has(row.stage_manual || row.stage);
+// ป้ายที่แอดมินติดในแชท (ป้ายในเว็บ tags + ป้ายฝั่ง Meta meta_labels) แม่นกว่าระยะแชท — แอดมินติดป้ายสม่ำเสมอกว่า
+// เปลี่ยนระยะ (60 วัน: นับจากระยะได้ 37 คน · จากป้าย 53 คน) จึงนับ "เปิดบัญชี/ซื้อ" จากป้ายหรือระยะอย่างใดอย่างหนึ่ง
+// "ไม่สนใจ"/"สแปม" ไม่นับเป็นลูกค้าที่สนใจ
+const OPENED_LABEL_RE = /เปิดบัญชี|ซื้อแล้ว|จ่ายแล้ว|โอนแล้ว|ชำระแล้ว/;
+const NOT_INTERESTED_LABEL_RE = /ไม่สนใจ|สแปม|spam/i;
+const chatLabels = (row) => [
+  ...(Array.isArray(row.tags) ? row.tags : []),
+  ...(Array.isArray(row.meta_labels) ? row.meta_labels.map((l) => (typeof l === "string" ? l : l?.name)) : []),
+].filter(Boolean).map(String);
+const isOpenedStage = (row) => TRACKER_OPENED_STAGES.has(row.stage_manual || row.stage) || chatLabels(row).some((l) => OPENED_LABEL_RE.test(l));
+const isNotInterested = (row) => !isOpenedStage(row) && chatLabels(row).some((l) => NOT_INTERESTED_LABEL_RE.test(l));
 
 // ดึงยอดลูกค้าที่ผูกกับแต่ละแอด (entry_ad_id) + ยอดรวม "ทั้งหมดแอดมิน" (ทุกช่องทาง ไม่ใช่แค่จากแอด)
 // ในช่วงเวลาเดียวกับที่แอดในรายงานนี้เปิดอยู่ — ใช้ต่อกับตัวเลขฝั่ง Meta (reach/conversations/engagement
@@ -2375,16 +2385,24 @@ function enrichTrackerRows(rows, byAd) {
   });
 }
 
-async function fetchTrackerLeadStats(rows) {
+async function fetchTrackerLeadStats(rows, range) {
   const adIds = [...new Set(rows.map((r) => r.ad_id).filter(Boolean))];
   const byAd = new Map(); // ad_id -> { total, opened }
+  // นับเฉพาะลูกค้าที่ทักครั้งแรกในช่วงเดียวกับค่าใช้จ่าย (ช่วงที่ export) ไม่งั้นเฉลี่ยราคาต่อคนเพี้ยน
+  // "ทั้งหมด" (maximum) = ไม่จำกัดวัน
+  const win = range ? presetToDates(range) : null;
   if (adIds.length) {
-    const { data } = await supabase.from("chat_customers").select("entry_ad_id, stage, stage_manual").in("entry_ad_id", adIds);
-    for (const l of data || []) {
-      const bucket = byAd.get(l.entry_ad_id) || { total: 0, opened: 0 };
-      bucket.total += 1;
-      if (isOpenedStage(l)) bucket.opened += 1;
-      byAd.set(l.entry_ad_id, bucket);
+    for (let i = 0; i < adIds.length; i += 200) {
+      let q = supabase.from("chat_customers").select("entry_ad_id, stage, stage_manual, tags, meta_labels").in("entry_ad_id", adIds.slice(i, i + 200));
+      if (win) q = q.gte("first_customer_message_at", `${win.since}T00:00:00+07:00`).lte("first_customer_message_at", `${win.until}T23:59:59+07:00`);
+      const { data } = await q;
+      for (const l of data || []) {
+        if (isNotInterested(l)) continue;
+        const bucket = byAd.get(l.entry_ad_id) || { total: 0, opened: 0 };
+        bucket.total += 1;
+        if (isOpenedStage(l)) bucket.opened += 1;
+        byAd.set(l.entry_ad_id, bucket);
+      }
     }
   }
 
@@ -2395,7 +2413,7 @@ async function fetchTrackerLeadStats(rows) {
     const until = `${dates[dates.length - 1]}T23:59:59+07:00`;
     const B = 1000;
     for (let from = 0, guard = 0; guard < 50; guard++, from += B) {
-      const { data } = await supabase.from("chat_customers").select("stage, stage_manual")
+      const { data } = await supabase.from("chat_customers").select("stage, stage_manual, tags, meta_labels")
         .gte("first_customer_message_at", since).lte("first_customer_message_at", until)
         .range(from, from + B - 1);
       for (const l of data || []) { adminTotal += 1; if (isOpenedStage(l)) adminOpened += 1; }
@@ -2405,9 +2423,9 @@ async function fetchTrackerLeadStats(rows) {
   return { byAd, adminTotal, adminOpened };
 }
 
-async function exportTrackerExcel(campaignName, rows) {
+async function exportTrackerExcel(campaignName, rows, range) {
   // โหลด ExcelJS เฉพาะตอนกด Export เพื่อไม่เพิ่มภาระให้หน้า Analyze ตอนเปิดใช้งานปกติ
-  const [{ default: ExcelJS }, { byAd, adminTotal, adminOpened }] = await Promise.all([import("exceljs"), fetchTrackerLeadStats(rows)]);
+  const [{ default: ExcelJS }, { byAd, adminTotal, adminOpened }] = await Promise.all([import("exceljs"), fetchTrackerLeadStats(rows, range)]);
   const wb = new ExcelJS.Workbook();
   wb.creator = "Besight";
   wb.created = new Date();
