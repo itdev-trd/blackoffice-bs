@@ -294,6 +294,31 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
     const userTv = f.username.trim();
     setBusy(true); setMsg(null);
 
+    // ลูกค้าที่มีข้อมูลอยู่แล้ว (เคยบันทึกไอดีเทรด/user TV/อีเมลไว้) แล้วแค่มาแก้ — แอดมินขอให้กดบันทึกได้เลย
+    // ไม่ต้องเลือก Indicator ก่อน · ถ้าเลือก Indicator ไว้ = ตั้งใจเพิ่มสิทธิ์ ก็ไปเส้นทางเดิมด้านล่าง
+    // ลูกค้าใหม่ที่ยังไม่มีข้อมูลเลยยังต้องเลือก Indicator ก่อนเหมือนเดิม
+    const prevTradeId = String(row?.trade_id || "").trim();
+    const prevUserTv = String(row?.username || "").trim();
+    const hasExisting = !!(prevTradeId || prevUserTv || String(row?.email || "").trim());
+    if (tvOn && hasExisting && !pineIds.length) {
+      // ไอดีเทรดเปลี่ยนต้องเช็คผ่านก่อน กันพิมพ์ผิดแล้วไปผูกกับบัญชีที่ไม่มีจริง
+      if (tradeId && tradeId !== prevTradeId) {
+        setMsg({ ok: true, text: "กำลังเช็คไอดีเทรดใหม่..." });
+        const { data: vt, error: ve } = await supabase.functions.invoke("verify-trade-id", { body: { trade_id: tradeId } });
+        if (ve || !vt?.ok) { setBusy(false); setMsg({ ok: false, text: "เช็คไอดีเทรดไม่สำเร็จ: " + (vt?.error || "ลองใหม่") }); return; }
+        if (!vt.pass) { setBusy(false); setMsg({ ok: false, text: `ไอดีเทรด "${tradeId}" ไม่ผ่าน — ยังไม่บันทึก` }); return; }
+      }
+      const r = await saveLeadFields();
+      setBusy(false);
+      if (!r.ok) { setMsg({ ok: false, text: "บันทึกไม่สำเร็จ: " + r.error }); return; }
+      // ปุ่มนี้แก้แค่ฐานข้อมูลลูกค้า ไม่แตะ TradingView — ถ้าเปลี่ยนชื่อ TV ของคนที่มีสิทธิ์อยู่แล้ว ต้องบอกให้ไปกดกล่องเหลือง
+      const tvStale = linkedTv && userTv && userTv.toLowerCase() !== String(linkedTv.username || "").trim().toLowerCase();
+      setMsg({ ok: true, text: tvStale
+        ? `✓ บันทึกข้อมูลลูกค้าแล้ว · สิทธิ์บน TradingView ยังเป็นชื่อ "${linkedTv.username}" — ถ้าจะย้ายสิทธิ์ไปชื่อใหม่ ให้กด "บันทึกการเปลี่ยนแปลง" ในกล่องสีเหลือง`
+        : "✓ บันทึกข้อมูลลูกค้าแล้ว (ไม่ได้เพิ่มสิทธิ์ Indicator)" });
+      return;
+    }
+
     // เส้นทางฟีเจอร์ TV (แอดมิน/ปล่อยแล้ว) และมีการป้อนไอดีเทรด/user TV
     if (tvOn && (tradeId || userTv)) {
       if (userTv && !tradeId) { setBusy(false); setMsg({ ok: false, text: "ต้องใส่ไอดีเทรดด้วยเมื่อจะเพิ่ม user TV" }); return; }
