@@ -32,7 +32,7 @@ import {
   KpiTile, MetricGroup, PlainTile, RangePicker, VerdictBadge,
 } from "@/components/features/analyze/analyzeCharts";
 import { lsGet, lsSet } from "@/lib/utils/storage";
-import { bangkokDate } from "@/lib/utils/date";
+import { bangkokDate, beToCe } from "@/lib/utils/date";
 import { logActivity } from "@/lib/utils/activity";
 import { readFunctionErrorMessage } from "@/lib/utils/errors";
 import { calculateVatInclusiveBudget } from "@/lib/budget-vat";
@@ -1500,6 +1500,18 @@ function CampaignOverviewView({ initialResult, campaignIds, range, textModel, on
   const [aiError, setAiError] = useState("");
   const [exportMenu, setExportMenu] = useState(false);
   const [trackerBusy, setTrackerBusy] = useState("");  // ข้อความความคืบหน้าตอนรวมไฟล์งบยิง Ads ทุกแคมเปญ
+  // ช่วงวันของไฟล์ export เลือกได้อิสระ ไม่ผูกกับช่วงที่ดูอยู่บนจอ — ค่าเริ่มต้น = ตามรายงาน
+  // custom = ใช้วันที่ที่เลือกเอง (ตั้งต้นจากช่วงของรายงาน ถ้าเป็น "ทั้งหมด" จะเว้นว่างให้เลือก)
+  const [expRange, setExpRange] = useState(() => {
+    const d = presetToDates(range) || { since: "", until: "" };
+    return { custom: false, since: d.since, until: d.until };
+  });
+  const todayStr = bangkokDate(new Date());
+  const expRangeError = !expRange.custom ? ""
+    : !expRange.since || !expRange.until ? "เลือกวันเริ่มและวันสิ้นสุดให้ครบ"
+    : expRange.since > expRange.until ? "วันเริ่มต้องไม่เกินวันสิ้นสุด"
+    : expRange.until > todayStr ? "วันสิ้นสุดต้องไม่เกินวันนี้" : "";
+  const exportRange = () => (expRange.custom ? { preset: "custom", since: expRange.since, until: expRange.until } : range);
   const [dashItem, setDashItem] = useState(() => lsGet("ov.dashItem", null));
   const [expandedCamps, setExpandedCamps] = useState(() => lsGet("ov.expandedCamps", {}));
   const toggleCamp = (id) => setExpandedCamps((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -1518,13 +1530,28 @@ function CampaignOverviewView({ initialResult, campaignIds, range, textModel, on
     setResult(data);
   }
 
+  // สรุปรายแคมเปญ: ช่วงตามรายงาน = ใช้ผลที่อยู่บนจอ (รวมคำวิเคราะห์ AI) · ช่วงกำหนดเอง = ดึงตัวเลขช่วงนั้นใหม่
+  async function runSummary(label, fn) {
+    if (expRangeError) return;
+    logActivity("export", { format: label, name: "รายงานแคมเปญ", range: rangeLabel(exportRange()) });
+    if (!expRange.custom) { fn(result); return; }
+    setTrackerBusy("กำลังดึงตัวเลขช่วงที่เลือก...");
+    try {
+      const { data, error } = await supabase.functions.invoke("analyze-campaigns", {
+        body: { campaign_ids: campaignIds, ...rangeToBody(exportRange()), text_model: textModel, use_ai: false },
+      });
+      if (error || !data?.ok) { alert(`ดึงข้อมูลไม่สำเร็จ: ${data?.error || (await readFunctionErrorMessage(error)) || "ลองใหม่"}`); return; }
+      fn(data);
+    } finally { setTrackerBusy(""); }
+  }
+
   async function runTrackerAll(fmt) {
     const camps = result.campaigns || [];
-    if (!camps.length) return;
+    if (!camps.length || expRangeError) return;
     setTrackerBusy(`กำลังดึง 0/${camps.length} แคมเปญ...`);
-    logActivity("export", { format: `งบยิง Ads รวมแคมเปญ (${fmt})`, count: camps.length });
+    logActivity("export", { format: `งบยิง Ads รวมแคมเปญ (${fmt})`, count: camps.length, range: rangeLabel(exportRange()) });
     try {
-      const { title, rows } = await fetchCampaignsTree(camps, range, (n, total) => setTrackerBusy(`กำลังดึง ${n}/${total} แคมเปญ...`));
+      const { title, rows } = await fetchCampaignsTree(camps, exportRange(), (n, total) => setTrackerBusy(`กำลังดึง ${n}/${total} แคมเปญ...`));
       if (!rows.length) { alert("ไม่พบโฆษณาในแคมเปญที่เลือก (หรือดึงข้อมูลไม่สำเร็จ)"); return; }
       setTrackerBusy("กำลังสร้างไฟล์...");
       if (fmt === "excel") await exportTrackerExcel(title, rows);
@@ -1559,15 +1586,43 @@ function CampaignOverviewView({ initialResult, campaignIds, range, textModel, on
               {exportMenu && (
                 <>
                   <div className="fixed inset-0 z-10" onClick={() => setExportMenu(false)} />
-                  <div className="absolute right-0 mt-1 z-20 bg-white border border-slate-200 rounded-lg shadow-lg py-1 min-w-[230px] overflow-hidden">
+                  <div className="absolute right-0 mt-1 z-20 bg-white border border-slate-200 rounded-lg shadow-lg py-1 w-[280px] max-w-[calc(100vw-32px)] overflow-hidden">
+                    {/* ช่วงวันของไฟล์ — ใช้กับทุกรูปแบบในเมนูนี้ */}
+                    <div className="px-3 pt-1.5 pb-2 space-y-1.5 border-b border-slate-100">
+                      <div className="text-[10px] font-semibold text-slate-400">ช่วงวันที่ในไฟล์</div>
+                      <div className="grid grid-cols-2 gap-1">
+                        {[[false, `ตามรายงาน (${rangeLabel(range)})`], [true, "เลือกวันเอง"]].map(([v, l]) => (
+                          <button key={String(v)} type="button" onClick={() => setExpRange((r) => ({ ...r, custom: v }))}
+                            className={`rounded-md border px-1.5 py-1 text-[11px] font-medium leading-tight ${expRange.custom === v ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+                            {l}
+                          </button>
+                        ))}
+                      </div>
+                      {expRange.custom && (
+                        <div className="grid grid-cols-2 gap-1">
+                          <label className="text-[10px] text-slate-400">ตั้งแต่
+                            <input type="date" value={expRange.since} max={expRange.until || todayStr}
+                              onChange={(e) => setExpRange((r) => ({ ...r, since: beToCe(e.target.value) }))}
+                              className="mt-0.5 w-full rounded-md border border-slate-300 px-1.5 py-1 text-[11px] text-slate-700" />
+                          </label>
+                          <label className="text-[10px] text-slate-400">ถึง
+                            <input type="date" value={expRange.until} min={expRange.since || undefined} max={todayStr}
+                              onChange={(e) => setExpRange((r) => ({ ...r, until: beToCe(e.target.value) }))}
+                              className="mt-0.5 w-full rounded-md border border-slate-300 px-1.5 py-1 text-[11px] text-slate-700" />
+                          </label>
+                        </div>
+                      )}
+                      {expRangeError && <div className="text-[10.5px] text-rose-600">{expRangeError}</div>}
+                      {expRange.custom && !expRangeError && <div className="text-[10px] text-slate-400">สรุปรายแคมเปญจะเป็นตัวเลขล้วน (ไม่มีคำวิเคราะห์ AI)</div>}
+                    </div>
                     <div className="px-3 pt-1 pb-0.5 text-[10px] font-semibold text-slate-400">สรุปรายแคมเปญ</div>
                     {[
-                      ["PDF (พิมพ์/บันทึก)", () => exportCampaignAnalysisPdf(result)],
-                      ["Excel (.xls)", () => exportCampaignAnalysisExcel(result)],
-                      ["CSV", () => exportCampaignAnalysisCsv(result)],
+                      ["PDF (พิมพ์/บันทึก)", (r) => exportCampaignAnalysisPdf(r)],
+                      ["Excel (.xls)", (r) => exportCampaignAnalysisExcel(r)],
+                      ["CSV", (r) => exportCampaignAnalysisCsv(r)],
                     ].map(([label, fn]) => (
-                      <button key={label} onClick={() => { logActivity("export", { format: label, name: "รายงานแคมเปญ" }); fn(); setExportMenu(false); }}
-                        className="w-full text-left text-xs px-3 py-2 hover:bg-slate-50 text-slate-700 flex items-center gap-2">
+                      <button key={label} disabled={!!expRangeError} onClick={() => { setExportMenu(false); runSummary(label, fn); }}
+                        className="w-full text-left text-xs px-3 py-2 hover:bg-slate-50 text-slate-700 flex items-center gap-2 disabled:opacity-40 disabled:hover:bg-transparent">
                         <FileDown size={13} className="text-slate-400" /> {label}
                       </button>
                     ))}
@@ -1578,8 +1633,8 @@ function CampaignOverviewView({ initialResult, campaignIds, range, textModel, on
                       ["งบยิง Ads (Excel)", "excel"],
                       ["งบยิง Ads (CSV)", "csv"],
                     ].map(([label, fmt]) => (
-                      <button key={label} onClick={() => { setExportMenu(false); runTrackerAll(fmt); }}
-                        className="w-full text-left text-xs px-3 py-2 hover:bg-slate-50 text-slate-700 flex items-center gap-2">
+                      <button key={label} disabled={!!expRangeError} onClick={() => { setExportMenu(false); runTrackerAll(fmt); }}
+                        className="w-full text-left text-xs px-3 py-2 hover:bg-slate-50 text-slate-700 flex items-center gap-2 disabled:opacity-40 disabled:hover:bg-transparent">
                         <FileDown size={13} className="text-emerald-500" /> {label}
                       </button>
                     ))}
