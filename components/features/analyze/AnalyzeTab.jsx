@@ -419,7 +419,7 @@ function AdDashboardModal({ ad, ai, onClose, onNavigate }) {
       if (!rows.length) { alert("ไม่พบโฆษณาในแคมเปญนี้ (หรือดึงข้อมูลไม่สำเร็จ)"); return; }
       if (fmt === "pdf") exportTrackerPdf(campaignName, rows);
       else if (fmt === "excel") await exportTrackerExcel(campaignName, rows);
-      else exportTrackerCsv(campaignName, rows);
+      else await exportTrackerCsv(campaignName, rows);
     } catch (error) {
       alert(`สร้างไฟล์ไม่สำเร็จ: ${error?.message || error}`);
     } finally { setTrackerBusy(false); }
@@ -1555,7 +1555,7 @@ function CampaignOverviewView({ initialResult, campaignIds, range, textModel, on
       if (!rows.length) { alert("ไม่พบโฆษณาในแคมเปญที่เลือก (หรือดึงข้อมูลไม่สำเร็จ)"); return; }
       setTrackerBusy("กำลังสร้างไฟล์...");
       if (fmt === "excel") await exportTrackerExcel(title, rows);
-      else exportTrackerCsv(title, rows);
+      else await exportTrackerCsv(title, rows);
     } catch (error) {
       alert(`สร้างไฟล์ไม่สำเร็จ: ${error?.message || error}`);
     } finally { setTrackerBusy(""); }
@@ -2275,24 +2275,32 @@ async function fetchCampaignsTree(campaigns, range, onProgress) {
   return { title, rows: trees.flatMap((t) => t.rows) };
 }
 
-function exportTrackerCsv(campaignName, rows) {
+// CSV ใช้คอลัมน์/ตัวเลขชุดเดียวกับไฟล์ Excel (รายงานผล Ads) — เดิมเป็นเทมเพลตเก่า 12 คอลัมน์
+// (ID โฆษณา/BG/คงเหลือ/ยอดซื้อ) เปิดใน Google Sheets แล้วไม่ตรงกับ Excel ที่ทีมใช้
+// CSV ใส่สี/รูป/รวมเซลล์ไม่ได้ ช่อง "ภาพ ADS" จึงเป็นลิงก์รูป และชื่อแคมเปญ/ชุดโฆษณาโชว์เฉพาะแถวแรกของกลุ่ม
+async function exportTrackerCsv(campaignName, rows) {
+  const { byAd } = await fetchTrackerLeadStats(rows);
+  const enriched = enrichTrackerRows(rows, byAd);
   const esc = (v) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const n2 = (v) => (Number(v) || 0).toFixed(2);
   const lines = [
-    [`สรุปงบยิงโฆษณา — ${campaignName}`].map(esc).join(","),
-    ["BG คงเหลือเดือนที่แล้ว", "", "BG เดือนนี้", "", "ยอดรวม", ""].map(esc).join(","),
-    TRACKER_HEADERS.map(esc).join(","),
-  ];
-  let total = 0, lastCamp = null, lastAdset = null;
-  for (const r of rows) {
-    if (r.spend != null) total += r.spend;
+    [`สรุปงบยิงโฆษณา — ${campaignName}`],
+    ["BG คงเหลือเดือนที่แล้ว", "", "", "", "", "BG เดือนนี้", "", "", "", "", "ยอดรวม"],
+    ["", "", "", "", "", "", "", "", "", "", ""],
+    TRACKER_REPORT_HEADERS,
+  ].map((r) => r.map(esc).join(","));
+  let lastCamp = null, lastAdset = null;
+  for (const r of enriched) {
     const rc = r.campaign ?? campaignName;
     const newCamp = rc !== lastCamp;
     const camp = newCamp ? rc : ""; lastCamp = rc;
     const adset = !newCamp && r.adset === lastAdset ? "" : r.adset; lastAdset = r.adset;
-    lines.push([camp, adset, r.ad, r.thumb || "", r.ad_id, "", r.spend != null ? money2(r.spend) : "", "", r.start, r.stopDate, "", ""].map(esc).join(","));
+    lines.push([camp, adset, r.ad, r.thumb || "", r.conversations, r.engagement, n2(r.avgPerConvo), n2(r.spend), r.reach, r.start, r.stopDate, r.leadsTotal, r.leadsOpened, n2(r.avgPerOpened)].map(esc).join(","));
   }
-  lines.push(["ผลรวม", "", "", "", "", "", money2(total), "", "", "", "", ""].map(esc).join(","));
-  downloadBlob(new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8" }), trackerFileName(campaignName, "csv"));
+  const sum = (k) => enriched.reduce((s, r) => s + (r[k] || 0), 0);
+  const totalSpend = sum("spend"), totalConvo = sum("conversations"), totalOpened = sum("leadsOpened");
+  lines.push(["ผลรวม", "", "", "", totalConvo, sum("engagement"), n2(totalConvo > 0 ? totalSpend / totalConvo : 0), n2(totalSpend), sum("reach"), "", "", sum("leadsTotal"), totalOpened, n2(totalOpened > 0 ? totalSpend / totalOpened : 0)].map(esc).join(","));
+  downloadBlob(new Blob(["\ufeff" + lines.join("\n")], { type: "text/csv;charset=utf-8" }), trackerFileName(campaignName, "csv"));
 }
 function trackerBodyHtml(campaignName, rows, { withImg }) {
   const esc = escHtml;
@@ -2349,6 +2357,24 @@ const isOpenedStage = (row) => TRACKER_OPENED_STAGES.has(row.stage_manual || row
 // ดึงยอดลูกค้าที่ผูกกับแต่ละแอด (entry_ad_id) + ยอดรวม "ทั้งหมดแอดมิน" (ทุกช่องทาง ไม่ใช่แค่จากแอด)
 // ในช่วงเวลาเดียวกับที่แอดในรายงานนี้เปิดอยู่ — ใช้ต่อกับตัวเลขฝั่ง Meta (reach/conversations/engagement
 // ที่ list-children ดึงมาให้อยู่แล้วผ่าน buildMetrics ใน _shared/ad-metrics.ts ไม่ต้องยิง Meta เพิ่ม)
+// หัวคอลัมน์ "รายงานผล Ads" — ใช้ร่วมกันทั้ง Excel และ CSV ให้สองไฟล์ตรงกันเสมอ
+const TRACKER_REPORT_HEADERS = ["Campaign", "ชุดโฆษณา", "โฆษณา", "ภาพ ADS", "จำนวนทักทั้งหมด", "การมีส่วนร่วม", "เฉลี่ยต่อทัก", "ค่าใช้จ่าย", "การเข้าถึง", "วันที่เปิด ADS", "วันที่ปิด ADS", "ลูกค้าที่สนใจ", "ลูกค้าที่เปิดบัญชี", "เฉลี่ยราคาต่อคน"];
+function enrichTrackerRows(rows, byAd) {
+  return rows.map((r) => {
+    const conversations = Number(r.metrics?.conversations) || 0;
+    const engagement = Number(r.metrics?.engagement) || 0;
+    const reach = Number(r.metrics?.reach) || 0;
+    const spend = r.spend == null ? 0 : Number(r.spend);
+    const leads = byAd.get(r.ad_id) || { total: 0, opened: 0 };
+    return {
+      ...r, conversations, engagement, reach, spend,
+      leadsTotal: leads.total, leadsOpened: leads.opened,
+      avgPerConvo: conversations > 0 ? spend / conversations : 0,
+      avgPerOpened: leads.opened > 0 ? spend / leads.opened : 0,
+    };
+  });
+}
+
 async function fetchTrackerLeadStats(rows) {
   const adIds = [...new Set(rows.map((r) => r.ad_id).filter(Boolean))];
   const byAd = new Map(); // ad_id -> { total, opened }
@@ -2391,19 +2417,7 @@ async function exportTrackerExcel(campaignName, rows) {
   // เข้ากับเลขฝั่งเรา (ลูกค้าที่สนใจ/เปิดบัญชี จาก chat_customers.entry_ad_id) ต่อแอดหนึ่งตัว
   // "จำนวนทักทั้งหมด" (Meta) กับ "ลูกค้าที่สนใจ" (DB) มักไม่เท่ากันเป๊ะโดยตั้งใจ — Meta นับ
   // "บทสนทนาเริ่มต้น" ส่วน DB เก็บทุกคนที่เคยทักจริงตามที่ระบบผูก entry_ad_id ไว้ คนละตัวชี้วัดที่คู่กัน
-  const enriched = rows.map((r) => {
-    const conversations = Number(r.metrics?.conversations) || 0;
-    const engagement = Number(r.metrics?.engagement) || 0;
-    const reach = Number(r.metrics?.reach) || 0;
-    const spend = r.spend == null ? 0 : Number(r.spend);
-    const leads = byAd.get(r.ad_id) || { total: 0, opened: 0 };
-    return {
-      ...r, conversations, engagement, reach, spend,
-      leadsTotal: leads.total, leadsOpened: leads.opened,
-      avgPerConvo: conversations > 0 ? spend / conversations : 0,
-      avgPerOpened: leads.opened > 0 ? spend / leads.opened : 0,
-    };
-  });
+  const enriched = enrichTrackerRows(rows, byAd);
 
   const report = wb.addWorksheet("รายงานผล Ads", {
     views: [{ state: "frozen", ySplit: 8, showGridLines: false }],
@@ -2413,7 +2427,7 @@ async function exportTrackerExcel(campaignName, rows) {
   const navy = "172033", green = "256D5A", paleGold = "FFF2B8", paleGreen = "E6F4EE", openedGreen = "E2F0D9", white = "FFFFFF", slate = "475569", border = "CBD5E1";
   const thinBorder = { top: { style: "thin", color: { argb: border } }, left: { style: "thin", color: { argb: border } }, bottom: { style: "thin", color: { argb: border } }, right: { style: "thin", color: { argb: border } } };
 
-  const HEADERS = ["Campaign", "ชุดโฆษณา", "โฆษณา", "ภาพ ADS", "จำนวนทักทั้งหมด", "การมีส่วนร่วม", "เฉลี่ยต่อทัก", "ค่าใช้จ่าย", "การเข้าถึง", "วันที่เปิด ADS", "วันที่ปิด ADS", "ลูกค้าที่สนใจ", "ลูกค้าที่เปิดบัญชี", "เฉลี่ยราคาต่อคน"];
+  const HEADERS = TRACKER_REPORT_HEADERS;
   const lastCol = HEADERS.length; // 14 = N
 
   report.columns = [20, 24, 28, 20, 16, 16, 15, 16, 14, 15, 15, 15, 17, 17].map((width) => ({ width }));
