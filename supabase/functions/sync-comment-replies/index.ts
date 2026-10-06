@@ -1,7 +1,7 @@
 // ตรวจเฉพาะคอมเมนต์ที่มีอยู่ใน Inbox และยังค้างตอบ ว่าเพจได้ตอบจาก Facebook โดยตรงแล้วหรือยัง
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getMetaToken } from "../_shared/meta.ts";
-import { getMetaPages } from "../_shared/meta-pages.ts";
+import { getChatPages } from "../_shared/meta-pages.ts";
 import { authorizeRequest } from "../_shared/permissions.ts";
 import { getMetaBackgroundGuard, recordMetaUsage } from "../_shared/meta-rate.ts";
 import { MAX_TRANSCRIPT_ITEMS } from "../_shared/transcript-cap.ts";
@@ -47,7 +47,7 @@ Deno.serve(async (req) => {
     if (!rows?.length) return json({ ok: true, checked: 0, reconciled: 0 });
 
     const token = await getMetaToken();
-    const pages = await getMetaPages(GRAPH_BASE, token);
+    const pages = await getChatPages(GRAPH_BASE);
     const pageTokens = new Map((pages?.data || []).map((p: any) => [String(p.id), String(p.access_token || "")]));
     let reconciled = 0;
     for (let offset = 0; offset < rows.length; offset += 10) {

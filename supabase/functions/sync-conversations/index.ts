@@ -8,8 +8,8 @@
 // upsert เป็นชุดๆ ทันที (ไม่สะสมใน memory) กัน "not enough compute resources"
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { getMetaToken } from "../_shared/meta.ts";
-import { getMetaPages } from "../_shared/meta-pages.ts";
+import { getMetaToken, getMetaTokenForNode } from "../_shared/meta.ts";
+import { getChatPages } from "../_shared/meta-pages.ts";
 import { contentHashOf } from "../_shared/chat-extract.ts";
 import { hasFullData, authorizeRequest } from "../_shared/permissions.ts";
 import { getMetaBackgroundGuard, recordMetaUsage } from "../_shared/meta-rate.ts";
@@ -96,7 +96,7 @@ async function fillMissingAdNames(admin: any, base: string, token: string): Prom
   for (const adId of ids) {
     let name = titleByAd[adId] ?? null;
     if (!name) {
-      const res = await fetchJson(`${base}/${adId}?fields=name&access_token=${token}`, 2);
+      const res = await fetchJson(`${base}/${adId}?fields=name&access_token=${await getMetaTokenForNode(adId) || token}`, 2);
       name = res?.error ? null : safeShort(res?.name, 300);
     }
     if (!name) continue;
@@ -193,7 +193,7 @@ Deno.serve(async (req) => {
     if (job === "read_status") {
       const token = await getMetaToken();
       if (!token) return jsonResp({ ok: false, error: "ยังไม่ได้ตั้งค่า Meta access token" });
-      const pagesData = await getMetaPages(base, token, { mustIncludePageId: onlyPage || undefined });
+      const pagesData = await getChatPages(base, { mustIncludePageId: onlyPage || undefined });
       let pages = (pagesData?.data ?? []).filter((p: any) => p.access_token);
       pages = onlyPage ? pages.filter((p: any) => p.id === onlyPage) : pages.filter((p: any) => enabledMap[p.id] !== false);
       if (!auth.isService && !(auth.permission && hasFullData(auth.permission))) {
@@ -279,7 +279,7 @@ Deno.serve(async (req) => {
     // ================= ปุ่มซิงก์: ดึงข้อมูลลูกค้าอย่างเดียว (ไม่ใช้ AI) =================
     const token = await getMetaToken();
     if (!token) throw new Error("ยังไม่ได้ตั้งค่า Meta access token (ตั้งได้ในหน้าตั้งค่า)");
-    const pagesData = await getMetaPages(base, token, { mustIncludePageId: onlyPage || undefined });
+    const pagesData = await getChatPages(base, { mustIncludePageId: onlyPage || undefined });
     if (pagesData?.error) throw new Error(pagesData.error.message || "ดึงรายชื่อเพจไม่สำเร็จ (ต้องมีสิทธิ์ pages_show_list/pages_messaging)");
     let pages = (pagesData?.data ?? []).filter((p: any) => p.access_token);
     if (onlyPage) pages = pages.filter((p: any) => p.id === onlyPage);

@@ -3,7 +3,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getMetaToken } from "../_shared/meta.ts";
-import { getMetaPages } from "../_shared/meta-pages.ts";
+import { getChatPages } from "../_shared/meta-pages.ts";
 import { authorizeRequest } from "../_shared/permissions.ts";
 import { getMetaBackgroundGuard, recordMetaUsage } from "../_shared/meta-rate.ts";
 
@@ -44,7 +44,7 @@ Deno.serve(async (req) => {
     if (guard.blocked) return json({ ok: true, upserted: 0, skipped: "rate_guard" });
     const token = await getMetaToken();
     if (!token) return json({ ok: false, error: "ยังไม่ได้ตั้งค่า Meta access token" });
-    const pagesData = await getMetaPages(GRAPH_BASE, token);
+    const pagesData = await getChatPages(GRAPH_BASE);
     let pages = (pagesData?.data ?? []).filter((p: any) => p.access_token && p.instagram_business_account?.id);
     if (requested.length) pages = pages.filter((p: any) => requested.includes(String(p.id)));
     if (!pages.length) return json({ ok: true, upserted: 0, skipped: "no_instagram_pages" });

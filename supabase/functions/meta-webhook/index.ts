@@ -7,7 +7,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getMetaToken, getWebhookAppSecrets, getWebhookVerifyTokens } from "../_shared/meta.ts";
-import { getMetaPages } from "../_shared/meta-pages.ts";
+import { getChatPages } from "../_shared/meta-pages.ts";
 import { getSelectedCommentPageIds, resolveCommentAds } from "../_shared/comment-realtime.ts";
 import { MAX_TRANSCRIPT_ITEMS } from "../_shared/transcript-cap.ts";
 
@@ -189,7 +189,7 @@ Deno.serve(async (req) => {
       }
       const selectedCommentPageIds = await getSelectedCommentPageIds(admin);
       const userToken = await getMetaToken();
-      let pagesData = await getMetaPages(GRAPH_BASE, userToken);
+      let pagesData = await getChatPages(GRAPH_BASE);
       let pages = pagesData?.data ?? [];
       // Refresh only when a genuinely new IG account is not in the 24h cache.
       // Previously every IG message/echo bypassed the cache and called /me/accounts.
@@ -197,7 +197,7 @@ Deno.serve(async (req) => {
         igId && !pages.some((p: any) => String(p?.instagram_business_account?.id || "") === igId)
       );
       if (missingIg) {
-        pagesData = await getMetaPages(GRAPH_BASE, userToken, { mustIncludeInstagramAccountId: missingIg });
+        pagesData = await getChatPages(GRAPH_BASE, { mustIncludeInstagramAccountId: missingIg });
         pages = pagesData?.data ?? [];
       }
       for (const entry of payload.entry || []) {

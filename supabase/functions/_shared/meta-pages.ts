@@ -133,3 +133,50 @@ export async function getMetaPages(
     slot.inFlight = null;
   }
 }
+
+/**
+ * เพจสำหรับงาน "อ่านแชท" (ดึงห้องแชท/IG/คอมเมนต์/webhook) — รวมเพจจาก token ตอบแชทกับ token หลัก
+ *
+ * ทำไม: 6 ต.ค. 69 แอปหลัก (besight-backend) โดน Meta ตอบ "API access blocked." ทุกคำขอ
+ * page token ที่แลกจาก token หลัก (แคชไว้ 24 ชม.) ใช้ไม่ได้ทั้งหมด → ดึงแชทไม่ได้เลยทั้งที่ token ตอบแชท
+ * (แอปที่มี Advanced Access) ยังใช้ได้และเห็นเพจเดียวกัน
+ * จึงเอา page token ของ token ตอบแชทก่อน แล้วเติมเพจที่มีแค่ฝั่ง token หลักต่อท้าย
+ * ไม่ได้ตั้ง token ตอบแชท = ได้ผลเหมือน getMetaPages(token หลัก) เดิมทุกอย่าง
+ */
+export async function getChatPages(
+  base: string,
+  options: { forceRefresh?: boolean; mustIncludePageId?: string; mustIncludeInstagramAccountId?: string; mustIncludeInstagramForPageId?: string } = {},
+): Promise<any> {
+  const { getMetaMessagingContext, getMetaToken } = await import("./meta.ts");
+  const msg = await getMetaMessagingContext();
+  const mainToken = await getMetaToken();
+  const lists: any[][] = [];
+  let firstError: any = null;
+  // เพจของระบบนี้ = เพจที่ token หลักเห็น (getMetaPages คืนแคชเก่าให้แม้ token หลักใช้ไม่ได้)
+  // token ตอบแชทเป็นของแอปอื่นที่เห็นเพจของธุรกิจอื่นด้วย (20+ เพจ) — ห้ามดึงแชทเพจพวกนั้นเข้ามา
+  // (เคยหลุด 6 ต.ค. 69: ดึงแชทเพจคนอื่นเข้ามา ~450 ห้องในรอบเดียว) · page_lead_config ใช้แยกไม่ได้
+  // เพราะมีแถว sync_enabled=true ของทุกเพจที่ token ตอบแชทเห็นอยู่แล้ว
+  let mainPages: any[] = [];
+  if (mainToken) {
+    const r = await getMetaPages(base, mainToken, options);
+    if (Array.isArray(r?.data)) mainPages = r.data; else firstError = r?.error;
+  }
+  const allowed = new Set(mainPages.map((p: any) => String(p?.id || "")));
+  if (msg.dedicated && msg.token) {
+    // ไม่ส่ง mustInclude* ให้ฝั่งตอบแชท — เพจที่ token นี้ไม่เห็นจะทำให้ดึงสดทุกครั้งโดยเปล่าประโยชน์
+    const r = await getMetaPages(base, msg.token, { forceRefresh: options.forceRefresh, cacheKey: msg.cacheKey });
+    if (Array.isArray(r?.data)) lists.push(r.data.filter((p: any) => allowed.has(String(p?.id || ""))));
+    else firstError = firstError || r?.error;
+  }
+  lists.push(mainPages);
+  const byId = new Map<string, any>();
+  for (const list of lists) for (const p of list) {
+    const id = String(p?.id || "");
+    if (!id) continue;
+    const cur = byId.get(id);
+    if (!cur) byId.set(id, p);
+    else if (!cur.instagram_business_account && p.instagram_business_account) byId.set(id, { ...cur, instagram_business_account: p.instagram_business_account });
+  }
+  const data = [...byId.values()];
+  return data.length ? { data } : (firstError ? { error: firstError } : { data: [] });
+}
