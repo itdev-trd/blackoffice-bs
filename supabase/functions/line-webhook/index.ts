@@ -83,8 +83,9 @@ async function saveLineMedia(admin: any, accessToken: string, messageId: string,
 const normTrigger = (v: unknown) => String(v ?? "").normalize("NFC").replace(/\s+/g, " ").trim().toLowerCase();
 async function loadLineAutoReplies(admin: any): Promise<any[]> {
   try {
-    const { data } = await admin.from("saved_replies").select("id, page_id, title, message, image_url, image_urls, line_triggers").neq("line_triggers", "{}");
-    return data || [];
+    // ตารางเล็ก (ไม่กี่สิบแถว) — กรองฝั่งโค้ดแทนตัวกรอง array ของ PostgREST ที่พลาดง่าย
+    const { data } = await admin.from("saved_replies").select("id, page_id, title, message, image_url, image_urls, line_triggers");
+    return (data || []).filter((r: any) => Array.isArray(r.line_triggers) && r.line_triggers.length);
   } catch (_) { return []; }
 }
 // ลำดับเหมือนที่ LINE ส่งจริง: รูปแรก (โปสเตอร์) → ข้อความ → รูปที่เหลือ (เช่นปุ่มเลือกท้ายข้อความ)
