@@ -87,7 +87,9 @@ async function loadLineAutoReplies(admin: any): Promise<any[]> {
     return data || [];
   } catch (_) { return []; }
 }
-function autoReplyItems(rules: any[], pageId: string, text: string, at: string, mid: string) {
+// ลำดับเหมือนที่ LINE ส่งจริง: รูปแรก (โปสเตอร์) → ข้อความ → รูปที่เหลือ (เช่นปุ่มเลือกท้ายข้อความ)
+// ข้อความแยกเป็นหลายบับเบิลได้ด้วยบรรทัดที่มีแค่ "---" · {ชื่อผู้ใช้} = ชื่อ LINE ของลูกค้า (แบบที่ LINE แทนให้)
+function autoReplyItems(rules: any[], pageId: string, text: string, at: string, mid: string, customerName = "") {
   const key = normTrigger(text);
   if (!key) return [];
   const rule = rules.find((r) => (!r.page_id || r.page_id === pageId) && (r.line_triggers || []).some((t: string) => normTrigger(t) === key));
@@ -95,11 +97,17 @@ function autoReplyItems(rules: any[], pageId: string, text: string, at: string, 
   const base = new Date(at).getTime();
   const by = "ตอบอัตโนมัติ (LINE OA)";
   const imgs: string[] = Array.isArray(rule.image_urls) && rule.image_urls.length ? rule.image_urls : rule.image_url ? [rule.image_url] : [];
-  const out: any[] = [];
-  // ลำดับเหมือน LINE: รูปก่อนแล้วตามด้วยข้อความ (ตามที่แอดมินเห็นในแอป LINE)
-  imgs.forEach((url, k) => out.push({ w: "p", t: "[รูปภาพ]", img: url, at: new Date(base + 1 + k).toISOString(), mid: `auto_${mid}_${k}`, via: "line", by, auto_reply: "line_oa", saved_reply_id: rule.id }));
-  if (String(rule.message || "").trim()) out.push({ w: "p", t: String(rule.message), at: new Date(base + 1 + imgs.length).toISOString(), mid: `auto_${mid}_t`, via: "line", by, auto_reply: "line_oa", saved_reply_id: rule.id });
-  return out;
+  const bubbles = String(rule.message || "").replace(/\{ชื่อผู้ใช้\}/g, customerName || "คุณลูกค้า")
+    .split(/\n\s*---\s*\n/).map((b) => b.trim()).filter(Boolean);
+  const seq: { img?: string; t?: string }[] = [
+    ...(imgs[0] ? [{ img: imgs[0] }] : []),
+    ...bubbles.map((t) => ({ t })),
+    ...imgs.slice(1).map((img) => ({ img })),
+  ];
+  return seq.map((x, k) => ({
+    w: "p", t: x.img ? "[รูปภาพ]" : x.t, ...(x.img ? { img: x.img } : {}),
+    at: new Date(base + 1 + k).toISOString(), mid: `auto_${mid}_${k}`, via: "line", by, auto_reply: "line_oa", saved_reply_id: rule.id,
+  }));
 }
 
 Deno.serve(async (req) => {
@@ -145,7 +153,7 @@ Deno.serve(async (req) => {
         ...(stickerUrl ? { img: stickerUrl, sticker: true, sticker_id: String(event.message.stickerId), package_id: String(event.message.packageId || "") } : {}),
         ...(event.message?.markAsReadToken ? { mark_as_read_token: String(event.message.markAsReadToken) } : {}),
       };
-      const autos = event.message?.type === "text" ? autoReplyItems(autoRules, pageId, text, at, mid || String(Date.now())) : [];
+      const autos = event.message?.type === "text" ? autoReplyItems(autoRules, pageId, text, at, mid || String(Date.now()), profile.displayName || "") : [];
       const row = {
         id, source: "line", page_id: pageId, page_name: pageName, psid: userId,
         customer_name: profile.displayName || "ลูกค้า LINE", profile_pic: profile.pictureUrl || null,

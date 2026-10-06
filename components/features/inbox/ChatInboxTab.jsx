@@ -646,7 +646,9 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     if (openSeq !== openRequestRef.current.seq) return;
     if (error) { setSavedErr(error.message); setSavedReplies([]); return; }
     const brandIds = new Set((pageBrands || []).filter((b) => Array.isArray(b.pages) && b.pages.map(String).includes(String(pageId))).map((b) => String(b.id)));
-    const items = (data || []).filter((r) => !r.brand_id || brandIds.has(String(r.brand_id))).map((r) => ({
+    // ข้อความที่มีคำทริกเกอร์ LINE เป็นสำเนาของข้อความที่ LINE ตอบอัตโนมัติไปแล้ว (มี --- / {ชื่อผู้ใช้} ไว้แสดงผล)
+    // ไม่เอามาให้กดส่งซ้ำ — ส่งไปลูกค้าจะเห็นเครื่องหมายพวกนั้นตรง ๆ
+    const items = (data || []).filter((r) => !(Array.isArray(r.line_triggers) && r.line_triggers.length)).filter((r) => !r.brand_id || brandIds.has(String(r.brand_id))).map((r) => ({
       id: r.id, title: r.title, message: r.message || "",
       // แถวเก่ามีแต่ image_url เดี่ยว แถวใหม่ใช้ image_urls — รวมเป็นรายการเดียวเสมอ
       images: Array.isArray(r.image_urls) && r.image_urls.length ? r.image_urls : (r.image_url ? [r.image_url] : []),
