@@ -1821,7 +1821,7 @@ export function SavedRepliesPanel({ allowedPages = null }) {
     supabase.from("tv_brands").select("id, name, active").eq("active", true).order("name").then(({ data }) =>
       setBrands(data || []));
   }, []);
-  const addNew = () => setItems((it) => [{ _new: true, tmp: Date.now(), title: "", message: "", image_urls: [], page_id: null, brand_id: null }, ...(it || [])]);
+  const addNew = () => setItems((it) => [{ _new: true, tmp: Date.now(), title: "", message: "", image_urls: [], page_id: null, brand_id: null, line_triggers: [] }, ...(it || [])]);
   const setField = (idx, k, v) => setItems((it) => it.map((x, i) => (i === idx ? { ...x, [k]: v } : x)));
   // แถวเก่ามีแต่ image_url เดี่ยว — อ่านให้เป็นรายการเสมอ จะได้ไม่ต้องเช็คสองแบบทุกที่
   const imagesOf = (it) => (Array.isArray(it.image_urls) && it.image_urls.length ? it.image_urls : it.image_url ? [it.image_url] : []);
@@ -1862,7 +1862,9 @@ export function SavedRepliesPanel({ allowedPages = null }) {
     if (!it.message?.trim() && !imgs.length) { alert("ต้องมีข้อความหรือรูปอย่างน้อยอย่างหนึ่ง"); return; }
     setSaving(it.id || it.tmp);
     // image_url เก็บรูปแรกไว้เสมอ เพื่อให้ระบบเก่าที่อ่านคอลัมน์เดี่ยวยังใช้ได้
-    const payload = { page_id: it.page_id || null, brand_id: it.brand_id || null, title: it.title || null, message: it.message || "", image_urls: imgs, image_url: imgs[0] || null, updated_at: new Date().toISOString() };
+    // คำที่ลูกค้าพิมพ์/กดเมนูใน LINE — คั่นด้วยจุลภาคหรือขึ้นบรรทัดใหม่ (ช่องเป็นข้อความดิบ แปลงเป็นรายการตอนบันทึก)
+    const triggers = String(it.line_triggers_text ?? (it.line_triggers || []).join(", ")).split(/[,\n]/).map((t) => t.trim()).filter(Boolean);
+    const payload = { page_id: it.page_id || null, brand_id: it.brand_id || null, title: it.title || null, message: it.message || "", image_urls: imgs, image_url: imgs[0] || null, line_triggers: triggers, updated_at: new Date().toISOString() };
     if (it.id) await supabase.from("saved_replies").update(payload).eq("id", it.id);
     else await supabase.from("saved_replies").insert(payload);
     setSaving(""); load();
@@ -1956,6 +1958,14 @@ export function SavedRepliesPanel({ allowedPages = null }) {
               </select>
             </div>
             <textarea rows={3} value={it.message || ""} onChange={(e) => setField(idx, "message", e.target.value)} placeholder="ข้อความตอบกลับอัตโนมัติ/ข้อความสำเร็จรูป..." className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+            {/* LINE ตอบอัตโนมัติเองเมื่อลูกค้ากดเมนู/พิมพ์คำที่ตั้งใน LINE OA Manager แต่ไม่ส่งข้อความนั้นมาให้ระบบ
+                ใส่คำเดียวกับใน LINE ไว้ตรงนี้ → แชทในเว็บจะขึ้นข้อความนี้ว่า "ตอบอัตโนมัติ (LINE OA)" ให้แอดมินรู้ว่าลูกค้าได้อะไรไปแล้ว */}
+            <div>
+              <input value={it.line_triggers_text ?? (it.line_triggers || []).join(", ")} onChange={(e) => setField(idx, "line_triggers_text", e.target.value)}
+                placeholder="คำที่ลูกค้าพิมพ์/กดเมนูใน LINE เช่น สนใจ Premium (คั่นด้วย ,)"
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+              <p className="mt-0.5 text-[11px] text-slate-400">ใส่ให้ตรงกับคีย์เวิร์ดตอบกลับอัตโนมัติใน LINE OA Manager — เมื่อลูกค้าส่งคำนี้มา แชทในเว็บจะแสดงข้อความนี้ให้แอดมินเห็นว่า LINE ตอบไปแล้ว (ไม่ส่งซ้ำให้ลูกค้า)</p>
+            </div>
             {/* รูปแนบ — เรียงตามลำดับที่จะถูกส่งในแชท กดลูกศรสลับตำแหน่งได้ */}
             {imagesOf(it).length > 0 && (
               <div className="flex flex-wrap gap-2">

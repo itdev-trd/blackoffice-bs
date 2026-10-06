@@ -76,6 +76,32 @@ async function saveLineMedia(admin: any, accessToken: string, messageId: string,
   }
 }
 
+// ข้อความที่ LINE ตอบอัตโนมัติเอง (ตั้งใน LINE OA Manager — เช่นลูกค้ากดเมนู "สนใจ Premium")
+// LINE ไม่ส่งข้อความตอบกลับพวกนี้มาทาง webhook แอดมินจึงไม่รู้ว่าลูกค้าได้ข้อมูลอะไรไปแล้ว
+// แอดมินใส่คำเดียวกับใน LINE ไว้ที่ "ข้อความบันทึกไว้" (line_triggers) → บันทึกข้อความนั้นลงแชทให้เห็นเท่านั้น
+// ไม่ส่งให้ลูกค้าซ้ำ (LINE ส่งไปแล้ว) · จับคู่แบบตรงทั้งข้อความ ไม่สนตัวพิมพ์/ช่องว่าง เหมือน keyword ของ LINE
+const normTrigger = (v: unknown) => String(v ?? "").normalize("NFC").replace(/\s+/g, " ").trim().toLowerCase();
+async function loadLineAutoReplies(admin: any): Promise<any[]> {
+  try {
+    const { data } = await admin.from("saved_replies").select("id, page_id, title, message, image_url, image_urls, line_triggers").neq("line_triggers", "{}");
+    return data || [];
+  } catch (_) { return []; }
+}
+function autoReplyItems(rules: any[], pageId: string, text: string, at: string, mid: string) {
+  const key = normTrigger(text);
+  if (!key) return [];
+  const rule = rules.find((r) => (!r.page_id || r.page_id === pageId) && (r.line_triggers || []).some((t: string) => normTrigger(t) === key));
+  if (!rule) return [];
+  const base = new Date(at).getTime();
+  const by = "ตอบอัตโนมัติ (LINE OA)";
+  const imgs: string[] = Array.isArray(rule.image_urls) && rule.image_urls.length ? rule.image_urls : rule.image_url ? [rule.image_url] : [];
+  const out: any[] = [];
+  // ลำดับเหมือน LINE: รูปก่อนแล้วตามด้วยข้อความ (ตามที่แอดมินเห็นในแอป LINE)
+  imgs.forEach((url, k) => out.push({ w: "p", t: "[รูปภาพ]", img: url, at: new Date(base + 1 + k).toISOString(), mid: `auto_${mid}_${k}`, via: "line", by, auto_reply: "line_oa", saved_reply_id: rule.id }));
+  if (String(rule.message || "").trim()) out.push({ w: "p", t: String(rule.message), at: new Date(base + 1 + imgs.length).toISOString(), mid: `auto_${mid}_t`, via: "line", by, auto_reply: "line_oa", saved_reply_id: rule.id });
+  return out;
+}
+
 Deno.serve(async (req) => {
   if (req.method !== "POST") return new Response("ok");
   const raw = await req.text();
@@ -93,6 +119,7 @@ Deno.serve(async (req) => {
     try { bot = await lineApi("/v2/bot/info", cfg.accessToken); } catch (_) { /* optional */ }
     const pageId = `line:${bot.userId || "oa"}`;
     const pageName = bot.displayName || "LINE OA";
+    const autoRules = await loadLineAutoReplies(admin);
     for (const event of Array.isArray(payload.events) ? payload.events : []) {
       if (event?.type !== "message" || event?.source?.type !== "user" || !event?.source?.userId) continue;
       const userId = String(event.source.userId);
@@ -118,11 +145,12 @@ Deno.serve(async (req) => {
         ...(stickerUrl ? { img: stickerUrl, sticker: true, sticker_id: String(event.message.stickerId), package_id: String(event.message.packageId || "") } : {}),
         ...(event.message?.markAsReadToken ? { mark_as_read_token: String(event.message.markAsReadToken) } : {}),
       };
+      const autos = event.message?.type === "text" ? autoReplyItems(autoRules, pageId, text, at, mid || String(Date.now())) : [];
       const row = {
         id, source: "line", page_id: pageId, page_name: pageName, psid: userId,
         customer_name: profile.displayName || "ลูกค้า LINE", profile_pic: profile.pictureUrl || null,
-        transcript: [...transcript, item].slice(-MAX_TRANSCRIPT_ITEMS), last_user_text: text.slice(0, 1000), last_message_at: at,
-        message_count: Number(old?.message_count || 0) + 1, user_message_count: Number(old?.user_message_count || 0) + 1,
+        transcript: [...transcript, item, ...autos].slice(-MAX_TRANSCRIPT_ITEMS), last_user_text: text.slice(0, 1000), last_message_at: at,
+        message_count: Number(old?.message_count || 0) + 1 + autos.length, user_message_count: Number(old?.user_message_count || 0) + 1,
         awaiting_reply: true, unread: true, synced_at: new Date().toISOString(), updated_at: new Date().toISOString(),
       };
       const { error } = await admin.from("chat_customers").upsert(row);

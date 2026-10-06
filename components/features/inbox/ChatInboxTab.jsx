@@ -2834,7 +2834,9 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                       </div>
                       {/* ผู้ตอบ: ส่งจากแอปเรารู้อีเมล (m.by) · ตอบจากกล่องข้อความเพจ Meta ไม่ส่งชื่อมา = "ตอบจากเพจ" */}
                       <div className="text-[10px] text-night-ink-3 mt-0.5 pr-1 flex items-center gap-1">
-                        <span className="text-emerald-400 font-medium">{m.by || "ตอบจากเพจ"}</span>
+                        {m.auto_reply
+                          ? <span className="text-amber-400 font-medium" title="LINE ตอบลูกค้าไปเองแล้ว (ตั้งใน LINE OA Manager) — ระบบบันทึกไว้ให้เห็นเท่านั้น ไม่ได้ส่งซ้ำ">🤖 {m.by || "ตอบอัตโนมัติ"}</span>
+                          : <span className="text-emerald-400 font-medium">{m.by || "ตอบจากเพจ"}</span>}
                         <span>{fmtMsgTime(m.at)}</span>
                         {m.pending
                           ? <span className="text-amber-500">· กำลังส่ง…</span>
