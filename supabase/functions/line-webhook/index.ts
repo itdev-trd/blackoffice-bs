@@ -89,7 +89,7 @@ async function loadLineAutoReplies(admin: any): Promise<any[]> {
   } catch (_) { return []; }
 }
 // ลำดับเหมือนที่ LINE ส่งจริง: รูปแรก (โปสเตอร์) → ข้อความ → รูปที่เหลือ (เช่นปุ่มเลือกท้ายข้อความ)
-// ข้อความแยกเป็นหลายบับเบิลได้ด้วยบรรทัดที่มีแค่ "---" · {ชื่อผู้ใช้} = ชื่อ LINE ของลูกค้า (แบบที่ LINE แทนให้)
+// ข้อความแยกเป็นหลายบับเบิลได้ด้วยบรรทัดที่มีแค่ "---" · ใส่ "[รูป N]" เป็นบับเบิลเพื่อวางรูปตรงนั้น · {ชื่อผู้ใช้} = ชื่อ LINE ของลูกค้า (แบบที่ LINE แทนให้)
 function autoReplyItems(rules: any[], pageId: string, text: string, at: string, mid: string, customerName = "") {
   const key = normTrigger(text);
   if (!key) return [];
@@ -100,11 +100,27 @@ function autoReplyItems(rules: any[], pageId: string, text: string, at: string, 
   const imgs: string[] = Array.isArray(rule.image_urls) && rule.image_urls.length ? rule.image_urls : rule.image_url ? [rule.image_url] : [];
   const bubbles = String(rule.message || "").replace(/\{ชื่อผู้ใช้\}/g, customerName || "คุณลูกค้า")
     .split(/\n\s*---\s*\n/).map((b) => b.trim()).filter(Boolean);
-  const seq: { img?: string; t?: string }[] = [
-    ...(imgs[0] ? [{ img: imgs[0] }] : []),
-    ...bubbles.map((t) => ({ t })),
-    ...imgs.slice(1).map((img) => ({ img })),
-  ];
+  // กำหนดตำแหน่งรูปเองได้: บับเบิลที่มีแค่ "[รูป N]" = รูปที่ N (เริ่ม 1) · รูปที่ไม่ได้อ้างถึงต่อท้ายสุด
+  // ไม่มี [รูป N] เลย = ค่าเริ่มต้น รูปแรก → ข้อความ → รูปที่เหลือ
+  const IMG_TOKEN = /^\[รูป\s*(\d+)\]$/;
+  let seq: { img?: string; t?: string }[];
+  if (bubbles.some((b) => IMG_TOKEN.test(b))) {
+    const used = new Set<number>();
+    seq = bubbles.map((b) => {
+      const m = b.match(IMG_TOKEN);
+      if (!m) return { t: b };
+      const n = Number(m[1]) - 1;
+      used.add(n);
+      return imgs[n] ? { img: imgs[n] } : null;
+    }).filter(Boolean) as { img?: string; t?: string }[];
+    imgs.forEach((img, n) => { if (!used.has(n)) seq.push({ img }); });
+  } else {
+    seq = [
+      ...(imgs[0] ? [{ img: imgs[0] }] : []),
+      ...bubbles.map((t) => ({ t })),
+      ...imgs.slice(1).map((img) => ({ img })),
+    ];
+  }
   return seq.map((x, k) => ({
     w: "p", t: x.img ? "[รูปภาพ]" : x.t, ...(x.img ? { img: x.img } : {}),
     at: new Date(base + 1 + k).toISOString(), mid: `auto_${mid}_${k}`, via: "line", by, auto_reply: "line_oa", saved_reply_id: rule.id,

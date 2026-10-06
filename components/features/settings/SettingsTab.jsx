@@ -1964,7 +1964,7 @@ export function SavedRepliesPanel({ allowedPages = null }) {
               <input value={it.line_triggers_text ?? (it.line_triggers || []).join(", ")} onChange={(e) => setField(idx, "line_triggers_text", e.target.value)}
                 placeholder="คำที่ลูกค้าพิมพ์/กดเมนูใน LINE เช่น สนใจ Premium (คั่นด้วย ,)"
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-              <p className="mt-0.5 text-[11px] text-slate-400">ใส่ให้ตรงกับคีย์เวิร์ดตอบกลับอัตโนมัติใน LINE OA Manager — เมื่อลูกค้าส่งคำนี้มา แชทในเว็บจะแสดงข้อความนี้ให้แอดมินเห็นว่า LINE ตอบไปแล้ว (ไม่ส่งซ้ำให้ลูกค้า)</p>
+              <p className="mt-0.5 text-[11px] text-slate-400">ใส่ให้ตรงกับคีย์เวิร์ดตอบกลับอัตโนมัติใน LINE OA Manager — เมื่อลูกค้าส่งคำนี้มา แชทในเว็บจะแสดงข้อความนี้ให้แอดมินเห็นว่า LINE ตอบไปแล้ว (ไม่ส่งซ้ำให้ลูกค้า) · ในข้อความ: บรรทัด <code>---</code> = แยกบับเบิล · บับเบิล <code>[รูป 2]</code> = วางรูปที่ 2 ตรงนั้น · <code>{"{ชื่อผู้ใช้}"}</code> = ชื่อลูกค้า</p>
             </div>
             {/* รูปแนบ — เรียงตามลำดับที่จะถูกส่งในแชท กดลูกศรสลับตำแหน่งได้ */}
             {imagesOf(it).length > 0 && (
