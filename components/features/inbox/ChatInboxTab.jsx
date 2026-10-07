@@ -841,9 +841,12 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
 
   // ค้นหา "ข้อความในแชท" แบบ LINE OA Manager — หาว่าห้องไหนมีข้อความนี้ (ไม่ใช่แค่ชื่อ/ข้อความล่าสุด)
   // ใช้ RPC search_chat_messages (ไล่ transcript ในฐานข้อมูล) · กดผลแล้วเปิดห้องและเลื่อนไปไฮไลต์ข้อความนั้น
+  // ค้นเฉพาะตอนกดปุ่ม "ข้อความ" เท่านั้น — การไล่ข้อความทั้งฐานข้อมูลใช้แรงเครื่องเยอะ (ฐานข้อมูล micro ~1 วิ/ครั้ง)
+  // เดิมยิงทุกครั้งที่พิมพ์ แม้แค่หาชื่อลูกค้า → พิมพ์กันหลายเครื่องทำเว็บช้าทั้งระบบ (7 ต.ค. 69)
   useEffect(() => {
     const term = q.trim();
     if (term.length < 2) { setMsgHits(null); setMsgSearching(false); setSearchMode("chats"); return; }
+    if (searchMode !== "messages") { setMsgHits(null); setMsgSearching(false); return; }
     let cancelled = false;
     setMsgSearching(true);
     const t = setTimeout(async () => {
@@ -854,10 +857,10 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
       // สิทธิ์เพจ: คนที่ถูกจำกัดเพจเห็นเฉพาะเพจของตัวเอง + LINE (เหมือนลิสต์แชทปกติ)
       const allow = allowedPages ? new Set(allowedPages.map(String)) : null;
       setMsgHits((data || []).filter((h) => !allow || allow.has(String(h.page_id)) || String(h.page_id || "").startsWith("line:")));
-    }, 400);
+    }, 600);
     return () => { cancelled = true; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q]);
+  }, [q, searchMode]);
   function openMessageHit(hit) {
     // จำเวลาข้อความเป้าหมายไว้ — พอ transcript โหลดเสร็จ effect ด้านบนจะเลื่อนไปหาและไฮไลต์ให้
     highlightAtRef.current = hit.match_at || null;
@@ -2511,7 +2514,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
             inputClassName="!bg-night-surface2 !border-night-border !text-night-ink !placeholder-night-ink-3" />
           {q.trim().length >= 2 && (
             <div className="grid grid-cols-2 gap-1 rounded-control border border-night-border bg-night-surface2 p-1">
-              {[["chats", `แชท (${filtered.length})`], ["messages", msgSearching ? "ข้อความ (…)" : `ข้อความ (${msgHits?.length ?? 0}${msgHits?.length >= 100 ? "+" : ""})`]].map(([k, label]) => (
+              {[["chats", `แชท (${filtered.length})`], ["messages", msgSearching ? "ข้อความ (…)" : msgHits ? `ข้อความ (${msgHits.length}${msgHits.length >= 100 ? "+" : ""})` : "🔍 ค้นหาข้อความ"]].map(([k, label]) => (
                 <button key={k} type="button" onClick={() => setSearchMode(k)}
                   className={`rounded-md px-2 py-1 text-[11.5px] font-semibold ${searchMode === k ? "bg-night-accent text-white" : "text-night-ink-2 hover:text-night-ink"}`}>
                   {label}
