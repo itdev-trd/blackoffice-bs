@@ -1169,11 +1169,15 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
       });
     // fallback: เผื่อ realtime หลุด — poll ทุก 10 วิ (จุดแดงข้อความใหม่ช้าสุด ~10 วิ)
     //   lean = ยิงแค่ query ลิสต์ตัวเดียว (จุดแดงในลิสต์สด) · เต็ม (นับ unread/badge) ทุก ~30 วิ
+    // 7 ต.ค. 69: เดิม 10 วิ/6 วิ ต่อเครื่อง — แอดมินเปิดพร้อมกันหลายเครื่องตอนเช้า ฐานข้อมูล (micro) รับไม่ไหว
+    // เปิดแชทช้าจน timeout · webhook Meta กลับมาส่งปกติแล้ว + realtime เด้งทันทีอยู่แล้ว polling เป็นแค่ตาข่ายกันพลาด
+    // แท็บที่ซ่อนอยู่ (ไม่ได้ดู) ข้ามรอบไปเลย ไม่ต้องยิงให้เปลืองเปล่า ๆ
+    const hidden = () => typeof document !== "undefined" && document.visibilityState === "hidden";
     let ftick = 0;
-    const fallback = setInterval(() => { ftick++; loadRef.current({ lean: ftick % 3 !== 0 }); openRef.current(); }, 10000);
-    // แยกจังหวะ "ถามหาแชทใหม่" ออกจากการรีเฟรชลิสต์ — ถามทุก 6 วิ (ฝั่ง server เคาะถามด้วยคำขอจิ๋ว
-    // แล้วดึงจริงเฉพาะตอนมีของใหม่) พอมีของใหม่ตัวมันเองสั่งรีเฟรชลิสต์ทันทีอยู่แล้ว
-    const recentTimer = setInterval(syncRecentChats, 6000);
+    const fallback = setInterval(() => { if (hidden()) return; ftick++; loadRef.current({ lean: ftick % 3 !== 0 }); openRef.current(); }, 30000);
+    // แยกจังหวะ "ถามหาแชทใหม่" ออกจากการรีเฟรชลิสต์ — ถามทุก 30 วิ (cron ฝั่ง server ถามทุกนาทีอยู่แล้วด้วย)
+    // พอมีของใหม่ตัวมันเองสั่งรีเฟรชลิสต์ทันทีอยู่แล้ว
+    const recentTimer = setInterval(() => { if (!hidden()) syncRecentChats(); }, 30000);
     // Facebook ไม่มี webhook เมื่อแอดมินเพียง "เปิดอ่าน" ใน Page Inbox จึงใช้ fallback เบา ๆ
     // ฝั่ง server มี shared cooldown ต่อเพจ ป้องกันหลายเครื่องเรียก Meta ซ้ำกัน
     const readSync = () => {
