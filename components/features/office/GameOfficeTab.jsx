@@ -298,7 +298,7 @@ export default function GameOfficeTab({ allowedPages = null, onOpenChat }) {
     loadData();
     let deb;
     const ch = supabase.channel("game-office")
-      .on("postgres_changes", { event: "*", schema: "public", table: "chat_customers" }, () => { clearTimeout(deb); deb = setTimeout(loadData, 400); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "chat_live" }, () => { clearTimeout(deb); deb = setTimeout(loadData, 400); })   // chat_live = สัญญาณเบา ไม่ส่ง transcript
       .subscribe();
     const iv = setInterval(loadData, 30000);
     return () => { clearTimeout(deb); clearInterval(iv); supabase.removeChannel(ch); };

@@ -44,20 +44,6 @@ const INBOX_LINE_OA_ENABLED = true; // เปิดใช้งาน LINE OA �
 // ทุกคนที่มีสิทธิ์แท็บตอบแชทเห็นแชท LINE ได้เท่ากัน (RLS ฝั่งฐานข้อมูลคุมไว้ตรงกัน)
 const isLinePage = (id) => String(id || "").startsWith("line:");
 // ตัวกรอง "เพจที่มีสิทธิ์ + แชท LINE" สำหรับ query ที่ครอบทุกช่องทาง
-// ตัดข้อความรอบคำที่ค้น + ไฮไลต์ (ผลค้นหาข้อความ) — ข้อความยาวจะเห็นช่วงที่เจอคำ ไม่ใช่แค่ต้นข้อความ
-function HighlightSnippet({ text, term }) {
-  const s = String(text || "").replace(/\s+/g, " ");
-  const i = term ? s.toLowerCase().indexOf(term.toLowerCase()) : -1;
-  if (i < 0) return <>{s.slice(0, 120)}</>;
-  const start = Math.max(0, i - 30);
-  return (
-    <>
-      {start > 0 && "…"}{s.slice(start, i)}
-      <mark className="rounded bg-amber-300/70 px-0.5 text-night-ink">{s.slice(i, i + term.length)}</mark>
-      {s.slice(i + term.length, i + term.length + 80)}{i + term.length + 80 < s.length && "…"}
-    </>
-  );
-}
 function scopeToAllowedPages(query, allowedPages) {
   if (!allowedPages) return query;   // ไม่ถูกจำกัดสิทธิ์ = เห็นทุกเพจอยู่แล้ว
   const ids = allowedPages.map(String).filter((id) => /^[\w:.-]+$/.test(id));
@@ -189,10 +175,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   const [listEnd, setListEnd] = useState(false);          // true = โหลดแชทเก่าครบแล้ว
   const [loadingMore, setLoadingMore] = useState(false);
   const [searchingDb, setSearchingDb] = useState(false);
-  const [searchMode, setSearchMode] = useState("chats");   // ตอนค้นหา: "chats" = ห้องที่ตรงชื่อ/ข้อความล่าสุด · "messages" = ข้อความในแชท
-  const [msgHits, setMsgHits] = useState(null);
-  const [msgSearching, setMsgSearching] = useState(false);
-  const [highlightReason, setHighlightReason] = useState(null);   // "search" = มาจากผลค้นหาข้อความ (ป้ายเหนือข้อความต่างจากรอบตอบช้า)
+  const [highlightReason, setHighlightReason] = useState(null);   // "reply" = มาจากกดข้อความต้นทาง (ป้ายเหนือข้อความต่างจากรอบตอบช้า)
   const highlightAtRef = useRef(null);                    // ใช้กันไม่ให้ตัวเลื่อนลงล่างสุดมาแย่งจังหวะ
   const selRef = useRef(null);
   const [pageOptions, setPageOptions] = useState([]);      // เพจทั้งหมดที่เชื่อมได้
@@ -839,36 +822,6 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q, listTab, showBlocked, showDropped, unreadOnly, pageSel.mode, pageSel.single, (pageSel.multi || []).join(",")]);
 
-  // ค้นหา "ข้อความในแชท" แบบ LINE OA Manager — หาว่าห้องไหนมีข้อความนี้ (ไม่ใช่แค่ชื่อ/ข้อความล่าสุด)
-  // ใช้ RPC search_chat_messages (ไล่ transcript ในฐานข้อมูล) · กดผลแล้วเปิดห้องและเลื่อนไปไฮไลต์ข้อความนั้น
-  // ค้นเฉพาะตอนกดปุ่ม "ข้อความ" เท่านั้น — การไล่ข้อความทั้งฐานข้อมูลใช้แรงเครื่องเยอะ (ฐานข้อมูล micro ~1 วิ/ครั้ง)
-  // เดิมยิงทุกครั้งที่พิมพ์ แม้แค่หาชื่อลูกค้า → พิมพ์กันหลายเครื่องทำเว็บช้าทั้งระบบ (7 ต.ค. 69)
-  useEffect(() => {
-    const term = q.trim();
-    if (term.length < 2) { setMsgHits(null); setMsgSearching(false); setSearchMode("chats"); return; }
-    if (searchMode !== "messages") { setMsgHits(null); setMsgSearching(false); return; }
-    let cancelled = false;
-    setMsgSearching(true);
-    const t = setTimeout(async () => {
-      const { data, error } = await supabase.rpc("search_chat_messages", { p_q: term, p_pages: null, p_limit: 100 });
-      if (cancelled) return;
-      setMsgSearching(false);
-      if (error) { setMsgHits([]); return; }
-      // สิทธิ์เพจ: คนที่ถูกจำกัดเพจเห็นเฉพาะเพจของตัวเอง + LINE (เหมือนลิสต์แชทปกติ)
-      const allow = allowedPages ? new Set(allowedPages.map(String)) : null;
-      setMsgHits((data || []).filter((h) => !allow || allow.has(String(h.page_id)) || String(h.page_id || "").startsWith("line:")));
-    }, 600);
-    return () => { cancelled = true; clearTimeout(t); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, searchMode]);
-  function openMessageHit(hit) {
-    // จำเวลาข้อความเป้าหมายไว้ — พอ transcript โหลดเสร็จ effect ด้านบนจะเลื่อนไปหาและไฮไลต์ให้
-    highlightAtRef.current = hit.match_at || null;
-    setHighlightAt(hit.match_at || null);
-    setHighlightReason("search");
-    openChat({ id: hit.id, customer_name: hit.customer_name, page_id: hit.page_id, page_name: hit.page_name, source: hit.source, profile_pic: hit.profile_pic });
-  }
-
   async function loadMessengerUnreadCount() {
     const ps = pageSelRef.current;
     let mq = supabase.from("chat_customers").select("id", { count: "exact", head: true })
@@ -1090,8 +1043,18 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     loadRef.current();
     let stopped = false;
     // Realtime: subscribe การเปลี่ยนแปลงของ chat_customers → เด้งทันที
-    const channel = supabase.channel("inbox-chat")
-      .on("postgres_changes", { event: "*", schema: "public", table: "chat_customers" }, (payload) => {
+    // Realtime ฟังตาราง chat_live (แถวเล็ก: id/page_id/source/เวลาเปลี่ยน) ไม่ใช่ chat_customers ทั้งแถว
+    // เดิม Realtime ต้องแพ็ก transcript ทั้งห้องส่งทุกเครื่องทุกครั้งที่แชทเปลี่ยน → ฐานข้อมูล micro ล่มทั้งคืน (8 ต.ค. 69)
+    // ได้สัญญาณแล้วดึงแค่แถวนั้นแถวเดียว (ห้องที่เปิดอยู่ดึง transcript ด้วย ห้องอื่นดึงแค่คอลัมน์ลิสต์)
+    const onChatLive = async (live) => {
+      if (live.eventType === "DELETE") { handleChatChange({ eventType: "DELETE", old: live.old }); return; }
+      const id = live.new?.id;
+      if (!id) return;
+      const isOpen = selRef.current?.id === id;
+      const { data } = await supabase.from("chat_customers").select(isOpen ? `${LIST_COLS}, transcript` : LIST_COLS).eq("id", id).maybeSingle();
+      if (data) handleChatChange({ eventType: live.eventType, new: data });
+    };
+    const handleChatChange = (payload) => {
         const row = payload.new;
         if (payload.eventType === "DELETE") {
           const deletedId = String(payload.old?.id || "");
@@ -1162,7 +1125,9 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
         if (row && payload.eventType !== "DELETE") {
           instantNotifyRef.current?.(row);
         }
-      })
+    };
+    const channel = supabase.channel("inbox-chat")
+      .on("postgres_changes", { event: "*", schema: "public", table: "chat_live" }, (payload) => { onChatLive(payload); })
       .subscribe((status) => {
         if (stopped) return;
         // โหลดใหม่เฉพาะเมื่อ socket มีปัญหา; ตอน SUBSCRIBED มี initial load อยู่แล้ว
@@ -2512,16 +2477,6 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
           </div>
           <SearchInput value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหาชื่อ/ข้อความ/ประเทศ"
             inputClassName="!bg-night-surface2 !border-night-border !text-night-ink !placeholder-night-ink-3" />
-          {q.trim().length >= 2 && (
-            <div className="grid grid-cols-2 gap-1 rounded-control border border-night-border bg-night-surface2 p-1">
-              {[["chats", `แชท (${filtered.length})`], ["messages", msgSearching ? "ข้อความ (…)" : msgHits ? `ข้อความ (${msgHits.length}${msgHits.length >= 100 ? "+" : ""})` : "🔍 ค้นหาข้อความ"]].map(([k, label]) => (
-                <button key={k} type="button" onClick={() => setSearchMode(k)}
-                  className={`rounded-md px-2 py-1 text-[11.5px] font-semibold ${searchMode === k ? "bg-night-accent text-white" : "text-night-ink-2 hover:text-night-ink"}`}>
-                  {label}
-                </button>
-              ))}
-            </div>
-          )}
           {/* หัวแผงตัวกรอง — กดพับ/คลี่ · ตอนพับยังบอกว่ากรองอะไรค้างไว้อยู่ จะได้ไม่งงว่าทำไมแชทหาย */}
           <button type="button" onClick={toggleFilters}
             className="flex w-full items-center gap-1.5 rounded-control border border-night-border bg-night-surface2 px-2.5 py-1.5 text-[11px] font-medium text-night-ink-2 hover:text-night-ink">
@@ -2660,38 +2615,6 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                 {loadingList ? "กำลังลองใหม่..." : "ลองโหลดใหม่"}
               </button>
             </div>
-          ) : (q.trim().length >= 2 && searchMode === "messages") ? (
-            msgHits === null || (msgSearching && !msgHits?.length) ? <div className="p-4"><Spinner label="กำลังค้นหาข้อความ..." /></div>
-            : msgHits.length === 0 ? (
-              <div className="p-6 text-center space-y-1.5">
-                <div className="text-[13px] font-medium text-night-ink-2">ไม่พบข้อความที่มีคำนี้</div>
-                <div className="text-2xs text-night-ink-3">ลองพิมพ์ให้สั้นลง เช่น เลขบัญชีบางส่วน หรือคำสำคัญคำเดียว</div>
-              </div>
-            ) : <>{msgHits.map((h) => (
-              <button key={h.id} onClick={() => openMessageHit(h)} className={`w-full text-left p-3 hover:bg-night-surface2 flex gap-2.5 ${selected?.id === h.id ? "bg-night-accent/15 chat-item-active" : ""}`}>
-                <div className="w-9 h-9 shrink-0 rounded-full bg-night-surface2 text-night-ink-2 flex items-center justify-center text-sm font-semibold relative overflow-hidden">
-                  <span>{initial(h.customer_name)}</span>
-                  {h.profile_pic && <img src={h.profile_pic} alt="" className="absolute inset-0 w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display = "none"; }} />}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-medium text-night-ink truncate">{h.customer_name || "(ไม่มีชื่อ)"}</span>
-                    <span className="text-[10px] text-night-ink-3 shrink-0">{fmt(h.match_at)}</span>
-                  </div>
-                  <div className="text-xs text-night-ink-2 line-clamp-2 break-words">
-                    {h.match_who === "p" && <span className="text-emerald-400 font-medium">แอดมิน: </span>}
-                    <HighlightSnippet text={h.match_text} term={q.trim()} />
-                  </div>
-                  <div className="mt-1 flex items-center gap-1.5 text-[10px] text-night-ink-3">
-                    {h.source === "line" && <span className="px-1.5 py-0.5 rounded bg-[#06C755]/15 text-[#00722F] dark:text-[#3FCF6A] font-semibold">LINE OA</span>}
-                    {h.source === "instagram" && <span className="px-1.5 py-0.5 rounded bg-fuchsia-500/25 text-fuchsia-400 font-semibold">◎ Instagram</span>}
-                    <span>พบ {h.match_count} ข้อความ</span>
-                  </div>
-                </div>
-              </button>
-            ))}
-            {msgHits.length >= 100 && <div className="p-3 text-center text-2xs text-night-ink-3">แสดง 100 ห้องล่าสุด — พิมพ์ให้เจาะจงขึ้นเพื่อหาห้องที่เก่ากว่า</div>}
-            </>
           ) : list === null ? <div className="p-4"><Spinner label="กำลังโหลด..." /></div>
             : filtered.length === 0 ? (
               // แยกสาเหตุให้ชัด: ค้นหาไม่เจอ / ดูที่บล็อกไว้ / ยังไม่มีแชทเข้ามาเลย
@@ -2951,9 +2874,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                       {/* ไฮไลต์ข้อความที่ถูกอ้างถึงจากลิสต์หลักฐาน (ตอบช้า/ยังไม่ตอบ) */}
                       {isHl(m) && (
                         <div className="text-[10px] font-semibold text-amber-400 bg-amber-500/15 rounded-full px-2 py-0.5 mb-1">
-                          {highlightReason === "search"
-                            ? "🔍 ข้อความที่ค้นหา"
-                            : highlightReason === "reply" ? "↩︎ ข้อความต้นทาง"
+                          {highlightReason === "reply" ? "↩︎ ข้อความต้นทาง"
                             : <>⬇ ข้อความนี้คือรอบที่{selected?.awaiting_reply && i === tItems.length - 1 ? "ยังไม่ได้ตอบ" : "ตอบช้า"}</>}
                         </div>
                       )}
