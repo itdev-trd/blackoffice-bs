@@ -1,0 +1,10 @@
+node_modules
+.next
+.next-check
+.claude
+.git
+.vercel
+.env*
+backup
+*.dump
+*.dump.suspect
