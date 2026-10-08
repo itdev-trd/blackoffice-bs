@@ -43,6 +43,14 @@ const INBOX_LINE_OA_ENABLED = true; // เปิดใช้งาน LINE OA �
 // สิทธิ์รายเพจ (ลิสต์นั้นมีแต่เพจ Meta) ถ้าเอาไปกรองด้วยลิสต์เพจ แชท LINE จะหายหมด
 // ทุกคนที่มีสิทธิ์แท็บตอบแชทเห็นแชท LINE ได้เท่ากัน (RLS ฝั่งฐานข้อมูลคุมไว้ตรงกัน)
 const isLinePage = (id) => String(id || "").startsWith("line:");
+// ตัดข้อความรอบคำค้นและเน้นคำที่พบ เหมือนผลค้นหาข้อความของ LINE
+function HighlightSnippet({ text, term }) {
+  const value = String(text || "").replace(/\s+/g, " ");
+  const index = term ? value.toLocaleLowerCase().indexOf(term.toLocaleLowerCase()) : -1;
+  if (index < 0) return <>{value.slice(0, 120)}</>;
+  const start = Math.max(0, index - 30);
+  return <>{start > 0 && "…"}{value.slice(start, index)}<mark className="rounded bg-amber-300/70 px-0.5 text-night-ink">{value.slice(index, index + term.length)}</mark>{value.slice(index + term.length, index + term.length + 80)}{index + term.length + 80 < value.length && "…"}</>;
+}
 // ตัวกรอง "เพจที่มีสิทธิ์ + แชท LINE" สำหรับ query ที่ครอบทุกช่องทาง
 function scopeToAllowedPages(query, allowedPages) {
   if (!allowedPages) return query;   // ไม่ถูกจำกัดสิทธิ์ = เห็นทุกเพจอยู่แล้ว
@@ -175,6 +183,10 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   const [listEnd, setListEnd] = useState(false);          // true = โหลดแชทเก่าครบแล้ว
   const [loadingMore, setLoadingMore] = useState(false);
   const [searchingDb, setSearchingDb] = useState(false);
+  const [searchMode, setSearchMode] = useState("chats");
+  const [msgHits, setMsgHits] = useState(null);
+  const [msgSearching, setMsgSearching] = useState(false);
+  const [msgSearchError, setMsgSearchError] = useState("");
   const [highlightReason, setHighlightReason] = useState(null);   // "reply" = มาจากกดข้อความต้นทาง (ป้ายเหนือข้อความต่างจากรอบตอบช้า)
   const highlightAtRef = useRef(null);                    // ใช้กันไม่ให้ตัวเลื่อนลงล่างสุดมาแย่งจังหวะ
   const selRef = useRef(null);
@@ -821,6 +833,31 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     return () => { cancelled = true; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q, listTab, showBlocked, showDropped, unreadOnly, pageSel.mode, pageSel.single, (pageSel.multi || []).join(",")]);
+
+  // ค้นประวัติข้อความเมื่อผู้ใช้เลือกแท็บ "ข้อความ" เท่านั้น เพื่อลดภาระฐานข้อมูลระหว่างพิมพ์ค้นหาสมาชิก
+  useEffect(() => {
+    const term = q.trim();
+    if (term.length < 2) { setMsgHits(null); setMsgSearching(false); setMsgSearchError(""); setSearchMode("chats"); return; }
+    if (searchMode !== "messages") { setMsgHits(null); setMsgSearching(false); setMsgSearchError(""); return; }
+    let cancelled = false;
+    setMsgSearching(true); setMsgSearchError("");
+    const timer = setTimeout(async () => {
+      const pages = allowedPages?.length ? allowedPages.map(String) : null;
+      const { data, error } = await supabase.rpc("search_chat_messages", { p_q: term, p_pages: pages, p_limit: 100 });
+      if (cancelled) return;
+      setMsgSearching(false);
+      if (error) { setMsgHits([]); setMsgSearchError("ค้นหาข้อความไม่สำเร็จ กรุณาลองใหม่"); return; }
+      setMsgHits(data || []);
+    }, 350);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [q, searchMode, allowedPages]);
+
+  function openMessageHit(hit) {
+    highlightAtRef.current = hit.match_at || null;
+    setHighlightAt(hit.match_at || null);
+    setHighlightReason("search");
+    openChat({ id: hit.id, customer_name: hit.customer_name, page_id: hit.page_id, page_name: hit.page_name, source: hit.source, profile_pic: hit.profile_pic });
+  }
 
   async function loadMessengerUnreadCount() {
     const ps = pageSelRef.current;
@@ -2190,6 +2227,22 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     (!adFilter || String(x.entry_ad_id || "").trim() === adFilter) &&
     (!q.trim() || `${x.customer_name || ""} ${x.last_user_text || ""} ${x.country || ""} ${x.entry_ad_name || ""}`.toLowerCase().includes(q.trim().toLowerCase()))
   );
+  // ผลค้นหาข้อความต้องเคารพแท็บช่องทางและเพจที่กำลังดู เหมือนลิสต์สมาชิกด้านบน
+  const visibleMsgHits = (msgHits || []).filter((hit) => {
+    const source = String(hit.source || "");
+    const id = String(hit.id || "");
+    const isComment = source === "comment" || id.startsWith("fbc_") || id.startsWith("igc_");
+    if (listTab === "line" && source !== "line") return false;
+    if (listTab === "instagram" && source !== "instagram") return false;
+    if (listTab === "comments" && !isComment) return false;
+    if (listTab === "all" && (isComment || source === "line" || source === "instagram")) return false;
+    if (listTab === "everything" && isComment) return false;
+    if (source !== "line") {
+      const chosenPages = pageSel.mode === "single" ? (pageSel.single ? [pageSel.single] : []) : (pageSel.multi || []);
+      if (chosenPages.length && !chosenPages.map(String).includes(String(hit.page_id))) return false;
+    }
+    return true;
+  });
   const tItemsRaw = Array.isArray(selected?.transcript) ? selected.transcript : [];
   const tItems = dedupeTranscript(tItemsRaw);   // ยุบข้อความเบิ้ล — ดู lib/inbox/transcript.js
   // index ของข้อความฝั่งเพจ "อันสุดท้าย" — โชว์สถานะอ่านแค่อันเดียว
@@ -2504,6 +2557,12 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
           </div>
           <SearchInput value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหาชื่อ/ข้อความ/ประเทศ"
             inputClassName="!bg-night-surface2 !border-night-border !text-night-ink !placeholder-night-ink-3" />
+          {q.trim().length >= 2 && (
+            <div className="grid grid-cols-2 gap-1 rounded-control border border-night-border bg-night-surface2 p-1">
+              <button type="button" onClick={() => setSearchMode("chats")} className={`rounded-md px-2 py-1 text-[11.5px] font-semibold ${searchMode === "chats" ? "bg-night-accent text-white" : "text-night-ink-2 hover:text-night-ink"}`}>สมาชิก ({filtered.length})</button>
+              <button type="button" onClick={() => setSearchMode("messages")} className={`rounded-md px-2 py-1 text-[11.5px] font-semibold ${searchMode === "messages" ? "bg-night-accent text-white" : "text-night-ink-2 hover:text-night-ink"}`}>{msgSearching ? "ข้อความ (…)" : msgHits ? `ข้อความ (${visibleMsgHits.length}${msgHits.length >= 100 ? "+" : ""})` : "ค้นหาข้อความ"}</button>
+            </div>
+          )}
           {/* หัวแผงตัวกรอง — กดพับ/คลี่ · ตอนพับยังบอกว่ากรองอะไรค้างไว้อยู่ จะได้ไม่งงว่าทำไมแชทหาย */}
           <button type="button" onClick={toggleFilters}
             className="flex w-full items-center gap-1.5 rounded-control border border-night-border bg-night-surface2 px-2.5 py-1.5 text-[11px] font-medium text-night-ink-2 hover:text-night-ink">
@@ -2642,6 +2701,16 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                 {loadingList ? "กำลังลองใหม่..." : "ลองโหลดใหม่"}
               </button>
             </div>
+          ) : (q.trim().length >= 2 && searchMode === "messages") ? (
+            msgHits === null || (msgSearching && !msgHits?.length) ? <div className="p-4"><Spinner label="กำลังค้นหาข้อความ..." /></div>
+            : msgSearchError ? <div className="p-6 text-center text-xs text-rose-400">{msgSearchError}</div>
+            : visibleMsgHits.length === 0 ? <div className="p-6 text-center space-y-1.5"><div className="text-[13px] font-medium text-night-ink-2">ไม่พบข้อความที่มีคำนี้</div><div className="text-2xs text-night-ink-3">ลองใช้คำสำคัญหรือเลขบัญชีบางส่วน</div></div>
+            : <>{visibleMsgHits.map((hit) => (
+              <button key={hit.id} onClick={() => openMessageHit(hit)} className={`w-full text-left p-3 hover:bg-night-surface2 flex gap-2.5 ${selected?.id === hit.id ? "bg-night-accent/15 chat-item-active" : ""}`}>
+                <div className="w-9 h-9 shrink-0 rounded-full bg-night-surface2 text-night-ink-2 flex items-center justify-center text-sm font-semibold relative overflow-hidden"><span>{initial(hit.customer_name)}</span>{hit.profile_pic && <img src={hit.profile_pic} alt="" className="absolute inset-0 w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display = "none"; }} />}</div>
+                <div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-2"><span className="text-sm font-medium text-night-ink truncate">{hit.customer_name || "(ไม่มีชื่อ)"}</span><span className="text-[10px] text-night-ink-3 shrink-0">{fmt(hit.match_at)}</span></div><div className="text-xs text-night-ink-2 line-clamp-2 break-words">{hit.match_who === "p" && <span className="text-emerald-400 font-medium">แอดมิน: </span>}<HighlightSnippet text={hit.match_text} term={q.trim()} /></div><div className="mt-1 flex items-center gap-1.5 text-[10px] text-night-ink-3">{hit.source === "line" && <span className="px-1.5 py-0.5 rounded bg-[#06C755]/15 text-[#3FCF6A] font-semibold">LINE OA</span>}<span>พบ {hit.match_count} ข้อความ</span></div></div>
+              </button>
+            ))}</>
           ) : list === null ? <div className="p-4"><Spinner label="กำลังโหลด..." /></div>
             : filtered.length === 0 ? (
               // แยกสาเหตุให้ชัด: ค้นหาไม่เจอ / ดูที่บล็อกไว้ / ยังไม่มีแชทเข้ามาเลย
