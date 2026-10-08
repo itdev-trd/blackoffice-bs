@@ -1,0 +1,62 @@
+# เฝ้าฐานข้อมูล Supabase จากภายนอก — ทำงานบน GitHub ไม่พึ่งระบบของเราเลย
+# (ระบบแจ้งเตือนในตัว system-health รันใน cron ของฐานข้อมูลเอง พอฐานข้อมูลล่มก็เงียบไปด้วย
+#  คืน 7→8 ต.ค. 69 ล่มทั้งคืนโดยไม่มีใครรู้จนเช้า)
+#
+# ทุก 5 นาที: ถามฐานข้อมูลจริงผ่าน REST (คีย์ anon สาธารณะ — คีย์เดียวกับที่ฝังอยู่ในหน้าเว็บ)
+# ล้มติดกันครบ 6 ครั้งใน ~3 นาที = ถือว่าล่ม → job ขึ้นแดง (GitHub ส่งอีเมลหาคนที่ตั้ง workflow)
+# ถ้าตั้ง secret LINE_ALERT_TOKEN + LINE_ALERT_TO ไว้ จะส่ง LINE แจ้งด้วย
+# วิธีกู้: docs/RUNBOOK-ฐานข้อมูลล่ม.md
+name: db-watchdog
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: db-watchdog
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      SUPABASE_URL: https://nmetbatfjiagpjbbmowp.supabase.co
+      LINE_ALERT_TOKEN: ${{ secrets.LINE_ALERT_TOKEN }}
+      LINE_ALERT_TO: ${{ secrets.LINE_ALERT_TO }}
+      SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5tZXRiYXRmamlhZ3BqYmJtb3dwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc4ODU2ODgsImV4cCI6MjEwMzQ2MTY4OH0.5alr_XFUYRMzZMwiO44rgrVNGyEhNCabf8nvQJ_Ot40
+    steps:
+      - name: Probe database
+        id: probe
+        run: |
+          ok=0; slow=0
+          for i in 1 2 3 4 5 6; do
+            out=$(curl -s -o /dev/null -m 10 -w '%{http_code} %{time_total}' \
+              "$SUPABASE_URL/rest/v1/tv_brands?select=id&limit=1" \
+              -H "apikey: $SUPABASE_ANON_KEY" -H "Authorization: Bearer $SUPABASE_ANON_KEY" || echo "000 10")
+            code=${out%% *}; secs=${out##* }
+            echo "ครั้งที่ $i: HTTP $code ใช้เวลา ${secs} วิ"
+            if [ "$code" = "200" ]; then
+              ok=1
+              awk "BEGIN{exit !($secs > 3)}" && slow=1
+              break
+            fi
+            sleep 30
+          done
+          echo "ok=$ok" >> "$GITHUB_OUTPUT"
+          echo "slow=$slow" >> "$GITHUB_OUTPUT"
+          if [ "$slow" = "1" ]; then echo "::warning::ฐานข้อมูลตอบช้ากว่า 3 วิ — ดู docs/RUNBOOK-ฐานข้อมูลล่ม.md"; fi
+
+      - name: Notify LINE (optional)
+        if: steps.probe.outputs.ok != '1' && env.LINE_ALERT_TOKEN != ''
+        run: |
+          curl -s -X POST https://api.line.me/v2/bot/message/push \
+            -H "Authorization: Bearer $LINE_ALERT_TOKEN" -H "Content-Type: application/json" \
+            -d "{\"to\":\"$LINE_ALERT_TO\",\"messages\":[{\"type\":\"text\",\"text\":\"⚠️ ฐานข้อมูล Blackoffice ไม่ตอบติดกัน 3 นาที\nทำตาม docs/RUNBOOK-ฐานข้อมูลล่ม.md\nขั้นแรก: Supabase → Settings → General → Restart project\"}]}" || true
+
+      - name: Fail when down
+        if: steps.probe.outputs.ok != '1'
+        run: |
+          echo "::error::ฐานข้อมูลไม่ตอบติดกัน ~3 นาที — ทำตาม docs/RUNBOOK-ฐานข้อมูลล่ม.md"
+          exit 1
