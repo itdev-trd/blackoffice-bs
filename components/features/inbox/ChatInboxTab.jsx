@@ -913,24 +913,6 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
       return data;
     });
   };
-  // ดึง "แชทล่าสุด" จาก Meta เอง ทุก ~30 วิ
-  // Messenger webhook ส่งข้อความของลูกค้าทั่วไปเข้ามาไม่ได้จนกว่าแอปจะได้ Advanced Access ของ pages_messaging
-  // (เห็นได้จาก settings.meta_webhook_last_event ที่ค้างเป็นวัน) แชทใหม่จึงเข้าระบบได้ทางเดียวคือดึงเอง
-  // ถ้าปล่อยให้ cron 15 นาทีทำงานลำพัง ลิสต์ในแอปจะช้ากว่ากล่องข้อความเพจหลายนาที
-  const syncRecentChats = async () => {
-    const ps = pageSelRef.current;
-    const selectedPages = ps.mode === "single" ? (ps.single ? [ps.single] : []) : (ps.multi || []);
-    const onePage = selectedPages.length === 1 ? selectedPages[0] : null;
-    // 5 วิ = จังหวะที่ฝั่ง server ยอมให้ยิงจริง (รอบที่ไม่มีอะไรใหม่เสียแค่คำขอเคาะถามใบเดียว)
-    return runGuardedSync("recent", onePage || "all", 5 * 1000, async () => {
-      const { data } = await supabase.functions.invoke("sync-conversations", {
-        body: { job: "recent", ...(onePage ? { page_id: onePage } : {}) },
-      }).catch(() => ({ data: null }));
-      // มีห้องที่เนื้อหาเปลี่ยนจริง = รีเฟรชลิสต์/แชทที่เปิดอยู่ทันที (ไม่ต้องรอ poll รอบถัดไป)
-      if (data?.changed > 0 || data?.upserted > 0) { loadRef.current({ lean: true }); openRef.current(); scheduleUnreadRefresh(0); }
-      return data;
-    });
-  };
   const syncInstagramRecent = async () => {
     const pageIds = currentPageIds({ includeAll: true });
     const key = pageIds.length ? [...pageIds].sort().join(",") : "all";
@@ -1042,7 +1024,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     if (!active) return;
     loadRef.current();
     let stopped = false;
-    // Realtime: subscribe การเปลี่ยนแปลงของ chat_customers → เด้งทันที
+    let realtimeOk = false;    // สถานะช่อง Realtime — ใช้ปรับความถี่ตาข่ายกันพลาด
     // Realtime ฟังตาราง chat_live (แถวเล็ก: id/page_id/source/เวลาเปลี่ยน) ไม่ใช่ chat_customers ทั้งแถว
     // เดิม Realtime ต้องแพ็ก transcript ทั้งห้องส่งทุกเครื่องทุกครั้งที่แชทเปลี่ยน → ฐานข้อมูล micro ล่มทั้งคืน (8 ต.ค. 69)
     // ได้สัญญาณแล้วดึงแค่แถวนั้นแถวเดียว (ห้องที่เปิดอยู่ดึง transcript ด้วย ห้องอื่นดึงแค่คอลัมน์ลิสต์)
@@ -1130,22 +1112,56 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
       .on("postgres_changes", { event: "*", schema: "public", table: "chat_live" }, (payload) => { onChatLive(payload); })
       .subscribe((status) => {
         if (stopped) return;
+        realtimeOk = status === "SUBSCRIBED";
         // โหลดใหม่เฉพาะเมื่อ socket มีปัญหา; ตอน SUBSCRIBED มี initial load อยู่แล้ว
         if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
           loadRef.current({ refreshAfterCurrent: true }); scheduleUnreadRefresh(0);
         }
       });
-    // fallback: เผื่อ realtime หลุด — poll ทุก 10 วิ (จุดแดงข้อความใหม่ช้าสุด ~10 วิ)
-    //   lean = ยิงแค่ query ลิสต์ตัวเดียว (จุดแดงในลิสต์สด) · เต็ม (นับ unread/badge) ทุก ~30 วิ
-    // 7 ต.ค. 69: เดิม 10 วิ/6 วิ ต่อเครื่อง — แอดมินเปิดพร้อมกันหลายเครื่องตอนเช้า ฐานข้อมูล (micro) รับไม่ไหว
-    // เปิดแชทช้าจน timeout · webhook Meta กลับมาส่งปกติแล้ว + realtime เด้งทันทีอยู่แล้ว polling เป็นแค่ตาข่ายกันพลาด
-    // แท็บที่ซ่อนอยู่ (ไม่ได้ดู) ข้ามรอบไปเลย ไม่ต้องยิงให้เปลืองเปล่า ๆ
+    // ตาข่ายกันพลาด (8 ต.ค. 69) — ถามแค่ "มีห้องไหนเปลี่ยนตั้งแต่รอบก่อน" จาก chat_live (คำขอจิ๋ว ส่วนใหญ่ได้ว่างกลับ)
+    // แล้วดึงเฉพาะห้องที่เปลี่ยน แทนโหลดลิสต์ 200 ห้อง + นับยังไม่อ่านใหม่ทุกรอบ (เดิมทุก 10 วิ/เครื่อง ฐานข้อมูล micro ล่ม)
+    // ความถี่ปรับตาม Realtime: ต่ออยู่ = ถามทุก 30 วิ (สัญญาณมาทันทีอยู่แล้ว) · หลุด = ทุก 5 วิ จนกว่าจะต่อกลับ
+    // แท็บที่ซ่อนอยู่ข้ามรอบ (กลับมาเปิดแท็บรีเฟรชเต็มทันทีที่ onFocus)
     const hidden = () => typeof document !== "undefined" && document.visibilityState === "hidden";
-    let ftick = 0;
-    const fallback = setInterval(() => { if (hidden()) return; ftick++; loadRef.current({ lean: ftick % 3 !== 0 }); openRef.current(); }, 30000);
-    // แยกจังหวะ "ถามหาแชทใหม่" ออกจากการรีเฟรชลิสต์ — ถามทุก 30 วิ (cron ฝั่ง server ถามทุกนาทีอยู่แล้วด้วย)
-    // พอมีของใหม่ตัวมันเองสั่งรีเฟรชลิสต์ทันทีอยู่แล้ว
-    const recentTimer = setInterval(() => { if (!hidden()) syncRecentChats(); }, 30000);
+    let liveCursor = null;     // changed_at ล่าสุดที่เห็น (เวลาจากฐานข้อมูล ไม่ใช้นาฬิกาเครื่อง กันเวลาเพี้ยน)
+    let deltaBusy = false;
+    let deltaTick = 0;
+    const pollChanges = async () => {
+      if (deltaBusy || hidden()) return;
+      deltaBusy = true;
+      try {
+        if (!liveCursor) {
+          const { data } = await supabase.from("chat_live").select("changed_at").order("changed_at", { ascending: false }).limit(1).maybeSingle();
+          liveCursor = data?.changed_at || new Date(0).toISOString();
+          return;
+        }
+        const { data: changed, error } = await supabase.from("chat_live").select("id, changed_at")
+          .gt("changed_at", liveCursor).order("changed_at", { ascending: true }).limit(40);
+        if (error || !changed?.length) return;
+        liveCursor = changed[changed.length - 1].changed_at;
+        // เปลี่ยนเยอะผิดปกติ (เช่นหลุดไปนาน) = โหลดลิสต์ใหม่ทั้งชุดครั้งเดียวคุ้มกว่า
+        if (changed.length >= 40) { loadRef.current({ refreshAfterCurrent: true }); openRef.current(); scheduleUnreadRefresh(0); return; }
+        const ids = [...new Set(changed.map((c) => c.id))];
+        const openId = selRef.current?.id;
+        const { data: rows } = await supabase.from("chat_customers").select(LIST_COLS).in("id", ids);
+        for (const row of rows || []) {
+          if (row.id === openId) continue;   // ห้องที่เปิดอยู่ไปดึงพร้อม transcript ด้านล่าง
+          handleChatChange({ eventType: "UPDATE", new: row });
+        }
+        if (openId && ids.includes(openId)) onChatLive({ eventType: "UPDATE", new: { id: openId } });
+        // ห้องที่หายไปจาก chat_customers (ถูกลบ) — เอาออกจากลิสต์
+        const gone = ids.filter((id) => !(rows || []).some((r) => r.id === id));
+        for (const id of gone) handleChatChange({ eventType: "DELETE", old: { id } });
+      } catch { /* รอบหน้าค่อยลองใหม่ */ } finally { deltaBusy = false; }
+    };
+    const fallback = setInterval(() => {
+      deltaTick++;
+      if (realtimeOk && deltaTick % 6 !== 0) return;   // Realtime ปกติ: ทุก 30 วิ · หลุด: ทุก 5 วิ
+      pollChanges();
+    }, 5000);
+    pollChanges();
+    // ถามแชทใหม่จาก Meta เหลือที่เดียวคือ cron ฝั่ง server (ทุกนาที) — เดิมทุกเครื่องเรียกเองทุก 30 วิ
+    // ภาระเลยคูณตามจำนวนแอดมิน · webhook ส่งเข้าทันทีอยู่แล้ว + Realtime/ตาข่ายด้านบนพาขึ้นจอ
     // Facebook ไม่มี webhook เมื่อแอดมินเพียง "เปิดอ่าน" ใน Page Inbox จึงใช้ fallback เบา ๆ
     // ฝั่ง server มี shared cooldown ต่อเพจ ป้องกันหลายเครื่องเรียก Meta ซ้ำกัน
     const readSync = () => {
@@ -1157,7 +1173,6 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
         supabase.functions.invoke("sync-conversations", { body: { job: "read_status", ...(onePage ? { page_id: onePage } : {}) } }).catch(() => null));
     };
     readSync();
-    syncRecentChats();
     const readEveryMs = Math.max(1, Math.min(15, Number(alertMin) || 3)) * 60 * 1000;
     const readTimer = setInterval(readSync, readEveryMs);
     // Webhook เป็นทางหลักและเด้งทันทีอยู่แล้ว; polling นี้เป็น safety net เมื่อ Meta พลาด event เท่านั้น
@@ -1175,13 +1190,13 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
       const now = Date.now();
       if (now - focusRefreshAtRef.current < 1500) return;
       focusRefreshAtRef.current = now;
-      loadRef.current(); openRef.current(); readSync(); syncRecentChats(); syncCommentReplies(); syncInstagramRecent(); clearNotifs();
+      loadRef.current(); openRef.current(); readSync(); syncCommentReplies(); syncInstagramRecent(); clearNotifs();
     };
     clearNotifs();   // ตอนเปิดแอปครั้งแรก
     const onVis = () => { if (document.visibilityState === "visible") onFocus(); };
     document.addEventListener("visibilitychange", onVis);
     window.addEventListener("focus", onFocus);
-    return () => { stopped = true; clearTimeout(unreadRefreshTimerRef.current); clearTimeout(transcriptRefreshTimerRef.current); clearTimeout(prefetchTimerRef.current); clearInterval(fallback); clearInterval(recentTimer); clearInterval(readTimer); clearInterval(commentReplyTimer); clearInterval(instagramFallbackTimer); supabase.removeChannel(channel); window.removeEventListener("focus", onFocus); document.removeEventListener("visibilitychange", onVis); };
+    return () => { stopped = true; clearTimeout(unreadRefreshTimerRef.current); clearTimeout(transcriptRefreshTimerRef.current); clearTimeout(prefetchTimerRef.current); clearInterval(fallback); clearInterval(readTimer); clearInterval(commentReplyTimer); clearInterval(instagramFallbackTimer); supabase.removeChannel(channel); window.removeEventListener("focus", onFocus); document.removeEventListener("visibilitychange", onVis); };
   }, [active, alertMin]);
   useEffect(() => { setList(null); loadList(); }, [listTab, unreadOnly]);   // เปลี่ยนแท็บ/ตัวกรองยังไม่อ่าน = แสดงสถานะโหลด ไม่สรุปผิดว่าไม่มีแชท
   useEffect(() => { setSelected(null); setList(null); loadList(); }, [showBlocked, showDropped]);
