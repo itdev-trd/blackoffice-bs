@@ -1,16 +1,21 @@
 "use client";
 
 import { useState } from "react";
+import dynamic from "next/dynamic";
 import { MessageSquare, Users, Tv, Gauge, ScanSearch, Megaphone } from "lucide-react";
-import CustomerDatabaseTab, { TradeIdChecker } from "@/components/features/customerdb/CustomerDatabaseTab";
-import TvMembersTab from "@/components/features/tv-members/TvMembersTab";
-import BesightMembersTab from "@/components/features/tv-members/BesightMembersTab";
-import DetectedDataReview from "@/components/features/customerdb/DetectedDataReview";
-import { SavedRepliesPanel } from "@/components/features/settings/SettingsTab";
-import LineBroadcastPanel from "@/components/features/customer-ops/LineBroadcastPanel";
+import Spinner from "@/components/shared/Spinner";
 import { SectionTitle } from "@/components/ui";
 import { useDashboard } from "@/components/dashboard/DashboardContext";
 import { hasFullData } from "@/lib/constants/roles";
+
+const loadingPanel = () => <div className="ds-card p-8"><Spinner label="กำลังเปิดเครื่องมือ..." /></div>;
+const CustomerDatabaseTab = dynamic(() => import("@/components/features/customerdb/CustomerDatabaseTab"), { ssr: false, loading: loadingPanel });
+const TradeIdChecker = dynamic(() => import("@/components/features/customerdb/CustomerDatabaseTab").then((module) => module.TradeIdChecker), { ssr: false });
+const TvMembersTab = dynamic(() => import("@/components/features/tv-members/TvMembersTab"), { ssr: false, loading: loadingPanel });
+const BesightMembersTab = dynamic(() => import("@/components/features/tv-members/BesightMembersTab"), { ssr: false, loading: loadingPanel });
+const DetectedDataReview = dynamic(() => import("@/components/features/customerdb/DetectedDataReview"), { ssr: false, loading: loadingPanel });
+const SavedRepliesPanel = dynamic(() => import("@/components/features/settings/SettingsTab").then((module) => module.SavedRepliesPanel), { ssr: false, loading: loadingPanel });
+const LineBroadcastPanel = dynamic(() => import("@/components/features/customer-ops/LineBroadcastPanel"), { ssr: false, loading: loadingPanel });
 
 const MODES = [
   ["customers", "ลูกค้า", Users],

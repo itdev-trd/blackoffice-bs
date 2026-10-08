@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
+import dynamic from "next/dynamic";
 import {
   CheckCircle2,
   CheckCheck,
@@ -29,7 +30,6 @@ import { compressImage, STORAGE_CACHE_SECONDS } from "@/lib/utils/image";
 import { mergeTopPage, appendUnique, mergeSearchResults } from "@/lib/inbox/list";
 import { dedupeTranscript } from "@/lib/inbox/transcript";
 import Spinner from "@/components/shared/Spinner";
-import { TradeIdChecker, CustomerDataForm } from "@/components/features/customerdb/CustomerDatabaseTab";
 import MetaLabels from "@/components/features/inbox/MetaLabels";
 import { SearchInput, FilterPill } from "@/components/ui";
 import { CHAT_STAGES } from "@/lib/constants/settings";
@@ -37,6 +37,17 @@ import { pushLeadStageToMeta, pushStageLabelToMeta } from "@/lib/utils/lead-stag
 
 // ตัวเลือกอิโมจิชุดเต็มมีข้อมูลจำนวนมาก — โหลดเฉพาะตอนเปิดใช้ ไม่ถ่วงหน้าแชท/PWA ตอนเริ่มต้น
 const EmojiPicker = React.lazy(() => import("emoji-picker-react").then((module) => ({ default: module.default })));
+
+// ฟอร์มลูกค้าเต็มชุดมีโค้ดจำนวนมากและไม่จำเป็นจนกว่าจะเปิดห้องแชท
+// แยกเป็น chunk เพื่อไม่ให้หน้า Inbox ต้องแบก CustomerDatabaseTab ทั้งไฟล์ตั้งแต่เฟรมแรก
+const CustomerDataForm = dynamic(
+  () => import("@/components/features/customerdb/CustomerDatabaseTab").then((module) => module.CustomerDataForm),
+  { ssr: false, loading: () => <div className="p-4"><Spinner label="กำลังเปิดข้อมูลลูกค้า..." /></div> }
+);
+const TradeIdChecker = dynamic(
+  () => import("@/components/features/customerdb/CustomerDatabaseTab").then((module) => module.TradeIdChecker),
+  { ssr: false, loading: () => <div className="py-3 text-xs text-night-ink-3">กำลังเปิดเครื่องมือตรวจไอดี...</div> }
+);
 
 const INBOX_LINE_OA_ENABLED = true; // เปิดใช้งาน LINE OA ในหน้าตอบแชท
 // LINE OA ไม่ได้ผูกกับเพจ Facebook — page_id ของมันคือ "line:<userId>" ซึ่งไม่เคยอยู่ในลิสต์
