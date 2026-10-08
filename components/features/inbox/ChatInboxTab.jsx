@@ -71,7 +71,7 @@ const MSG_WINDOW_STEP = 80;
 const LIST_PAGE = 200;
 const LIST_COLS = "id, customer_name, last_user_text, last_reply_text, last_reply_by, last_reply_at, last_message_at, page_id, page_name, country, cust_lang, source, entry_ad_id, entry_ad_name, comment_ad_name, comment_ad_ids, comment_ad_names, comment_is_ad, comment_promoted_to_inbox, stage, stage_manual, psid, profile_pic, awaiting_reply, unread, cust_read_at, blocked_at, synced_at, updated_at, tags, not_interested_at, purge_confirmed_at, purge_at";
 
-const CHAT_OPEN_COLS = "id, page_id, page_name, psid, customer_name, source, stage, stage_manual, classified_by, needs_ai, needs_verify, manual_data, manual_data_by, manual_data_at, trade_id, username, phone, email, awaiting_reply, unread, read_at, cust_read_at, cust_lang, country, broker, profile_pic, transcript, account_opened_at, entry_ad_id, entry_ad_name, last_user_text, last_reply_text, last_reply_by, last_reply_at, last_message_at, comment_ad_name, comment_ad_ids, comment_ad_names, comment_is_ad, comment_promoted_to_inbox, comment_permalink, blocked_at, synced_at, updated_at, notes, tags, ai_summary, ai_summary_at, not_interested_at, purge_at";
+const CHAT_OPEN_COLS = "id, page_id, page_name, psid, customer_name, source, stage, stage_manual, classified_by, needs_ai, needs_verify, manual_data, manual_data_by, manual_data_at, trade_id, username, phone, email, address, awaiting_reply, unread, read_at, cust_read_at, cust_lang, country, broker, profile_pic, transcript, account_opened_at, entry_ad_id, entry_ad_name, last_user_text, last_reply_text, last_reply_by, last_reply_at, last_message_at, comment_ad_name, comment_ad_ids, comment_ad_names, comment_is_ad, comment_promoted_to_inbox, comment_permalink, blocked_at, synced_at, updated_at, notes, tags, ai_summary, ai_summary_at, not_interested_at, purge_at";
 
 export default function ChatInboxTab({ allowedPages = null, alertAllowed = true, alertMin = 3, alertPages = [], alertSound = true, alertNew = true, gotoChat = null, onGotoDone, active = true }) {
   const isInstagramComment = (row) => String(row?.id || "").startsWith("igc_");
@@ -1337,7 +1337,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     const preloaded = cachedChat(item.id);
     setSelected(preloaded || { ...item, transcript: null });
     logActivity("open_chat", { id: item.id, customer_name: item.customer_name, page_id: item.page_id });
-    setTranslations({}); setReply(""); setSendPreview(null); setSendMsg(""); setFailedText(""); setAdSources([]); setAdLoading(false); setSavedReplies([]); setSavedOpen(false); setKnowledgeOpen(false); setKnowledgeResults([]); setReplyTo(null); setMessageMenu(null); setKnowledgeCapture(null); setKnowledgeCaptureMsg(""); setEmojiOpen(false); setInfoOpen(false); setComposeMode("reply"); setLabelMsg(null); setQuickFillState({});
+    setTranslations({}); setReply(""); setSendPreview(null); setSendMsg(""); setFailedText(""); setAdSources([]); setAdLoading(false); setSavedReplies([]); setSavedOpen(false); setKnowledgeOpen(false); setKnowledgeResults([]); setReplyTo(null); setMessageMenu(null); setKnowledgeCapture(null); setKnowledgeCaptureMsg(""); setEmojiOpen(false); setInfoOpen(false); setComposeMode("reply"); setLabelMsg(null); setQuickFillState({}); setAddressDraft(null);
     setForceLang(item.source === "line" ? "Thai" : lsGet(`ui.forceLang.${item.id}`, "auto"));   // LINE เป็นภาษาไทย ไม่ต้องแปล
     // LINE OA ใช้ภาษาไทย ไม่ต้องเรียกตัวแปลหรือสร้างคำแปลใต้ข้อความ
     const translationPromise = item.source === "line" ? null : supabase.functions.invoke("messenger-reply", { body: { action: "translate", id: item.id } });
@@ -2318,6 +2318,18 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     return m && m[0].length >= 4 ? m[0] : null;
   };
   const [quickFillState, setQuickFillState] = useState({});   // { [key]: "saving"|"saved"|"error" }
+  // ข้อความลูกค้าที่หน้าตาเหมือนที่อยู่ (มีรหัสไปรษณีย์ 5 หลัก + ต./อ./จ./แขวง/เขต) → ชิป "ใช้เป็นที่อยู่ลูกค้า"
+  const looksLikeAddress = (text) => {
+    const t = String(text || "");
+    return t.length >= 20 && /(?<!\d)\d{5}(?!\d)/.test(t) && /(ต\.|อ\.|จ\.|ตำบล|อำเภอ|จังหวัด|แขวง|เขต|กทม|กรุงเทพ)/.test(t);
+  };
+  // ส่งข้อความไปเปิดกล่องที่อยู่ในฟอร์มข้อมูลลูกค้า (แยกช่องให้ แต่ยังไม่บันทึกจนแอดมินกดเอง)
+  const [addressDraft, setAddressDraft] = useState(null);   // { text, at }
+  function takeAsAddress(text) {
+    setMessageMenu(null);
+    setAddressDraft({ text: String(text || ""), at: Date.now() });
+    if (!hasSidePanel) setComposeMode("customer");
+  }
   async function quickSaveField(field, value, key) {
     if (!selected) return;
     setQuickFillState((s) => ({ ...s, [key]: "saving" }));
@@ -2930,6 +2942,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                           <div className="absolute left-0 top-full z-30 mt-1 w-56 overflow-hidden rounded-xl border border-night-border bg-night-surface shadow-xl">
                             {MSG_REPLY_ENABLED && <button onClick={() => { setReplyTo({ text: messageMenu.text, img: messageMenu.img, mid: messageMenu.mid, at: messageMenu.at, quoteToken: messageMenu.quoteToken, side: "customer" }); setMessageMenu(null); }} className="block w-full px-3 py-2.5 text-left text-xs font-medium text-night-ink hover:bg-night-surface2">↩︎ ตอบกลับข้อความนี้</button>}
                             {!m.img && <button onClick={() => beginKnowledgeCapture(m.t)} className="block w-full border-t border-night-border-subtle px-3 py-2.5 text-left text-xs font-medium text-night-accent-light hover:bg-night-accent/15">บันทึกเข้าคลังคำถาม</button>}
+                            {!m.img && <button onClick={() => takeAsAddress(m.t)} className="block w-full border-t border-night-border-subtle px-3 py-2.5 text-left text-xs font-medium text-night-ink hover:bg-night-surface2">📦 ใช้เป็นที่อยู่ลูกค้า</button>}
                           </div>
                         )}
                       </div>
@@ -2940,7 +2953,8 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                         const chips = [];
                         if (tid && String(selected?.trade_id || "") !== tid) chips.push({ key: `${i}-tid`, field: "trade_id", value: tid, label: `บันทึกเป็นไอดีเทรด: ${tid}` });
                         if (tv && String(selected?.username || "") !== tv) chips.push({ key: `${i}-tv`, field: "username", value: tv, label: `บันทึกเป็น username TV: ${tv}` });
-                        if (!chips.length) return null;
+                        const addrChip = looksLikeAddress(m.t);
+                        if (!chips.length && !addrChip) return null;
                         return (
                           <div className="flex flex-wrap gap-1.5 mt-1">
                             {chips.map((c) => {
@@ -2960,6 +2974,12 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                                 </button>
                               );
                             })}
+                            {addrChip && (
+                              <button onClick={() => takeAsAddress(m.t)}
+                                className="text-[11px] font-medium rounded-full px-2.5 py-1 border border-night-accent/40 bg-night-accent/15 text-night-accent-light hover:bg-night-accent/25">
+                                📦 ใช้เป็นที่อยู่ลูกค้า
+                              </button>
+                            )}
                           </div>
                         );
                       })()}
@@ -3043,6 +3063,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                     <CustomerDataForm
                       darkMode
                       compact
+                      addressDraft={addressDraft}
                       row={selected}
                       onSaved={(v) => {
                         setSelected((sel) => (sel ? { ...sel, ...v } : sel));
@@ -3287,7 +3308,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
               {!adLoading && adSources.length === 0 && <div className="text-[11px] text-night-ink-2">{srcLabel(selected)}</div>}
               {adSources.map(renderAd)}
             </div>
-            <CustomerDataForm darkMode row={selected} onSaved={(v) => { setSelected((s) => (s ? { ...s, ...v } : s)); setList((l) => (l || []).map((x) => (x.id === selected.id ? { ...x, ...v } : x))); }} />
+            <CustomerDataForm darkMode addressDraft={addressDraft} row={selected} onSaved={(v) => { setSelected((s) => (s ? { ...s, ...v } : s)); setList((l) => (l || []).map((x) => (x.id === selected.id ? { ...x, ...v } : x))); }} />
             {isBeSightPage(selected) && <TradeIdChecker darkMode />}
             <ConversationInsights />
             {retentionBox}

@@ -10,7 +10,7 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 });
 const PAGE_SIZE = 50;
 const MAX_ROWS = 50_000;
-const SELECT_COLUMNS = "id,customer_name,page_id,page_name,trade_id,phone,email,username,psid,source,entry_ad_id,entry_ad_name,comment_ad_name,comment_ad_names,comment_ad_ids,comment_is_ad,last_user_text,user_message_count,message_count,first_customer_message_at,last_message_at,stage,stage_manual,meta_push_status,meta_push_at,meta_push_error";
+const SELECT_COLUMNS = "id,customer_name,page_id,page_name,trade_id,phone,email,username,address,psid,source,entry_ad_id,entry_ad_name,comment_ad_name,comment_ad_names,comment_ad_ids,comment_is_ad,last_user_text,user_message_count,message_count,first_customer_message_at,last_message_at,stage,stage_manual,meta_push_status,meta_push_at,meta_push_error";
 const VALID_DATE_FILTERS = new Set(["all", "today", "yesterday", "last3", "this_week", "last_week", "this_month", "last_month", "this_year", "last_year", "7", "30", "90", "custom"]);
 const SORT_COLUMNS: Record<string, string> = {
   customer_name: "customer_name", page_name: "page_name", trade_id: "trade_id", phone: "phone",

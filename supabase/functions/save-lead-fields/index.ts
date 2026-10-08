@@ -1,6 +1,7 @@
 // supabase/functions/save-lead-fields/index.ts
 // แอดมินป้อนข้อมูลลูกค้าเองจากหน้าตอบแชท → บันทึกลง chat_customers + มาร์ค manual_data (ล็อกไม่ให้ AI แก้)
 // body: { id, trade_id?, username?, phone?, email?, country?, broker? }  (ค่าว่าง = ล้างค่า)
+//       { id, action: "save_address", address: {...} | null }  ที่อยู่ลูกค้า — แยกจากข้อมูลเทรด ไม่แตะช่องอื่น
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { authorizeRequest } from "../_shared/permissions.ts";
 
@@ -54,6 +55,24 @@ Deno.serve(async (req) => {
       const { error } = await admin.from("chat_customers").update(patch).eq("id", id);
       if (error) throw error;
       return json({ ok: true, id, entry_ad_name: adName || null });
+    }
+
+    // ที่อยู่ลูกค้า — บันทึกแยกปุ่ม ไม่ยุ่งกับไอดีเทรด/TradingView และไม่มาร์ค manual_data
+    // (ช่องว่างทั้งหมด = ลบที่อยู่)
+    if (body?.action === "save_address") {
+      const src = body?.address && typeof body.address === "object" ? body.address : {};
+      const addr: Record<string, string> = {};
+      for (const k of ["name", "phone", "line1", "subdistrict", "district", "province", "postcode", "note"]) {
+        const v = String(src[k] ?? "").trim().slice(0, k === "line1" || k === "note" ? 300 : 120);
+        if (v) addr[k] = v;
+      }
+      const nowIso = new Date().toISOString();
+      const address = Object.keys(addr).length
+        ? { ...addr, updated_by: auth.permission?.email || "unknown", updated_at: nowIso }
+        : null;
+      const { error } = await admin.from("chat_customers").update({ address, updated_at: nowIso }).eq("id", id);
+      if (error) throw error;
+      return json({ ok: true, id, address });
     }
 
     const nowIso = new Date().toISOString();

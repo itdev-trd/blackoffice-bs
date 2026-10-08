@@ -16,6 +16,9 @@ import {
   ArrowUpDown,
   X,
   Sparkles,
+  MapPin,
+  Copy,
+  Pencil,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
 import { pushLeadStageToMeta, pushStageLabelToMeta } from "@/lib/utils/lead-stage";
@@ -30,6 +33,7 @@ import Spinner from "@/components/shared/Spinner";
 import { EmptyState, SearchInput, FilterPill, Dialog, Button } from "@/components/ui";
 import { EditableCell } from "@/components/features/settings/SettingsTab";
 import { CHAT_STAGES } from "@/lib/constants/settings";
+import { EMPTY_ADDRESS, ADDRESS_FIELDS, parseAddress, formatAddress, hasAddress, cleanAddress, isBangkok, shortArea } from "@/lib/customer-address";
 
 // ชื่อช่องภาษาคน ใช้บอกแอดมินว่า AI ตอบช่องไหนเพี้ยน
 const AI_FIELD_LABEL = { trade_id: "ไอดีเทรด", email: "อีเมล", tv_username: "User TradingView", phone: "เบอร์โทร" };
@@ -113,11 +117,157 @@ const contactChannelOfChat = (row) => {
   return row?.page_id ? "facebook" : "";
 };
 
+// ที่อยู่ลูกค้า — กล่องแยกของตัวเอง มีปุ่มบันทึกของตัวเอง ไม่ผูกกับไอดีเทรด/สิทธิ์อินดิเคเตอร์เลย
+// draft = ข้อความที่แอดมินกด "ใช้เป็นที่อยู่ลูกค้า" จากข้อความในแชท ({ text, at }) → เปิดโหมดแก้พร้อมแยกช่องให้
+// ยังไม่บันทึกจนกว่าแอดมินจะตรวจแล้วกด "บันทึกที่อยู่" (ตัวแยกอัตโนมัติเดาผิดได้ โดยเฉพาะที่อยู่ต่างประเทศ)
+export function CustomerAddressBox({ row, onSaved, draft = null, compact = false }) {
+  const toForm = (a) => ({ ...EMPTY_ADDRESS, ...Object.fromEntries(ADDRESS_FIELDS.map((k) => [k, a?.[k] || ""])) });
+  const saved = row?.address && typeof row.address === "object" ? row.address : null;
+  const [editing, setEditing] = useState(false);
+  const [f, setF] = useState(() => toForm(saved));
+  const [paste, setPaste] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);     // {ok, text}
+  const [copied, setCopied] = useState(false);
+  const boxRef = useRef(null);
+
+  useEffect(() => { setF(toForm(saved)); setEditing(false); setPaste(""); setMsg(null); /* eslint-disable-next-line */ }, [row?.id]);
+  useEffect(() => { if (!editing) setF(toForm(saved)); /* eslint-disable-next-line */ }, [saved?.updated_at]);
+
+  // กดมาจากข้อความในแชท — แยกช่องทับเฉพาะช่องที่แยกได้ ช่องที่แยกไม่ได้คงค่าเดิมไว้
+  useEffect(() => {
+    if (!draft?.text) return;
+    const p = parseAddress(draft.text);
+    setF((cur) => {
+      const next = { ...cur };
+      for (const k of ADDRESS_FIELDS) if (p[k]) next[k] = p[k];
+      return next;
+    });
+    setPaste(draft.text);
+    setEditing(true); setMsg(null);
+    setTimeout(() => boxRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }), 50);
+  }, [draft?.at]);
+
+  const set = (k, v) => setF((cur) => ({ ...cur, [k]: v }));
+  const applyPaste = () => {
+    const p = parseAddress(paste);
+    setF((cur) => { const next = { ...cur }; for (const k of ADDRESS_FIELDS) if (p[k]) next[k] = p[k]; return next; });
+  };
+
+  async function save(clear = false) {
+    if (busy || !row?.id) return;
+    const address = clear ? null : cleanAddress(f);
+    if (!clear && !hasAddress(address)) { setMsg({ ok: false, text: "ยังไม่มีที่อยู่ — กรอกอย่างน้อยที่อยู่หรือจังหวัด" }); return; }
+    setBusy(true); setMsg(null);
+    const { data, error } = await supabase.functions.invoke("save-lead-fields", { body: { id: row.id, action: "save_address", address } });
+    setBusy(false);
+    if (error || !data?.ok) { setMsg({ ok: false, text: "บันทึกไม่สำเร็จ: " + (data?.error || (await readFunctionErrorMessage(error)) || "ลองใหม่") }); return; }
+    logActivity(clear ? "clear_customer_address" : "save_customer_address", { id: row.id, customer_name: row?.customer_name });
+    onSaved?.({ address: data.address });
+    setF(toForm(data.address)); setEditing(false); setPaste("");
+    setMsg({ ok: true, text: clear ? "ลบที่อยู่แล้ว" : "✓ บันทึกที่อยู่แล้ว" });
+  }
+
+  async function copy() {
+    try { await navigator.clipboard.writeText(formatAddress(saved)); setCopied(true); setTimeout(() => setCopied(false), 1500); }
+    catch { setMsg({ ok: false, text: "คัดลอกไม่ได้ — เบราว์เซอร์ไม่อนุญาต" }); }
+  }
+
+  const bkk = isBangkok(f.province);
+  const inCls = "mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm";
+  const inp = (k, label, ph, span = false) => (
+    <div className={`min-w-0 ${span ? "col-span-2" : ""}`}>
+      <label className="text-[11px] text-slate-400">{label}</label>
+      <input value={f[k]} onChange={(e) => set(k, e.target.value)} placeholder={ph} className={inCls} />
+    </div>
+  );
+  const by = saved?.updated_by ? String(saved.updated_by).split("@")[0] : "";
+  const at = saved?.updated_at ? new Date(saved.updated_at).toLocaleString("th-TH", { day: "numeric", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
+
+  return (
+    <div ref={boxRef} className={`rounded-lg border border-slate-300 ${compact ? "p-2" : "p-2.5"} space-y-2`}>
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-[11px] font-semibold text-slate-600 flex items-center gap-1"><MapPin size={12} /> ที่อยู่ลูกค้า</div>
+        {!editing && hasAddress(saved) && (
+          <div className="flex items-center gap-1">
+            <button type="button" onClick={copy} title="คัดลอกที่อยู่ (ชื่อ เบอร์ ที่อยู่) ไปวางใบจ่าหน้า/ขนส่ง"
+              className="inline-flex items-center gap-1 rounded-full border border-slate-300 px-2 py-0.5 text-[10.5px] font-medium text-slate-600 hover:bg-slate-50">
+              {copied ? <CheckCircle2 size={11} /> : <Copy size={11} />} {copied ? "คัดลอกแล้ว" : "คัดลอก"}
+            </button>
+            <button type="button" onClick={() => { setEditing(true); setMsg(null); }}
+              className="inline-flex items-center gap-1 rounded-full border border-slate-300 px-2 py-0.5 text-[10.5px] font-medium text-slate-600 hover:bg-slate-50">
+              <Pencil size={11} /> แก้ไข
+            </button>
+          </div>
+        )}
+      </div>
+
+      {!editing && (hasAddress(saved) ? (
+        <div className="space-y-1">
+          <div className="text-[12.5px] leading-relaxed text-slate-600 whitespace-pre-line break-words">{formatAddress(saved)}</div>
+          {saved.note && <div className="text-[11px] text-slate-500">หมายเหตุ: {saved.note}</div>}
+          {(by || at) && <div className="text-[10px] text-slate-400">บันทึกโดย {by || "-"}{at ? ` · ${at}` : ""}</div>}
+        </div>
+      ) : (
+        <button type="button" onClick={() => { setEditing(true); setMsg(null); }}
+          className="w-full rounded-lg border border-dashed border-slate-300 px-2 py-2 text-[12px] text-slate-500 hover:bg-slate-50">
+          + เพิ่มที่อยู่ลูกค้า
+        </button>
+      ))}
+
+      {editing && (
+        <div className="space-y-2">
+          <div>
+            <label className="text-[11px] text-slate-400">วางข้อความที่อยู่ที่ลูกค้าส่งมา (ไม่บังคับ)</label>
+            <textarea value={paste} onChange={(e) => setPaste(e.target.value)} rows={compact ? 2 : 3}
+              placeholder={"เช่น สมชาย ใจดี 081-234-5678\n99/1 ม.5 ต.สุเทพ อ.เมือง จ.เชียงใหม่ 50200"}
+              className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm resize-y" />
+            <button type="button" onClick={applyPaste} disabled={!paste.trim()}
+              className="mt-1 inline-flex items-center gap-1 rounded-full border border-brand-400/50 px-2 py-0.5 text-[10.5px] font-semibold text-brand-600 hover:bg-brand-50 disabled:opacity-50">
+              <Sparkles size={11} /> แยกช่องให้อัตโนมัติ
+            </button>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {inp("name", "ชื่อผู้รับ", row?.customer_name || "ชื่อ-นามสกุล")}
+            {inp("phone", "เบอร์ผู้รับ", row?.phone || "เบอร์โทร")}
+            {inp("line1", "บ้านเลขที่ / หมู่ / ซอย / ถนน", "99/1 ม.5 ถ.สุเทพ", true)}
+            {inp("subdistrict", bkk ? "แขวง" : "ตำบล / แขวง", "")}
+            {inp("district", bkk ? "เขต" : "อำเภอ / เขต", "")}
+            {inp("province", "จังหวัด", "")}
+            {inp("postcode", "รหัสไปรษณีย์", "")}
+            {inp("note", "หมายเหตุ (เช่น จุดสังเกต/เวลาที่สะดวก)", "", true)}
+          </div>
+          {hasAddress(cleanAddress(f)) && (
+            <div className="rounded-lg bg-slate-50 px-2 py-1.5 text-[11.5px] text-slate-500 whitespace-pre-line break-words">
+              <span className="text-[10px] text-slate-400">จะแสดงเป็น</span>{"\n"}{formatAddress(cleanAddress(f))}
+            </div>
+          )}
+          <div className="flex gap-1.5">
+            <button type="button" onClick={() => save(false)} disabled={busy}
+              className="flex-1 rounded-lg bg-emerald-700 text-white px-3 py-1.5 text-sm font-semibold hover:bg-emerald-800 disabled:opacity-50 flex items-center justify-center gap-1.5">
+              {busy ? <Loader2 className="animate-spin" size={13} /> : <CheckCircle2 size={13} />} บันทึกที่อยู่
+            </button>
+            <button type="button" onClick={() => { setEditing(false); setF(toForm(saved)); setPaste(""); setMsg(null); }} disabled={busy}
+              className="shrink-0 rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-50">
+              ยกเลิก
+            </button>
+          </div>
+          {hasAddress(saved) && (
+            <button type="button" onClick={() => { if (confirm("ลบที่อยู่ของลูกค้ารายนี้?")) save(true); }} disabled={busy}
+              className="text-[10.5px] text-rose-500 hover:underline disabled:opacity-50">ลบที่อยู่นี้</button>
+          )}
+        </div>
+      )}
+      {msg && <div className={`text-[11px] ${msg.ok ? "text-emerald-600" : "text-rose-600"}`}>{msg.text}</div>}
+    </div>
+  );
+}
+
 // แอดมินป้อนข้อมูลลูกค้าเอง (ไอดีเทรด/TradingView/เบอร์/อีเมล) จากหน้าตอบแชท
 // บันทึกผ่าน save-lead-fields → มาร์ค manual_data + ผู้ป้อน · AI/sync/webhook จะไม่แก้ทับ
 // compact = เวอร์ชันย่อสำหรับกล่องตอบแชท ซึ่งพื้นที่จำกัดและมีแท็บบอกอยู่แล้วว่านี่คือ "ข้อมูลลูกค้า"
 // จึงตัดหัวข้อซ้ำ ย่อคำอธิบาย และลดระยะห่าง — ที่อื่น (แผงขวา/หน้าจัดการลูกค้า) ยังเหมือนเดิม
-export function CustomerDataForm({ row, onSaved, darkMode = false, compact = false }) {
+export function CustomerDataForm({ row, onSaved, darkMode = false, compact = false, addressDraft = null }) {
   // country อยู่ในฟอร์มเดียวกัน — ตัวตรวจอัตโนมัติเดาไม่ได้ทุกภาษา (อังกฤษ/ตากาล็อกเดาไม่ได้เลย)
   // แอดมินที่คุยอยู่รู้ดีที่สุด และค่าที่คนระบุจะไม่ถูกตัวตรวจเขียนทับ (country_source = manual)
   const [f, setF] = useState({ trade_id: "", username: "", phone: "", email: "", country: "", broker: "XM" });
@@ -688,6 +838,9 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
       </div>
       {msg && <div className={`text-[11px] whitespace-pre-line ${msg.ok ? "text-emerald-600" : "text-rose-600"}`}>{msg.text}</div>}
 
+      {/* ที่อยู่ลูกค้า — อยู่ใต้ปุ่ม "บันทึกข้อมูล" และมีปุ่มของตัวเอง ไม่เกี่ยวกับเพิ่มสิทธิ์อินดิเคเตอร์ */}
+      <CustomerAddressBox row={row} onSaved={onSaved} draft={addressDraft} compact={compact} />
+
       {/* เดิมเห็นแค่แถบข้อความเล็ก ๆ ใต้ฟอร์ม ปนกับข้อความสถานะระหว่างทำงาน — เพิ่ม popup ยืนยันชัดๆ ว่าให้สิทธิ์สำเร็จ */}
       <Dialog open={!!grantSuccess} title={grantSuccess?.renewed ? "ต่ออายุสำเร็จ" : "เพิ่มสิทธิ์สำเร็จ"} onClose={() => setGrantSuccess(null)}
         footer={<Button variant="primary" onClick={() => setGrantSuccess(null)}>ตกลง</Button>}>
@@ -939,7 +1092,7 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
 
   // map ปุ่มเรียง → คอลัมน์จริงใน DB
   const SORT_COL = { customer_name: "customer_name", page_name: "page_name", trade_id: "trade_id", phone: "phone", email: "email", username: "username", psid: "psid", source: "source", messages: "user_message_count", stage: "stage", first_customer_message_at: "first_customer_message_at", last_message_at: "first_customer_message_at", synced_at: "first_customer_message_at" };
-  const EXPORT_DB_COLS = ["customer_name", "page_name", "trade_id", "phone", "email", "username", "psid", "source", "entry_ad_id", "first_customer_message_at", "stage", "stage_manual", "comment_ad_name", "comment_ad_names", "comment_ad_ids", "comment_is_ad", "entry_ad_name", "notes"];
+  const EXPORT_DB_COLS = ["customer_name", "page_name", "trade_id", "phone", "email", "username", "address", "psid", "source", "entry_ad_id", "first_customer_message_at", "stage", "stage_manual", "comment_ad_name", "comment_ad_names", "comment_ad_ids", "comment_is_ad", "entry_ad_name", "notes"];
   // สถานะในชีตใช้คำของทีม ไม่ใช่ค่า stage ดิบ — แมปให้ตรงกับที่กรอกมือกันอยู่
   const SHEET_STATUS = {
     account_opened: "เปิดบัญชีแล้ว",
@@ -991,6 +1144,7 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
     ["เบอร์โทร", (row) => row.phone || ""],
     ["อีเมล", (row) => row.email || ""],
     ["user tradingview", (row) => row.username || ""],
+    ["ที่อยู่", (row) => formatAddress(row.address).replace(/\n/g, " ")],
     ["เฟสบุคไอดี", (row) => row.psid || ""],
     ["แหล่งที่มา", (row) => sourceText(row)],
     ["วันที่", (row) => fmtTime(row.first_customer_message_at)],
@@ -1571,6 +1725,7 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
                       <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                         <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${st.cls}`}>{st.label}</span>
                         <span className="text-xs text-slate-400 truncate">{SOURCE_LABELS[srcOf(r)] || r.page_name || "-"} · {r.trade_id || "ไม่มีไอดีเทรด"}</span>
+                        {hasAddress(r.address) && <span className="inline-flex items-center gap-0.5 text-xs text-emerald-700 truncate"><MapPin size={11} />{shortArea(r.address) || "มีที่อยู่"}</span>}
                       </div>
                     </div>
                     <ChevronRight size={18} className="text-slate-300 shrink-0" />
@@ -1582,9 +1737,9 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
             <div className="hidden md:block w-full overflow-hidden">
               <table className="w-full table-fixed text-xs">
                 <colgroup>
-                  <col className="w-[16%]" /><col className="w-[8%]" /><col className="w-[9%]" /><col className="w-[9%]" />
-                  <col className="w-[11%]" /><col className="w-[10%]" /><col className="w-[11%]" /><col className="w-[9%]" />
-                  <col className="w-[6%]" /><col className="w-[7%]" /><col className="w-[4%]" />
+                  <col className="w-[14%]" /><col className="w-[7%]" /><col className="w-[9%]" /><col className="w-[9%]" />
+                  <col className="w-[11%]" /><col className="w-[9%]" /><col className="w-[11%]" /><col className="w-[9%]" />
+                  <col className="w-[10%]" /><col className="w-[5%]" /><col className="w-[6%]" />
                 </colgroup>
                 <thead>
                   <tr className="text-left text-xs text-slate-500 border-b border-slate-200 bg-slate-50">
@@ -1594,6 +1749,7 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
                     <SortHead k="phone" className="whitespace-nowrap">เบอร์โทร</SortHead>
                     <SortHead k="email" className="whitespace-nowrap">อีเมล</SortHead>
                     <SortHead k="username" className="whitespace-nowrap">TradingView</SortHead>
+                    <th className="px-3 py-2 font-medium whitespace-nowrap">ที่อยู่</th>
                     <SortHead k="psid" className="whitespace-nowrap">เฟสบุคไอดี</SortHead>
                     <SortHead k="source" className="whitespace-nowrap">แหล่งที่มา</SortHead>
                     <SortHead k="messages" className="text-center">ข้อความ</SortHead>
@@ -1614,6 +1770,18 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
                       <td className="px-1 py-1.5 min-w-0"><EditableCell row={r} field="phone" numeric onSaved={patchRow} /></td>
                       <td className="px-1 py-1.5 min-w-0"><EditableCell row={r} field="email" onSaved={patchRow} /></td>
                       <td className="px-1 py-1.5 min-w-0"><EditableCell row={r} field="username" onSaved={patchRow} /></td>
+                      <td className="px-1 py-1.5 min-w-0">
+                        {/* ที่อยู่ยาวเกินจะแก้ในช่องตาราง — กดแล้วเปิดโปรไฟล์ลูกค้า (มีกล่องที่อยู่ให้ดู/คัดลอก/แก้) */}
+                        <button type="button" onClick={() => setDetailRow(r)} title={hasAddress(r.address) ? formatAddress(r.address) : "คลิกเพื่อเพิ่มที่อยู่"}
+                          className="block w-full min-w-0 rounded px-1.5 py-0.5 text-left border border-transparent hover:border-slate-300">
+                          {hasAddress(r.address) ? (
+                            <>
+                              <span className="flex items-center gap-1 text-[11px] text-slate-700 truncate"><MapPin size={10} className="shrink-0 text-emerald-600" />{shortArea(r.address) || "มีที่อยู่"}</span>
+                              <span className="block text-[10px] text-slate-400 truncate">{r.address.name || r.address.line1}</span>
+                            </>
+                          ) : <span className="text-[11px] text-slate-400">—</span>}
+                        </button>
+                      </td>
                       <td title={r.psid || ""} className="px-1.5 py-2 text-slate-500 truncate">{r.psid || <span className="text-slate-400">—</span>}</td>
                       <td className="px-1.5 py-2 min-w-0">
                         {srcOf(r) === "ad" ? (
@@ -1855,6 +2023,9 @@ function CustomerDetailModal({ row, onClose, onSaved }) {
               {saved && <span className="text-sm text-emerald-700">บันทึกแล้ว</span>}
             </div>
           </div>
+
+          {/* ที่อยู่ลูกค้า — กล่องเดียวกับในหน้าตอบแชท บันทึกแยกปุ่ม */}
+          <CustomerAddressBox row={row} onSaved={(patch) => onSaved?.(row.id, patch)} />
 
           {/* บทสนทนาที่ดึงมา */}
           <div>
