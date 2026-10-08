@@ -42,7 +42,13 @@ from pg_stat_activity where state <> 'idle' order by query_start limit 20;
 -- Realtime ค้างไหม (lag ควรเป็นหลัก KB)
 select slot_name, active, pg_size_pretty(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)) lag
 from pg_replication_slots;
+
+-- ยามเฝ้า (db-guard-1min) ตัดงานค้างอะไรไปล่าสุด / connection เคยแตะเกิน 45 เมื่อไหร่
+select value, updated_at from settings where key = 'db_guard_last';
 ```
+
+ระบบกันไว้แล้ว (8 ต.ค. 69): ฟังก์ชันหลังบ้าน (service_role) คำสั่งค้างได้สูงสุด 30 วิ · ธุรกรรมเปิดค้างเฉย ๆ ปิดเองใน 60 วิ ·
+cron `db-guard-1min` ตัดงานของแอปที่ค้างเกิน 60 วิทุกนาที (ไม่แตะ Realtime/ระบบ Supabase)
 
 และดูความเร็วย้อนหลังใน Logs Explorer (edge_logs → `response.origin_time` ของ `/rest/v1/chat_customers`)
 ปกติเฉลี่ย ~0.1–0.2 วิ
