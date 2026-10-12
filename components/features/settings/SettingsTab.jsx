@@ -89,45 +89,45 @@ function GameOfficeSettingsPanel() {
     setSaving(false);
     setMsg(error ? "บันทึกไม่สำเร็จ: " + error.message : "บันทึกแล้ว ✓ (ผู้ใช้ต้องรีเฟรชหน้าเพื่อเห็นผล)");
   }
-  if (!cfg) return <div className="bg-white rounded-2xl border border-slate-200 p-5"><Spinner label="กำลังโหลด..." /></div>;
+  if (!cfg) return <div className="bg-[var(--surface)] rounded-2xl border border-[var(--line)] p-5"><Spinner label="กำลังโหลด..." /></div>;
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4 max-w-xl">
+    <div className="bg-[var(--surface)] rounded-2xl border border-[var(--line)] p-5 shadow-sm space-y-4 max-w-xl">
       <div>
-        <h3 className="font-semibold text-slate-800 flex items-center gap-2"><Gamepad2 size={16} /> เมนูออฟฟิศจำลอง (Game)</h3>
-        <p className="text-xs text-slate-500 mt-0.5">คุมว่าใครจะเห็นแท็บ "ออฟฟิศจำลอง" บ้าง — เป็นฟีเจอร์ทดลอง (beta) แยกจากระบบแชทเดิม ปิดได้โดยไม่กระทบอะไร</p>
+        <h3 className="font-semibold text-[var(--ink)] flex items-center gap-2"><Gamepad2 size={16} /> เมนูออฟฟิศจำลอง (Game)</h3>
+        <p className="text-xs text-[var(--ink-3)] mt-0.5">คุมว่าใครจะเห็นแท็บ "ออฟฟิศจำลอง" บ้าง — เป็นฟีเจอร์ทดลอง (beta) แยกจากระบบแชทเดิม ปิดได้โดยไม่กระทบอะไร</p>
       </div>
-      <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+      <label className="flex items-center gap-2 text-sm text-[var(--ink-2)] cursor-pointer">
         <input type="checkbox" checked={cfg.enabled} onChange={(e) => setCfg({ ...cfg, enabled: e.target.checked })} className="w-4 h-4" />
         เปิดใช้งานเมนูนี้
       </label>
       <div className={cfg.enabled ? "" : "opacity-40 pointer-events-none"}>
-        <label className="text-xs text-slate-600">จำกัดเฉพาะอีเมล (คั่นด้วย , — เว้นว่าง = ทุกคนเห็น)</label>
-        <textarea value={emailsText} onChange={(e) => setEmailsText(e.target.value)} rows={2} placeholder="เช่น you@example.com, boss@example.com" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-        <p className="text-[11px] text-slate-400 mt-1">ใส่เฉพาะอีเมลตัวเอง = ซ่อนจากพนักงานคนอื่น เห็นแค่คุณคนเดียว</p>
+        <label className="text-xs text-[var(--ink-2)]">จำกัดเฉพาะอีเมล (คั่นด้วย , — เว้นว่าง = ทุกคนเห็น)</label>
+        <textarea value={emailsText} onChange={(e) => setEmailsText(e.target.value)} rows={2} placeholder="เช่น you@example.com, boss@example.com" className="mt-1 w-full rounded-lg border border-[var(--line-strong)] px-3 py-2 text-sm" />
+        <p className="text-[11px] text-[var(--ink-3)] mt-1">ใส่เฉพาะอีเมลตัวเอง = ซ่อนจากพนักงานคนอื่น เห็นแค่คุณคนเดียว</p>
       </div>
       <div className={cfg.enabled ? "" : "opacity-40 pointer-events-none"}>
-        <label className="text-xs text-slate-600">ลิงก์ภาพฉากหลัง (ไม่บังคับ)</label>
-        <input value={bg} onChange={(e) => setBg(e.target.value)} placeholder="https://.../office-pixel.png (เว้นว่าง = ใช้ฉากที่วาดด้วยโค้ด)" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-        <p className="text-[11px] text-slate-400 mt-1">เจนภาพออฟฟิศ pixel-art แนว AGENT HQ (ขนาดแนวนอน ~940×370) แล้ววางลิงก์ที่นี่ → ตัวละคร sprite จะเดินทับบนภาพ · เว้นว่างไว้จะใช้ฉากที่วาดด้วยโค้ด</p>
+        <label className="text-xs text-[var(--ink-2)]">ลิงก์ภาพฉากหลัง (ไม่บังคับ)</label>
+        <input value={bg} onChange={(e) => setBg(e.target.value)} placeholder="https://.../office-pixel.png (เว้นว่าง = ใช้ฉากที่วาดด้วยโค้ด)" className="mt-1 w-full rounded-lg border border-[var(--line-strong)] px-3 py-2 text-sm" />
+        <p className="text-[11px] text-[var(--ink-3)] mt-1">เจนภาพออฟฟิศ pixel-art แนว AGENT HQ (ขนาดแนวนอน ~940×370) แล้ววางลิงก์ที่นี่ → ตัวละคร sprite จะเดินทับบนภาพ · เว้นว่างไว้จะใช้ฉากที่วาดด้วยโค้ด</p>
       </div>
       {/* ตัวละคร sprite sheet (แบบ Pixel Agents / Metro City) */}
-      <div className={"border-t border-slate-200 pt-3 " + (cfg.enabled ? "" : "opacity-40 pointer-events-none")}>
-        <div className="text-sm font-medium text-slate-700 mb-1">ตัวละคร (Sprite Sheet)</div>
-        <p className="text-[11px] text-slate-400 mb-2">โหลดชุดตัวละคร top-down ฟรี เช่น Metro City (jik-a-4.itch.io/metrocity-free-topdown-character-pack) แล้ววางลิงก์รูป sheet + ปรับค่าเฟรมให้ตรง · เว้นลิงก์ว่าง = ใช้คนวาดด้วยโค้ด</p>
-        <label className="text-xs text-slate-600">ลิงก์รูป sprite sheet (.png)</label>
-        <input value={sp.url} onChange={(e) => setSp({ ...sp, url: e.target.value })} placeholder="https://.../character.png" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+      <div className={"border-t border-[var(--line)] pt-3 " + (cfg.enabled ? "" : "opacity-40 pointer-events-none")}>
+        <div className="text-sm font-medium text-[var(--ink-2)] mb-1">ตัวละคร (Sprite Sheet)</div>
+        <p className="text-[11px] text-[var(--ink-3)] mb-2">โหลดชุดตัวละคร top-down ฟรี เช่น Metro City (jik-a-4.itch.io/metrocity-free-topdown-character-pack) แล้ววางลิงก์รูป sheet + ปรับค่าเฟรมให้ตรง · เว้นลิงก์ว่าง = ใช้คนวาดด้วยโค้ด</p>
+        <label className="text-xs text-[var(--ink-2)]">ลิงก์รูป sprite sheet (.png)</label>
+        <input value={sp.url} onChange={(e) => setSp({ ...sp, url: e.target.value })} placeholder="https://.../character.png" className="mt-1 w-full rounded-lg border border-[var(--line-strong)] px-3 py-2 text-sm" />
         <div className="grid grid-cols-3 gap-2 mt-2 text-xs">
-          <label className="flex flex-col gap-1">กว้าง/เฟรม (px)<input type="number" value={sp.fw} onChange={(e) => spNum("fw", e.target.value)} className="rounded border border-slate-300 px-2 py-1" /></label>
-          <label className="flex flex-col gap-1">สูง/เฟรม (px)<input type="number" value={sp.fh} onChange={(e) => spNum("fh", e.target.value)} className="rounded border border-slate-300 px-2 py-1" /></label>
-          <label className="flex flex-col gap-1">จำนวนเฟรมเดิน<input type="number" value={sp.frames} onChange={(e) => spNum("frames", e.target.value)} className="rounded border border-slate-300 px-2 py-1" /></label>
-          <label className="flex flex-col gap-1">แถวหันลง<input type="number" value={sp.rowDown} onChange={(e) => spNum("rowDown", e.target.value)} className="rounded border border-slate-300 px-2 py-1" /></label>
-          <label className="flex flex-col gap-1">แถวหันซ้าย<input type="number" value={sp.rowLeft} onChange={(e) => spNum("rowLeft", e.target.value)} className="rounded border border-slate-300 px-2 py-1" /></label>
-          <label className="flex flex-col gap-1">แถวหันขวา<input type="number" value={sp.rowRight} onChange={(e) => spNum("rowRight", e.target.value)} className="rounded border border-slate-300 px-2 py-1" /></label>
-          <label className="flex flex-col gap-1">แถวหันขึ้น<input type="number" value={sp.rowUp} onChange={(e) => spNum("rowUp", e.target.value)} className="rounded border border-slate-300 px-2 py-1" /></label>
-          <label className="flex flex-col gap-1">ความเร็ว (ms/เฟรม)<input type="number" value={sp.ms} onChange={(e) => spNum("ms", e.target.value)} className="rounded border border-slate-300 px-2 py-1" /></label>
-          <label className="flex flex-col gap-1">ขยาย (scale)<input type="number" step="0.1" value={sp.scale} onChange={(e) => spNum("scale", e.target.value)} className="rounded border border-slate-300 px-2 py-1" /></label>
+          <label className="flex flex-col gap-1">กว้าง/เฟรม (px)<input type="number" value={sp.fw} onChange={(e) => spNum("fw", e.target.value)} className="rounded border border-[var(--line-strong)] px-2 py-1" /></label>
+          <label className="flex flex-col gap-1">สูง/เฟรม (px)<input type="number" value={sp.fh} onChange={(e) => spNum("fh", e.target.value)} className="rounded border border-[var(--line-strong)] px-2 py-1" /></label>
+          <label className="flex flex-col gap-1">จำนวนเฟรมเดิน<input type="number" value={sp.frames} onChange={(e) => spNum("frames", e.target.value)} className="rounded border border-[var(--line-strong)] px-2 py-1" /></label>
+          <label className="flex flex-col gap-1">แถวหันลง<input type="number" value={sp.rowDown} onChange={(e) => spNum("rowDown", e.target.value)} className="rounded border border-[var(--line-strong)] px-2 py-1" /></label>
+          <label className="flex flex-col gap-1">แถวหันซ้าย<input type="number" value={sp.rowLeft} onChange={(e) => spNum("rowLeft", e.target.value)} className="rounded border border-[var(--line-strong)] px-2 py-1" /></label>
+          <label className="flex flex-col gap-1">แถวหันขวา<input type="number" value={sp.rowRight} onChange={(e) => spNum("rowRight", e.target.value)} className="rounded border border-[var(--line-strong)] px-2 py-1" /></label>
+          <label className="flex flex-col gap-1">แถวหันขึ้น<input type="number" value={sp.rowUp} onChange={(e) => spNum("rowUp", e.target.value)} className="rounded border border-[var(--line-strong)] px-2 py-1" /></label>
+          <label className="flex flex-col gap-1">ความเร็ว (ms/เฟรม)<input type="number" value={sp.ms} onChange={(e) => spNum("ms", e.target.value)} className="rounded border border-[var(--line-strong)] px-2 py-1" /></label>
+          <label className="flex flex-col gap-1">ขยาย (scale)<input type="number" step="0.1" value={sp.scale} onChange={(e) => spNum("scale", e.target.value)} className="rounded border border-[var(--line-strong)] px-2 py-1" /></label>
         </div>
-        <p className="text-[11px] text-slate-400 mt-1">ค่าเริ่มต้นเดา sheet 4 แถว (ลง/ซ้าย/ขวา/ขึ้น) เฟรมละ 32×32 · ถ้าตัวละครเพี้ยน ปรับตัวเลขให้ตรง sheet ที่โหลดมา แล้วบันทึก+รีเฟรช</p>
+        <p className="text-[11px] text-[var(--ink-3)] mt-1">ค่าเริ่มต้นเดา sheet 4 แถว (ลง/ซ้าย/ขวา/ขึ้น) เฟรมละ 32×32 · ถ้าตัวละครเพี้ยน ปรับตัวเลขให้ตรง sheet ที่โหลดมา แล้วบันทึก+รีเฟรช</p>
       </div>
       <div className="flex items-center gap-3">
         <button onClick={save} disabled={saving} className="bg-brand-600 text-white rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-60">{saving ? "กำลังบันทึก..." : "บันทึก"}</button>
@@ -175,33 +175,33 @@ function LeaderboardSettingsPanel() {
     setSaving(false);
     setMsg(error ? "บันทึกไม่สำเร็จ: " + error.message : "บันทึกแล้ว ✓ (ผู้ใช้รีเฟรชหน้าเพื่อเห็นผล)");
   }
-  if (!cfg) return <div className="bg-white rounded-2xl border border-slate-200 p-5"><Spinner label="กำลังโหลด..." /></div>;
+  if (!cfg) return <div className="bg-[var(--surface)] rounded-2xl border border-[var(--line)] p-5"><Spinner label="กำลังโหลด..." /></div>;
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4 max-w-xl">
+    <div className="bg-[var(--surface)] rounded-2xl border border-[var(--line)] p-5 shadow-sm space-y-4 max-w-xl">
       <div>
-        <h3 className="font-semibold text-slate-800 flex items-center gap-2"><Trophy size={16} /> กระดานแต้ม (Leaderboard)</h3>
-        <p className="text-xs text-slate-500 mt-0.5">คุมว่าใครเห็นเมนู "กระดานแต้ม" และเพจไหนบ้างที่นับแต้ม — ผู้ใช้เลือกเพจเองไม่ได้ ใช้ตามที่ตั้งที่นี่</p>
+        <h3 className="font-semibold text-[var(--ink)] flex items-center gap-2"><Trophy size={16} /> กระดานแต้ม (Leaderboard)</h3>
+        <p className="text-xs text-[var(--ink-3)] mt-0.5">คุมว่าใครเห็นเมนู "กระดานแต้ม" และเพจไหนบ้างที่นับแต้ม — ผู้ใช้เลือกเพจเองไม่ได้ ใช้ตามที่ตั้งที่นี่</p>
       </div>
-      <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+      <label className="flex items-center gap-2 text-sm text-[var(--ink-2)] cursor-pointer">
         <input type="checkbox" checked={cfg.enabled} onChange={(e) => setCfg({ ...cfg, enabled: e.target.checked })} className="w-4 h-4" />
         เปิดเมนูกระดานแต้ม
       </label>
       <div className={cfg.enabled ? "" : "opacity-40 pointer-events-none"}>
-        <label className="text-xs text-slate-600">จำกัดเฉพาะอีเมล (คั่นด้วย , — เว้นว่าง = ทุกคนเห็น)</label>
-        <textarea value={emailsText} onChange={(e) => setEmailsText(e.target.value)} rows={2} placeholder="เว้นว่าง = พนักงานทุกคนเห็นได้" className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+        <label className="text-xs text-[var(--ink-2)]">จำกัดเฉพาะอีเมล (คั่นด้วย , — เว้นว่าง = ทุกคนเห็น)</label>
+        <textarea value={emailsText} onChange={(e) => setEmailsText(e.target.value)} rows={2} placeholder="เว้นว่าง = พนักงานทุกคนเห็นได้" className="mt-1 w-full rounded-lg border border-[var(--line-strong)] px-3 py-2 text-sm" />
       </div>
       <div className={cfg.enabled ? "" : "opacity-40 pointer-events-none"}>
-        <label className="text-xs text-slate-600">เพจที่นับแต้ม (ไม่ติ๊ก = ทุกเพจ)</label>
-        <div className="mt-1 max-h-52 overflow-auto rounded-lg border border-slate-200 divide-y divide-slate-100">
-          {pageOpts.length === 0 && <div className="px-3 py-2 text-xs text-slate-400">ยังไม่มีเพจ</div>}
+        <label className="text-xs text-[var(--ink-2)]">เพจที่นับแต้ม (ไม่ติ๊ก = ทุกเพจ)</label>
+        <div className="mt-1 max-h-52 overflow-auto rounded-lg border border-[var(--line)] divide-y divide-slate-100">
+          {pageOpts.length === 0 && <div className="px-3 py-2 text-xs text-[var(--ink-3)]">ยังไม่มีเพจ</div>}
           {pageOpts.map((p) => (
-            <label key={p.id} className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-slate-50">
+            <label key={p.id} className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-[var(--ground)]">
               <input type="checkbox" checked={pages.includes(p.id)} onChange={() => toggle(p.id)} className="w-4 h-4" />
-              <span className="text-slate-700">{p.name}</span>
+              <span className="text-[var(--ink-2)]">{p.name}</span>
             </label>
           ))}
         </div>
-        <p className="text-[11px] text-slate-400 mt-1">เลือกเฉพาะเพจที่ต้องการให้เข้าแข่ง · เว้นทั้งหมด = นับทุกเพจ</p>
+        <p className="text-[11px] text-[var(--ink-3)] mt-1">เลือกเฉพาะเพจที่ต้องการให้เข้าแข่ง · เว้นทั้งหมด = นับทุกเพจ</p>
       </div>
       <div className="flex items-center gap-3">
         <button onClick={save} disabled={saving} className="bg-brand-600 text-white rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-60">{saving ? "กำลังบันทึก..." : "บันทึก"}</button>
@@ -282,16 +282,16 @@ function InsightsPrefetchPanel() {
     setMsg(error ? "บันทึกไม่สำเร็จ: " + error.message : "บันทึกแล้ว ✓ — cron จะดึงตามที่เลือก (ตี 1 + ทยอยเช็ค rate)");
   }
 
-  if (!loaded) return <div className="bg-white rounded-2xl border border-slate-200 p-5"><Spinner label="กำลังโหลด..." /></div>;
-  const statusBadge = (st) => <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${st === "ACTIVE" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{st}</span>;
+  if (!loaded) return <div className="bg-[var(--surface)] rounded-2xl border border-[var(--line)] p-5"><Spinner label="กำลังโหลด..." /></div>;
+  const statusBadge = (st) => <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${st === "ACTIVE" ? "bg-emerald-100 text-emerald-700" : "bg-[var(--ground)] text-[var(--ink-3)]"}`}>{st}</span>;
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4 max-w-3xl">
+    <div className="bg-[var(--surface)] rounded-2xl border border-[var(--line)] p-5 shadow-sm space-y-4 max-w-3xl">
       <div>
-        <h3 className="font-semibold text-slate-800 flex items-center gap-2"><BarChart3 size={16} /> ดึงรีพอร์ตออโต้ (cache)</h3>
-        <p className="text-xs text-slate-500 mt-0.5">เลือกบัญชี/แคมเปญ/ชุด/โฆษณา + ช่วงเวลา แล้วระบบจะดึงมา cache ล่วงหน้า (ตี 1 ทุกวัน · ทยอยดึง + เช็ค rate limit) เปิดดูจะเร็วและไม่ยิง Meta ซ้ำ</p>
+        <h3 className="font-semibold text-[var(--ink)] flex items-center gap-2"><BarChart3 size={16} /> ดึงรีพอร์ตออโต้ (cache)</h3>
+        <p className="text-xs text-[var(--ink-3)] mt-0.5">เลือกบัญชี/แคมเปญ/ชุด/โฆษณา + ช่วงเวลา แล้วระบบจะดึงมา cache ล่วงหน้า (ตี 1 ทุกวัน · ทยอยดึง + เช็ค rate limit) เปิดดูจะเร็วและไม่ยิง Meta ซ้ำ</p>
       </div>
-      <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+      <label className="flex items-center gap-2 text-sm text-[var(--ink-2)] cursor-pointer">
         <input type="checkbox" checked={cfg.enabled} onChange={(e) => setCfg((c) => ({ ...c, enabled: e.target.checked }))} className="w-4 h-4" />
         เปิดดึงรีพอร์ตออโต้
       </label>
@@ -300,30 +300,30 @@ function InsightsPrefetchPanel() {
         <div className="space-y-4">
           {/* ช่วงเวลา */}
           <div>
-            <div className="text-xs font-medium text-slate-600 mb-1">ช่วงเวลาที่จะดึง (เลือกได้หลายอัน)</div>
+            <div className="text-xs font-medium text-[var(--ink-2)] mb-1">ช่วงเวลาที่จะดึง (เลือกได้หลายอัน)</div>
             <div className="flex flex-wrap gap-1.5">
               {PREFETCH_RANGES.map(([k, l]) => (
-                <button key={k} onClick={() => toggleRange(k)} className={`text-xs rounded-full px-2.5 py-1 border ${cfg.ranges.includes(k) ? "bg-brand-600 text-white border-brand-600" : "border-slate-300 text-slate-600 hover:bg-slate-50"}`}>{l}</button>
+                <button key={k} onClick={() => toggleRange(k)} className={`text-xs rounded-full px-2.5 py-1 border ${cfg.ranges.includes(k) ? "bg-brand-600 text-white border-brand-600" : "border-[var(--line-strong)] text-[var(--ink-2)] hover:bg-[var(--ground)]"}`}>{l}</button>
               ))}
             </div>
             <div className="flex items-center gap-1.5 mt-2 text-xs flex-wrap">
-              <span className="text-slate-400">กำหนดเอง:</span>
-              <input type="date" value={custom.since} onChange={(e) => setCustom((s) => ({ ...s, since: e.target.value }))} className="rounded-lg border border-slate-300 px-1.5 py-1" />
+              <span className="text-[var(--ink-3)]">กำหนดเอง:</span>
+              <input type="date" value={custom.since} onChange={(e) => setCustom((s) => ({ ...s, since: e.target.value }))} className="rounded-lg border border-[var(--line-strong)] px-1.5 py-1" />
               <span>–</span>
-              <input type="date" value={custom.until} onChange={(e) => setCustom((s) => ({ ...s, until: e.target.value }))} className="rounded-lg border border-slate-300 px-1.5 py-1" />
+              <input type="date" value={custom.until} onChange={(e) => setCustom((s) => ({ ...s, until: e.target.value }))} className="rounded-lg border border-[var(--line-strong)] px-1.5 py-1" />
               <button disabled={!custom.since || !custom.until} onClick={() => { toggleRange({ since: custom.since, until: custom.until }); setCustom({ since: "", until: "" }); }} className="rounded-lg bg-brand-600 text-white px-2.5 py-1 disabled:opacity-40">+ เพิ่มช่วง</button>
             </div>
             {cfg.ranges.length > 0 && (
               <div className="flex flex-wrap gap-1 mt-2">
-                {cfg.ranges.map((r, i) => <span key={i} className="inline-flex items-center gap-1 bg-slate-100 rounded-full px-2 py-0.5 text-[11px] text-slate-700">{rangeLabel(r)}<button onClick={() => toggleRange(r)} className="text-slate-400 hover:text-rose-600">✕</button></span>)}
+                {cfg.ranges.map((r, i) => <span key={i} className="inline-flex items-center gap-1 bg-[var(--ground)] rounded-full px-2 py-0.5 text-[11px] text-[var(--ink-2)]">{rangeLabel(r)}<button onClick={() => toggleRange(r)} className="text-[var(--ink-3)] hover:text-rose-600">✕</button></span>)}
               </div>
             )}
           </div>
 
           {/* บัญชี → แคมเปญ → ชุด → โฆษณา */}
           <div>
-            <div className="text-xs font-medium text-slate-600 mb-1">เลือกบัญชีโฆษณา</div>
-            <select value={acct} onChange={(e) => loadCampaigns(e.target.value)} className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white">
+            <div className="text-xs font-medium text-[var(--ink-2)] mb-1">เลือกบัญชีโฆษณา</div>
+            <select value={acct} onChange={(e) => loadCampaigns(e.target.value)} className="w-full rounded-lg border border-[var(--line-strong)] px-3 py-2 text-sm bg-[var(--surface)]">
               <option value="">— เลือกบัญชี —</option>
               {(accounts || []).map((a) => <option key={a.account_id} value={a.account_id}>{a.name} ({a.account_id})</option>)}
             </select>
@@ -331,8 +331,8 @@ function InsightsPrefetchPanel() {
 
           {loadingCamp && <Spinner label="กำลังโหลดแคมเปญ..." />}
           {!loadingCamp && acct && campaigns.length > 0 && (
-            <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-96 overflow-y-auto">
-              <div className="flex items-center justify-between px-3 py-1.5 bg-slate-50 text-[11px] text-slate-500">
+            <div className="border border-[var(--line)] rounded-lg divide-y divide-slate-100 max-h-96 overflow-y-auto">
+              <div className="flex items-center justify-between px-3 py-1.5 bg-[var(--ground)] text-[11px] text-[var(--ink-3)]">
                 <span>แคมเปญ · ติ๊ก = ดึงระดับแคมเปญ · กดลูกศรเพื่อเลือกลึกลงไป</span>
                 <button onClick={() => pickAll(campaigns.map((c) => ({ id: c.id, name: c.name })), "campaign")} className="text-brand-600 hover:underline">เลือกทุกแคมเปญ</button>
               </div>
@@ -340,32 +340,32 @@ function InsightsPrefetchPanel() {
                 <div key={c.id}>
                   <div className="flex items-center gap-2 px-3 py-2 text-sm">
                     <input type="checkbox" checked={isPicked(c.id)} onChange={() => togglePick({ id: c.id, name: c.name, level: "campaign" }, [], (kids[c.id]?.nodes || []).map((s) => s.id))} className="w-4 h-4" />
-                    <button onClick={() => loadKids(c.id, "adsets")} className="text-slate-400 hover:text-slate-700">{expanded[c.id] ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</button>
-                    <span className="flex-1 min-w-0 truncate text-slate-700">{c.name}</span>
+                    <button onClick={() => loadKids(c.id, "adsets")} className="text-[var(--ink-3)] hover:text-[var(--ink-2)]">{expanded[c.id] ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</button>
+                    <span className="flex-1 min-w-0 truncate text-[var(--ink-2)]">{c.name}</span>
                     {statusBadge(c.effective_status)}
                   </div>
                   {expanded[c.id] && (
                     <div className="pl-8 pr-2 pb-1">
-                      {kids[c.id]?.loading ? <div className="text-[11px] text-slate-400 py-1">กำลังโหลดชุดโฆษณา...</div> : (kids[c.id]?.nodes || []).length === 0 ? <div className="text-[11px] text-slate-400 py-1">ไม่มีชุดโฆษณา</div> : (
+                      {kids[c.id]?.loading ? <div className="text-[11px] text-[var(--ink-3)] py-1">กำลังโหลดชุดโฆษณา...</div> : (kids[c.id]?.nodes || []).length === 0 ? <div className="text-[11px] text-[var(--ink-3)] py-1">ไม่มีชุดโฆษณา</div> : (
                         <>
                           <button onClick={() => pickAll((kids[c.id].nodes).map((s) => ({ id: s.id, name: s.name })), "adset", [c.id])} className="text-[11px] text-brand-600 hover:underline">เลือกทุกชุดในแคมเปญนี้</button>
                           {(kids[c.id].nodes).map((s) => (
                             <div key={s.id}>
                               <div className="flex items-center gap-2 py-1 text-sm">
                                 <input type="checkbox" checked={isPicked(s.id)} onChange={() => togglePick({ id: s.id, name: s.name, level: "adset" }, [c.id], (kids[s.id]?.nodes || []).map((a) => a.id))} className="w-4 h-4" />
-                                <button onClick={() => loadKids(s.id, "ads")} className="text-slate-400 hover:text-slate-700">{expanded[s.id] ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</button>
-                                <span className="flex-1 min-w-0 truncate text-slate-600">{s.name}</span>
+                                <button onClick={() => loadKids(s.id, "ads")} className="text-[var(--ink-3)] hover:text-[var(--ink-2)]">{expanded[s.id] ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</button>
+                                <span className="flex-1 min-w-0 truncate text-[var(--ink-2)]">{s.name}</span>
                                 {statusBadge(s.effective_status)}
                               </div>
                               {expanded[s.id] && (
                                 <div className="pl-7 pb-1">
-                                  {kids[s.id]?.loading ? <div className="text-[11px] text-slate-400 py-1">กำลังโหลดโฆษณา...</div> : (kids[s.id]?.nodes || []).length === 0 ? <div className="text-[11px] text-slate-400 py-1">ไม่มีโฆษณา</div> : (
+                                  {kids[s.id]?.loading ? <div className="text-[11px] text-[var(--ink-3)] py-1">กำลังโหลดโฆษณา...</div> : (kids[s.id]?.nodes || []).length === 0 ? <div className="text-[11px] text-[var(--ink-3)] py-1">ไม่มีโฆษณา</div> : (
                                     <>
                                       <button onClick={() => pickAll((kids[s.id].nodes).map((a) => ({ id: a.id, name: a.name })), "ad", [c.id, s.id])} className="text-[11px] text-brand-600 hover:underline">เลือกทุกโฆษณาในชุดนี้</button>
                                       {(kids[s.id].nodes).map((a) => (
                                         <div key={a.id} className="flex items-center gap-2 py-0.5 text-sm">
                                           <input type="checkbox" checked={isPicked(a.id)} onChange={() => togglePick({ id: a.id, name: a.name, level: "ad" }, [c.id, s.id], [])} className="w-4 h-4" />
-                                          <span className="flex-1 min-w-0 truncate text-slate-500">{a.name}</span>
+                                          <span className="flex-1 min-w-0 truncate text-[var(--ink-3)]">{a.name}</span>
                                           {statusBadge(a.effective_status)}
                                         </div>
                                       ))}
@@ -387,15 +387,15 @@ function InsightsPrefetchPanel() {
           {/* รายการที่เลือกไว้ (ทุกบัญชี) */}
           {cfg.targets.length > 0 && (
             <div>
-              <div className="text-xs font-medium text-slate-600 mb-1">ที่เลือกไว้ ({cfg.targets.length})</div>
+              <div className="text-xs font-medium text-[var(--ink-2)] mb-1">ที่เลือกไว้ ({cfg.targets.length})</div>
               <div className="flex flex-wrap gap-1">
                 {cfg.targets.map((t) => (
-                  <span key={t.id} className="inline-flex items-center gap-1 bg-slate-100 rounded-full px-2 py-0.5 text-[11px] text-slate-700">
-                    <span className="text-slate-400">{t.level === "campaign" ? "แคมเปญ" : t.level === "adset" ? "ชุด" : "โฆษณา"}:</span> {t.name || t.id}
-                    <button onClick={() => setCfg((c) => ({ ...c, targets: c.targets.filter((x) => x.id !== t.id) }))} className="text-slate-400 hover:text-rose-600">✕</button>
+                  <span key={t.id} className="inline-flex items-center gap-1 bg-[var(--ground)] rounded-full px-2 py-0.5 text-[11px] text-[var(--ink-2)]">
+                    <span className="text-[var(--ink-3)]">{t.level === "campaign" ? "แคมเปญ" : t.level === "adset" ? "ชุด" : "โฆษณา"}:</span> {t.name || t.id}
+                    <button onClick={() => setCfg((c) => ({ ...c, targets: c.targets.filter((x) => x.id !== t.id) }))} className="text-[var(--ink-3)] hover:text-rose-600">✕</button>
                   </span>
                 ))}
-                <button onClick={() => setCfg((c) => ({ ...c, targets: [] }))} className="text-[11px] text-slate-400 hover:text-rose-600 px-1">ล้างทั้งหมด</button>
+                <button onClick={() => setCfg((c) => ({ ...c, targets: [] }))} className="text-[11px] text-[var(--ink-3)] hover:text-rose-600 px-1">ล้างทั้งหมด</button>
               </div>
             </div>
           )}
@@ -405,9 +405,9 @@ function InsightsPrefetchPanel() {
       <div className="flex items-center gap-3 pt-1 flex-wrap">
         <button onClick={save} disabled={saving} className="bg-brand-600 text-white rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-60">{saving ? "กำลังบันทึก..." : "บันทึก"}</button>
         {cfg.enabled && cfg.targets.length > 0 && (
-          <button onClick={async () => { setMsg("กำลังเริ่มดึง..."); await save(); const { data } = await supabase.functions.invoke("prefetch-insights", { body: { seed: true } }); setMsg(data?.ok ? `เริ่มดึงแล้ว ✓ (คิว ${data.remaining ?? "-"} งาน · ทยอยดึงทุก 15 นาที)` : "เริ่มดึงไม่สำเร็จ — อาจยังไม่ได้ deploy prefetch-insights"); }} className="border border-slate-300 text-slate-700 rounded-lg px-4 py-2 text-sm font-medium hover:bg-slate-50">เริ่มดึงตอนนี้</button>
+          <button onClick={async () => { setMsg("กำลังเริ่มดึง..."); await save(); const { data } = await supabase.functions.invoke("prefetch-insights", { body: { seed: true } }); setMsg(data?.ok ? `เริ่มดึงแล้ว ✓ (คิว ${data.remaining ?? "-"} งาน · ทยอยดึงทุก 15 นาที)` : "เริ่มดึงไม่สำเร็จ — อาจยังไม่ได้ deploy prefetch-insights"); }} className="border border-[var(--line-strong)] text-[var(--ink-2)] rounded-lg px-4 py-2 text-sm font-medium hover:bg-[var(--ground)]">เริ่มดึงตอนนี้</button>
         )}
-        {msg && <span className={`text-xs ${msg.startsWith("บันทึกแล้ว") || msg.startsWith("เริ่มดึงแล้ว") ? "text-emerald-600" : "text-slate-500"}`}>{msg}</span>}
+        {msg && <span className={`text-xs ${msg.startsWith("บันทึกแล้ว") || msg.startsWith("เริ่มดึงแล้ว") ? "text-emerald-600" : "text-[var(--ink-3)]"}`}>{msg}</span>}
       </div>
     </div>
   );
@@ -486,10 +486,10 @@ function PushNotificationPanel() {
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4 max-w-xl">
+    <div className="bg-[var(--surface)] rounded-2xl border border-[var(--line)] p-5 shadow-sm space-y-4 max-w-xl">
       <div>
-        <h3 className="font-semibold text-slate-800 flex items-center gap-2"><Bell size={18} /> แจ้งเตือนข้อความใหม่ (Push)</h3>
-        <p className="text-xs text-slate-500 mt-1">เด้งเตือนแม้ปิดแอป · ตามเพจที่เลือกในหน้าตอบแชท · ต้องเปิด/ต่ออายุ 1 ครั้งต่อเครื่อง</p>
+        <h3 className="font-semibold text-[var(--ink)] flex items-center gap-2"><Bell size={18} /> แจ้งเตือนข้อความใหม่ (Push)</h3>
+        <p className="text-xs text-[var(--ink-3)] mt-1">เด้งเตือนแม้ปิดแอป · ตามเพจที่เลือกในหน้าตอบแชท · ต้องเปิด/ต่ออายุ 1 ครั้งต่อเครื่อง</p>
       </div>
 
       {iosNeedsInstall && (
@@ -498,7 +498,7 @@ function PushNotificationPanel() {
         </div>
       )}
 
-      <div className="text-xs text-slate-600">
+      <div className="text-xs text-[var(--ink-2)]">
         สถานะสิทธิ์แจ้งเตือนบนเครื่องนี้: <b className={perm === "granted" ? "text-emerald-600" : perm === "denied" ? "text-rose-600" : "text-amber-600"}>
           {perm === "granted" ? "อนุญาตแล้ว" : perm === "denied" ? "ถูกบล็อก" : "ยังไม่อนุญาต"}</b>
       </div>
@@ -509,20 +509,20 @@ function PushNotificationPanel() {
           {busy === "enable" ? "กำลังทำ..." : perm === "granted" ? "🔔 ต่ออายุการแจ้งเตือน" : "🔔 เปิดการแจ้งเตือน"}
         </button>
         <button onClick={test} disabled={!!busy || perm !== "granted"}
-          className="rounded-lg bg-slate-100 text-slate-700 px-4 py-2 text-sm font-medium hover:bg-slate-200 disabled:opacity-50">
+          className="rounded-lg bg-[var(--ground)] text-[var(--ink-2)] px-4 py-2 text-sm font-medium hover:bg-[var(--line)] disabled:opacity-50">
           {busy === "test" ? "กำลังส่ง..." : "ทดสอบส่ง"}
         </button>
         <button onClick={runDiag} disabled={!!busy}
-          className="rounded-lg bg-slate-100 text-slate-700 px-4 py-2 text-sm font-medium hover:bg-slate-200 disabled:opacity-50">
+          className="rounded-lg bg-[var(--ground)] text-[var(--ink-2)] px-4 py-2 text-sm font-medium hover:bg-[var(--line)] disabled:opacity-50">
           {busy === "diag" ? "กำลังตรวจ..." : "ตรวจระบบ"}
         </button>
       </div>
 
-      {msg && <div className="text-xs text-slate-600 whitespace-pre-wrap">{msg}</div>}
+      {msg && <div className="text-xs text-[var(--ink-2)] whitespace-pre-wrap">{msg}</div>}
 
       {diag && diag !== "loading" && (
-        <div className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 space-y-1">
-          <div className="font-semibold text-slate-700">ผลตรวจระบบ</div>
+        <div className="text-xs text-[var(--ink-2)] bg-[var(--ground)] border border-[var(--line)] rounded-lg px-3 py-2 space-y-1">
+          <div className="font-semibold text-[var(--ink-2)]">ผลตรวจระบบ</div>
           <div>VAPID (คีย์ฝั่ง server): {diag.vapid_ok ? "✓ ตั้งค่าแล้ว" : "✗ ยังไม่ตั้ง — ตั้ง secret VAPID + deploy send-push"}</div>
           <div>subscription ของเมลคุณ: <b>{diag.subscriptions_mine}</b> เครื่อง · ทั้งระบบ: {diag.subscriptions_all} เครื่อง</div>
           <div>แชทค้างอ่านตอนนี้: {diag.unread_total} (เกินเวลา {diag.alertMin} นาที: {diag.overdue_now})</div>
@@ -659,34 +659,34 @@ function TvAdminSettingsPanel() {
           ไม่งั้นจะเดาไม่ออกเลยว่าพังเพราะคุกกี้ เพราะ endpoint เปลี่ยน หรือเพราะ username ผิด */}
       {logOpen && (
         <div className="fixed inset-0 z-[200] bg-black/60 flex items-center justify-center p-4" onClick={() => setLogOpen(false)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[88vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-5 py-4">
+          <div className="bg-[var(--surface)] rounded-2xl shadow-2xl w-full max-w-4xl max-h-[88vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between gap-3 border-b border-[var(--line)] px-5 py-4">
               <div>
-                <h3 className="font-semibold text-slate-800">ประวัติการเรียก TradingView</h3>
-                <p className="text-[11px] text-slate-500">100 รายการล่าสุด · บันทึกทั้งโหมดยิงตรงและโหมด n8n</p>
+                <h3 className="font-semibold text-[var(--ink)]">ประวัติการเรียก TradingView</h3>
+                <p className="text-[11px] text-[var(--ink-3)]">100 รายการล่าสุด · บันทึกทั้งโหมดยิงตรงและโหมด n8n</p>
               </div>
               <div className="flex items-center gap-2">
-                <label className="flex items-center gap-1.5 text-[12px] text-slate-600">
+                <label className="flex items-center gap-1.5 text-[12px] text-[var(--ink-2)]">
                   <input type="checkbox" checked={logFail} onChange={(e) => { setLogFail(e.target.checked); loadLogs(e.target.checked); }} />
                   เฉพาะที่ล้มเหลว
                 </label>
-                <button onClick={() => loadLogs()} disabled={logBusy} className="rounded-lg border border-slate-300 px-2.5 py-1.5 text-[12px] disabled:opacity-50">
+                <button onClick={() => loadLogs()} disabled={logBusy} className="rounded-lg border border-[var(--line-strong)] px-2.5 py-1.5 text-[12px] disabled:opacity-50">
                   {logBusy ? "กำลังโหลด…" : "รีเฟรช"}
                 </button>
-                <button onClick={() => setLogOpen(false)} className="text-slate-400 hover:text-slate-700"><X size={20} /></button>
+                <button onClick={() => setLogOpen(false)} className="text-[var(--ink-3)] hover:text-[var(--ink-2)]"><X size={20} /></button>
               </div>
             </div>
 
             <div className="min-h-0 flex-1 overflow-auto">
               {logRows === null ? (
-                <div className="p-8 text-center text-sm text-slate-500">กำลังโหลด…</div>
+                <div className="p-8 text-center text-sm text-[var(--ink-3)]">กำลังโหลด…</div>
               ) : logRows.length === 0 ? (
-                <div className="p-8 text-center text-sm text-slate-500">
+                <div className="p-8 text-center text-sm text-[var(--ink-3)]">
                   ยังไม่มีประวัติ{logFail ? "ที่ล้มเหลว" : ""} — จะเริ่มบันทึกเมื่อระบบเรียก TradingView ครั้งต่อไป
                 </div>
               ) : (
                 <table className="w-full min-w-[1100px] text-[12px]">
-                  <thead className="sticky top-0 bg-slate-50 text-left text-slate-600">
+                  <thead className="sticky top-0 bg-[var(--ground)] text-left text-[var(--ink-2)]">
                     <tr>
                       {["เวลา", "ผล", "สคริปต์", "ผลจาก TV", "โหมด", "คำสั่ง", "username", "HTTP", "ใช้เวลา", "ใครกด"].map((h) => (
                         <th key={h} className="whitespace-nowrap px-3 py-2 font-medium">{h}</th>
@@ -696,7 +696,7 @@ function TvAdminSettingsPanel() {
                   <tbody>
                     {logRows.map((r) => (
                       <tr key={r.id} className="border-t border-slate-100 align-top">
-                        <td className="whitespace-nowrap px-3 py-2 text-slate-500">
+                        <td className="whitespace-nowrap px-3 py-2 text-[var(--ink-3)]">
                           {new Date(r.at).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "medium" })}
                         </td>
                         <td className="px-3 py-2">
@@ -705,7 +705,7 @@ function TvAdminSettingsPanel() {
                           </span>
                         </td>
                         {/* สคริปต์ไหน — เดิมไม่มีคอลัมน์นี้ จึงรู้แค่ว่า "สำเร็จ" แต่ไม่รู้ว่าของตัวไหน */}
-                        <td className="px-3 py-2 text-slate-700">{r.script || "—"}</td>
+                        <td className="px-3 py-2 text-[var(--ink-2)]">{r.script || "—"}</td>
                         {/* exists = TradingView บอกว่ามีสิทธิ์อยู่แล้ว "ไม่ได้ต่ออายุให้" ซึ่งเดิมนับเป็นสำเร็จ */}
                         <td className="px-3 py-2">
                           {r.tv_outcome === "exists" ? (
@@ -715,15 +715,15 @@ function TvAdminSettingsPanel() {
                           ) : r.tv_outcome === "ok" ? (
                             <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700">เพิ่มให้จริง</span>
                           ) : (
-                            <span className="text-slate-400">—</span>
+                            <span className="text-[var(--ink-3)]">—</span>
                           )}
                         </td>
-                        <td className="px-3 py-2 text-slate-600">{r.transport === "direct" ? "ยิงตรง" : "n8n"}</td>
-                        <td className="px-3 py-2 font-medium text-slate-800">{r.action}</td>
-                        <td className="px-3 py-2 text-slate-700">{r.username || "—"}</td>
-                        <td className="px-3 py-2 tabular-nums text-slate-600">{r.http_status ?? "—"}</td>
-                        <td className="px-3 py-2 tabular-nums text-slate-600">{r.duration_ms != null ? `${r.duration_ms} ms` : "—"}</td>
-                        <td className="px-3 py-2 text-slate-500">{r.actor ? String(r.actor).split("@")[0] : "ระบบ (cron)"}</td>
+                        <td className="px-3 py-2 text-[var(--ink-2)]">{r.transport === "direct" ? "ยิงตรง" : "n8n"}</td>
+                        <td className="px-3 py-2 font-medium text-[var(--ink)]">{r.action}</td>
+                        <td className="px-3 py-2 text-[var(--ink-2)]">{r.username || "—"}</td>
+                        <td className="px-3 py-2 tabular-nums text-[var(--ink-2)]">{r.http_status ?? "—"}</td>
+                        <td className="px-3 py-2 tabular-nums text-[var(--ink-2)]">{r.duration_ms != null ? `${r.duration_ms} ms` : "—"}</td>
+                        <td className="px-3 py-2 text-[var(--ink-3)]">{r.actor ? String(r.actor).split("@")[0] : "ระบบ (cron)"}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -731,14 +731,14 @@ function TvAdminSettingsPanel() {
               )}
               {/* รายละเอียดของแถวที่ล้มเหลว วางแยกใต้ตาราง เพราะข้อความยาวเกินกว่าจะยัดในช่อง */}
               {logRows?.some((r) => !r.ok) && (
-                <div className="space-y-2 border-t border-slate-200 p-4">
-                  <div className="text-[12px] font-semibold text-slate-700">รายละเอียดที่ล้มเหลว</div>
+                <div className="space-y-2 border-t border-[var(--line)] p-4">
+                  <div className="text-[12px] font-semibold text-[var(--ink-2)]">รายละเอียดที่ล้มเหลว</div>
                   {logRows.filter((r) => !r.ok).slice(0, 15).map((r) => (
                     <div key={`d${r.id}`} className="rounded-lg bg-rose-50 p-2.5 text-[11px]">
                       <div className="font-medium text-rose-800">{r.action} · {r.username || "—"} · {new Date(r.at).toLocaleString("th-TH", { timeStyle: "medium", dateStyle: "short" })}</div>
                       <div className="mt-0.5 text-rose-700">{r.error || "(ไม่มีข้อความ)"}</div>
-                      {r.endpoint && <div className="mt-0.5 break-all font-mono text-[10px] text-slate-500">{r.endpoint}</div>}
-                      {r.response && <div className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap break-all font-mono text-[10px] text-slate-500">{r.response}</div>}
+                      {r.endpoint && <div className="mt-0.5 break-all font-mono text-[10px] text-[var(--ink-3)]">{r.endpoint}</div>}
+                      {r.response && <div className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap break-all font-mono text-[10px] text-[var(--ink-3)]">{r.response}</div>}
                     </div>
                   ))}
                 </div>
@@ -751,38 +751,38 @@ function TvAdminSettingsPanel() {
       {/* modal ตั้งค่า n8n webhook (global) */}
       {whOpen && (
         <div className="fixed inset-0 z-[200] bg-black/60 flex items-center justify-center p-4" onClick={() => setWhOpen(false)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-[var(--surface)] rounded-2xl shadow-2xl w-full max-w-md p-5 space-y-3" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
-              <h3 className="font-semibold text-slate-800">ตั้งค่า n8n Webhook (ใช้ร่วมทุกแบรนด์)</h3>
-              <button onClick={() => setWhOpen(false)} className="text-slate-400 hover:text-slate-700"><X size={20} /></button>
+              <h3 className="font-semibold text-[var(--ink)]">ตั้งค่า n8n Webhook (ใช้ร่วมทุกแบรนด์)</h3>
+              <button onClick={() => setWhOpen(false)} className="text-[var(--ink-3)] hover:text-[var(--ink-2)]"><X size={20} /></button>
             </div>
             {/* พิสูจน์แล้วว่า Deno บน Supabase Edge ส่ง header Cookie ได้จริง (ทดสอบยิงหาตัวเอง header ไปถึงครบ)
                 ข้ออ้างเดิมที่ว่าส่งไม่ได้จึงไม่จริง — n8n ไม่จำเป็นแล้ว แต่คงไว้เป็นทางสำรอง
                 จนกว่าจะยืนยันว่าโหมดยิงตรงใช้กับ TradingView ได้จริง */}
-            <div className="rounded-xl border border-slate-200 p-3 space-y-2">
-              <div className="text-xs font-semibold text-slate-700">วิธีคุยกับ TradingView</div>
+            <div className="rounded-xl border border-[var(--line)] p-3 space-y-2">
+              <div className="text-xs font-semibold text-[var(--ink-2)]">วิธีคุยกับ TradingView</div>
               {[["direct", "ยิงตรงจากระบบ (แนะนำ)", "ไม่ต้องมี n8n · คุกกี้ไม่ต้องเดินทางออกนอกระบบ"],
                 ["n8n", "ผ่าน n8n (แบบเดิม)", "ต้องมีเซิร์ฟเวอร์ n8n รันอยู่ + ตั้ง URL ด้านล่าง"]].map(([val, title, hint]) => (
-                <label key={val} className={`flex cursor-pointer items-start gap-2 rounded-lg border p-2 ${tvTransport === val ? "border-brand-600 bg-brand-50" : "border-slate-200"}`}>
+                <label key={val} className={`flex cursor-pointer items-start gap-2 rounded-lg border p-2 ${tvTransport === val ? "border-brand-600 bg-brand-50" : "border-[var(--line)]"}`}>
                   <input type="radio" name="tv-transport" checked={tvTransport === val} onChange={() => saveTransport(val)} className="mt-0.5" />
                   <span className="min-w-0">
-                    <span className="block text-[13px] font-medium text-slate-800">{title}</span>
-                    <span className="block text-[11px] text-slate-500">{hint}</span>
+                    <span className="block text-[13px] font-medium text-[var(--ink)]">{title}</span>
+                    <span className="block text-[11px] text-[var(--ink-3)]">{hint}</span>
                   </span>
                 </label>
               ))}
             </div>
-            <p className="text-xs text-slate-500">ช่องด้านล่างใช้เฉพาะโหมด n8n — โหมดยิงตรงไม่ต้องกรอก</p>
+            <p className="text-xs text-[var(--ink-3)]">ช่องด้านล่างใช้เฉพาะโหมด n8n — โหมดยิงตรงไม่ต้องกรอก</p>
             <div>
-              <label className="text-xs text-slate-500">n8n Webhook URL</label>
-              <input value={whUrl} onChange={(e) => setWhUrl(e.target.value)} placeholder="https://your-n8n/webhook/tv-access" className="w-full mt-1 rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono" />
+              <label className="text-xs text-[var(--ink-3)]">n8n Webhook URL</label>
+              <input value={whUrl} onChange={(e) => setWhUrl(e.target.value)} placeholder="https://your-n8n/webhook/tv-access" className="w-full mt-1 rounded-lg border border-[var(--line-strong)] px-3 py-2 text-sm font-mono" />
             </div>
             <div>
-              <label className="text-xs text-slate-500">Secret (เว้นว่าง = ไม่เปลี่ยนของเดิม)</label>
-              <input value={whSecret} onChange={(e) => setWhSecret(e.target.value)} placeholder="ต้องตรงกับ secret ใน node Config ของ n8n" className="w-full mt-1 rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono" />
+              <label className="text-xs text-[var(--ink-3)]">Secret (เว้นว่าง = ไม่เปลี่ยนของเดิม)</label>
+              <input value={whSecret} onChange={(e) => setWhSecret(e.target.value)} placeholder="ต้องตรงกับ secret ใน node Config ของ n8n" className="w-full mt-1 rounded-lg border border-[var(--line-strong)] px-3 py-2 text-sm font-mono" />
             </div>
             <div className="flex justify-end gap-2 pt-1">
-              <button onClick={() => setWhOpen(false)} className="px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-600 hover:bg-slate-50">ยกเลิก</button>
+              <button onClick={() => setWhOpen(false)} className="px-4 py-2 rounded-lg border border-[var(--line-strong)] text-sm text-[var(--ink-2)] hover:bg-[var(--ground)]">ยกเลิก</button>
               <button onClick={saveWebhook} disabled={whSaving} className="px-4 py-2 rounded-lg bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 disabled:opacity-50">{whSaving ? "กำลังบันทึก..." : "บันทึก"}</button>
             </div>
           </div>
@@ -792,35 +792,35 @@ function TvAdminSettingsPanel() {
       {/* modal เพิ่ม/แก้แบรนด์ */}
       {be && (
         <div className="fixed inset-0 z-[200] bg-black/60 flex items-center justify-center p-4" onClick={() => setBe(null)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 space-y-3 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+          <div className="bg-[var(--surface)] rounded-2xl shadow-2xl w-full max-w-md p-5 space-y-3 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
-              <h3 className="font-semibold text-slate-800">{be.id ? "แก้ไขแบรนด์" : "เพิ่มแบรนด์ TradingView"}</h3>
-              <button onClick={() => setBe(null)} className="text-slate-400 hover:text-slate-700"><X size={20} /></button>
+              <h3 className="font-semibold text-[var(--ink)]">{be.id ? "แก้ไขแบรนด์" : "เพิ่มแบรนด์ TradingView"}</h3>
+              <button onClick={() => setBe(null)} className="text-[var(--ink-3)] hover:text-[var(--ink-2)]"><X size={20} /></button>
             </div>
             <div>
-              <label className="text-xs text-slate-500">ชื่อแบรนด์</label>
-              <input value={be.name} onChange={(e) => setBe({ ...be, name: e.target.value })} placeholder="เช่น BeSight / Brand B" className="w-full mt-1 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+              <label className="text-xs text-[var(--ink-3)]">ชื่อแบรนด์</label>
+              <input value={be.name} onChange={(e) => setBe({ ...be, name: e.target.value })} placeholder="เช่น BeSight / Brand B" className="w-full mt-1 rounded-lg border border-[var(--line-strong)] px-3 py-2 text-sm" />
             </div>
             <div>
-              <label className="text-xs text-slate-500">TradingView sessionid {be.has_cookie && <span className="text-emerald-600">· มีคุกกี้แล้ว (เว้นว่าง = ไม่เปลี่ยน)</span>}</label>
-              <input value={be.sessionid} onChange={(e) => setBe({ ...be, sessionid: e.target.value })} placeholder="คุกกี้ sessionid" className="w-full mt-1 rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono" />
+              <label className="text-xs text-[var(--ink-3)]">TradingView sessionid {be.has_cookie && <span className="text-emerald-600">· มีคุกกี้แล้ว (เว้นว่าง = ไม่เปลี่ยน)</span>}</label>
+              <input value={be.sessionid} onChange={(e) => setBe({ ...be, sessionid: e.target.value })} placeholder="คุกกี้ sessionid" className="w-full mt-1 rounded-lg border border-[var(--line-strong)] px-3 py-2 text-sm font-mono" />
             </div>
             <div>
-              <label className="text-xs text-slate-500">sessionid_sign</label>
-              <input value={be.sign} onChange={(e) => setBe({ ...be, sign: e.target.value })} placeholder="คุกกี้ sessionid_sign" className="w-full mt-1 rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono" />
+              <label className="text-xs text-[var(--ink-3)]">sessionid_sign</label>
+              <input value={be.sign} onChange={(e) => setBe({ ...be, sign: e.target.value })} placeholder="คุกกี้ sessionid_sign" className="w-full mt-1 rounded-lg border border-[var(--line-strong)] px-3 py-2 text-sm font-mono" />
             </div>
             <div>
-              <label className="text-xs text-slate-500">TradingView base URL (เว้นว่าง = ค่าเริ่มต้น)</label>
-              <input value={be.tv_base} onChange={(e) => setBe({ ...be, tv_base: e.target.value })} placeholder="https://www.tradingview.com" className="w-full mt-1 rounded-lg border border-slate-300 px-3 py-2 text-sm font-mono" />
+              <label className="text-xs text-[var(--ink-3)]">TradingView base URL (เว้นว่าง = ค่าเริ่มต้น)</label>
+              <input value={be.tv_base} onChange={(e) => setBe({ ...be, tv_base: e.target.value })} placeholder="https://www.tradingview.com" className="w-full mt-1 rounded-lg border border-[var(--line-strong)] px-3 py-2 text-sm font-mono" />
             </div>
             <div>
-              <label className="text-xs text-slate-500">เพจแชทที่ให้โชว์ฟอร์มเพิ่ม TV ของแบรนด์นี้</label>
-              <div className="mt-1 rounded-lg border border-slate-300 divide-y divide-slate-100 max-h-40 overflow-y-auto">
-                {pages.length === 0 && <div className="px-3 py-2 text-sm text-slate-400">ยังไม่มีเพจ</div>}
+              <label className="text-xs text-[var(--ink-3)]">เพจแชทที่ให้โชว์ฟอร์มเพิ่ม TV ของแบรนด์นี้</label>
+              <div className="mt-1 rounded-lg border border-[var(--line-strong)] divide-y divide-slate-100 max-h-40 overflow-y-auto">
+                {pages.length === 0 && <div className="px-3 py-2 text-sm text-[var(--ink-3)]">ยังไม่มีเพจ</div>}
                 {pages.map((p) => {
                   const on = be.pages.includes(p.id);
                   return (
-                    <label key={p.id} className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-slate-50">
+                    <label key={p.id} className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-[var(--ground)]">
                       <input type="checkbox" checked={on} onChange={() => setBe({ ...be, pages: on ? be.pages.filter((x) => x !== p.id) : [...be.pages, p.id] })} />
                       <span className="truncate">{p.name}</span>
                     </label>
@@ -828,83 +828,83 @@ function TvAdminSettingsPanel() {
                 })}
               </div>
             </div>
-            <label className="flex items-center gap-2 text-sm text-slate-700">
+            <label className="flex items-center gap-2 text-sm text-[var(--ink-2)]">
               <input type="checkbox" checked={be.show_in_manager} onChange={(e) => setBe({ ...be, show_in_manager: e.target.checked })} /> โชว์ในหน้าจัดการสมาชิก TV
             </label>
             {be.id && be.ingest_token && (
-              <div className="rounded-lg bg-slate-50 border border-slate-200 p-2.5 space-y-1.5">
-                <div className="text-[11px] font-medium text-slate-600">รับคุกกี้อัตโนมัติจาก Chrome extension</div>
-                <div className="text-[11px] text-slate-400">ตั้งค่า extension ให้ยิง POST มาที่ URL นี้ พร้อม token ของแบรนด์ (body: {`{action:"ingest_cookie", token, sessionid, sessionid_sign}`})</div>
-                <div><span className="text-[10px] text-slate-400">Endpoint URL</span><div className="flex gap-1"><input readOnly value={ingestUrl} onFocus={(e) => e.target.select()} className="flex-1 rounded border border-slate-300 px-2 py-1 text-[11px] font-mono bg-white" /><button onClick={() => navigator.clipboard?.writeText(ingestUrl)} className="px-2 rounded border border-slate-300 text-[11px] text-slate-600 hover:bg-slate-100">คัดลอก</button></div></div>
-                <div><span className="text-[10px] text-slate-400">Token (แบรนด์นี้)</span><div className="flex gap-1"><input readOnly value={be.ingest_token} onFocus={(e) => e.target.select()} className="flex-1 rounded border border-slate-300 px-2 py-1 text-[11px] font-mono bg-white" /><button onClick={() => navigator.clipboard?.writeText(be.ingest_token)} className="px-2 rounded border border-slate-300 text-[11px] text-slate-600 hover:bg-slate-100">คัดลอก</button></div></div>
+              <div className="rounded-lg bg-[var(--ground)] border border-[var(--line)] p-2.5 space-y-1.5">
+                <div className="text-[11px] font-medium text-[var(--ink-2)]">รับคุกกี้อัตโนมัติจาก Chrome extension</div>
+                <div className="text-[11px] text-[var(--ink-3)]">ตั้งค่า extension ให้ยิง POST มาที่ URL นี้ พร้อม token ของแบรนด์ (body: {`{action:"ingest_cookie", token, sessionid, sessionid_sign}`})</div>
+                <div><span className="text-[10px] text-[var(--ink-3)]">Endpoint URL</span><div className="flex gap-1"><input readOnly value={ingestUrl} onFocus={(e) => e.target.select()} className="flex-1 rounded border border-[var(--line-strong)] px-2 py-1 text-[11px] font-mono bg-[var(--surface)]" /><button onClick={() => navigator.clipboard?.writeText(ingestUrl)} className="px-2 rounded border border-[var(--line-strong)] text-[11px] text-[var(--ink-2)] hover:bg-[var(--ground)]">คัดลอก</button></div></div>
+                <div><span className="text-[10px] text-[var(--ink-3)]">Token (แบรนด์นี้)</span><div className="flex gap-1"><input readOnly value={be.ingest_token} onFocus={(e) => e.target.select()} className="flex-1 rounded border border-[var(--line-strong)] px-2 py-1 text-[11px] font-mono bg-[var(--surface)]" /><button onClick={() => navigator.clipboard?.writeText(be.ingest_token)} className="px-2 rounded border border-[var(--line-strong)] text-[11px] text-[var(--ink-2)] hover:bg-[var(--ground)]">คัดลอก</button></div></div>
               </div>
             )}
             <div className="flex justify-end gap-2 pt-1">
-              <button onClick={() => setBe(null)} className="px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-600 hover:bg-slate-50">ยกเลิก</button>
+              <button onClick={() => setBe(null)} className="px-4 py-2 rounded-lg border border-[var(--line-strong)] text-sm text-[var(--ink-2)] hover:bg-[var(--ground)]">ยกเลิก</button>
               <button onClick={saveBrand} disabled={beSaving} className="px-4 py-2 rounded-lg bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 disabled:opacity-50">{beSaving ? "กำลังบันทึก..." : "บันทึก"}</button>
             </div>
           </div>
         </div>
       )}
 
-      <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-3">
+      <div className="bg-[var(--surface)] rounded-2xl border border-[var(--line)] p-5 shadow-sm space-y-3">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
-            <h3 className="font-semibold text-slate-800">ตั้งค่า TradingView (แอดมิน)</h3>
-            <p className="text-xs text-slate-500 mt-1">จัดการหลายแบรนด์ — แต่ละแบรนด์คุกกี้/สคริปต์แยกกัน · เลือกเพจแชทที่ให้โชว์ + จะโชว์ในหน้าจัดการ TV ไหม</p>
+            <h3 className="font-semibold text-[var(--ink)]">ตั้งค่า TradingView (แอดมิน)</h3>
+            <p className="text-xs text-[var(--ink-3)] mt-1">จัดการหลายแบรนด์ — แต่ละแบรนด์คุกกี้/สคริปต์แยกกัน · เลือกเพจแชทที่ให้โชว์ + จะโชว์ในหน้าจัดการ TV ไหม</p>
           </div>
           <div className="flex gap-2 shrink-0">
-            <button onClick={openLogs} className="px-3 py-2 rounded-lg border border-slate-300 text-sm text-slate-700 hover:bg-slate-50">ประวัติการเรียก TV</button>
-            <button onClick={openWebhook} className="px-3 py-2 rounded-lg border border-slate-300 text-sm text-slate-700 hover:bg-slate-50">ตั้งค่า n8n</button>
+            <button onClick={openLogs} className="px-3 py-2 rounded-lg border border-[var(--line-strong)] text-sm text-[var(--ink-2)] hover:bg-[var(--ground)]">ประวัติการเรียก TV</button>
+            <button onClick={openWebhook} className="px-3 py-2 rounded-lg border border-[var(--line-strong)] text-sm text-[var(--ink-2)] hover:bg-[var(--ground)]">ตั้งค่า n8n</button>
             <button onClick={newBrand} className="px-3 py-2 rounded-lg bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700">+ เพิ่มแบรนด์</button>
           </div>
         </div>
-        {msg && <div className="text-sm rounded-lg bg-slate-100 border border-slate-200 px-3 py-2 text-slate-700 whitespace-pre-line">{msg}</div>}
+        {msg && <div className="text-sm rounded-lg bg-[var(--ground)] border border-[var(--line)] px-3 py-2 text-[var(--ink-2)] whitespace-pre-line">{msg}</div>}
       </div>
 
       {/* ปล่อยฟีเจอร์ TV ใหม่ */}
-      <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
+      <div className="bg-[var(--surface)] rounded-2xl border border-[var(--line)] p-5 shadow-sm">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="min-w-0">
-            <h3 className="font-semibold text-slate-800 flex items-center gap-2"><Tv size={16} /> ปล่อยอัปเดต TV ให้ผู้ใช้ทุกคน</h3>
-            <p className="text-xs text-slate-500 mt-1 max-w-md">ปิดอยู่ = เห็นเฉพาะแอดมิน, เปิด = ผู้ใช้ทุกคนเห็น (คอลัมน์อีเมล + ตัวเลือก TV ในหน้าตอบแชท)</p>
+            <h3 className="font-semibold text-[var(--ink)] flex items-center gap-2"><Tv size={16} /> ปล่อยอัปเดต TV ให้ผู้ใช้ทุกคน</h3>
+            <p className="text-xs text-[var(--ink-3)] mt-1 max-w-md">ปิดอยู่ = เห็นเฉพาะแอดมิน, เปิด = ผู้ใช้ทุกคนเห็น (คอลัมน์อีเมล + ตัวเลือก TV ในหน้าตอบแชท)</p>
           </div>
           <div className="flex items-center gap-3 shrink-0">
-            <span className={`text-xs font-medium ${released ? "text-emerald-600" : "text-slate-400"}`}>{released == null ? "..." : released ? "ปล่อยแล้ว" : "เฉพาะแอดมิน"}</span>
+            <span className={`text-xs font-medium ${released ? "text-emerald-600" : "text-[var(--ink-3)]"}`}>{released == null ? "..." : released ? "ปล่อยแล้ว" : "เฉพาะแอดมิน"}</span>
             <button onClick={toggleReleased} disabled={relSaving || released == null} className={`relative w-12 h-7 rounded-full transition-colors disabled:opacity-50 ${released ? "bg-emerald-500" : "bg-slate-300"}`}>
-              <span className={`absolute top-0.5 w-6 h-6 rounded-full bg-white shadow transition-all ${released ? "left-[22px]" : "left-0.5"}`} />
+              <span className={`absolute top-0.5 w-6 h-6 rounded-full bg-[var(--surface)] shadow transition-all ${released ? "left-[22px]" : "left-0.5"}`} />
             </button>
           </div>
         </div>
       </div>
 
       {/* รายการแบรนด์ + สคริปต์ต่อแบรนด์ */}
-      {brands.length === 0 && <div className="bg-white rounded-2xl border border-slate-200 p-6 text-center text-sm text-slate-400">ยังไม่มีแบรนด์ — กด "+ เพิ่มแบรนด์"</div>}
+      {brands.length === 0 && <div className="bg-[var(--surface)] rounded-2xl border border-[var(--line)] p-6 text-center text-sm text-[var(--ink-3)]">ยังไม่มีแบรนด์ — กด "+ เพิ่มแบรนด์"</div>}
       {brands.map((b) => {
         const bs = scripts.filter((s) => s.brand_id === b.id);
         return (
-          <div key={b.id} className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+          <div key={b.id} className="bg-[var(--surface)] rounded-2xl border border-[var(--line)] overflow-hidden">
             <div className="px-4 py-3 border-b border-slate-100 flex items-start justify-between gap-2 flex-wrap">
               <div className="min-w-0">
-                <div className="font-semibold text-slate-800 truncate flex items-center gap-2">{b.name}
+                <div className="font-semibold text-[var(--ink)] truncate flex items-center gap-2">{b.name}
                   <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${b.has_cookie ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-600"}`}>{b.has_cookie ? "มีคุกกี้" : "ยังไม่มีคุกกี้"}</span>
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${b.show_in_manager ? "bg-slate-100 text-slate-600" : "bg-amber-50 text-amber-700"}`}>{b.show_in_manager ? "โชว์ในหน้าจัดการ" : "ซ่อนหน้าจัดการ"}</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${b.show_in_manager ? "bg-[var(--ground)] text-[var(--ink-2)]" : "bg-amber-50 text-amber-700"}`}>{b.show_in_manager ? "โชว์ในหน้าจัดการ" : "ซ่อนหน้าจัดการ"}</span>
                 </div>
-                <div className="text-[11px] text-slate-400 truncate mt-0.5">เพจ: {(b.pages || []).length ? (b.pages || []).map(pageName).join(", ") : "— (ไม่ผูกเพจ)"}</div>
+                <div className="text-[11px] text-[var(--ink-3)] truncate mt-0.5">เพจ: {(b.pages || []).length ? (b.pages || []).map(pageName).join(", ") : "— (ไม่ผูกเพจ)"}</div>
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
-                <button onClick={() => checkBrand(b)} disabled={checkingId === b.id} className="px-2 py-1 rounded-md border border-slate-300 text-[11px] text-slate-600 hover:bg-slate-50 disabled:opacity-50">{checkingId === b.id ? "ตรวจ..." : "ตรวจระบบ"}</button>
+                <button onClick={() => checkBrand(b)} disabled={checkingId === b.id} className="px-2 py-1 rounded-md border border-[var(--line-strong)] text-[11px] text-[var(--ink-2)] hover:bg-[var(--ground)] disabled:opacity-50">{checkingId === b.id ? "ตรวจ..." : "ตรวจระบบ"}</button>
                 <button onClick={() => addScript(b.id)} className="px-2 py-1 rounded-md bg-brand-600 text-white text-[11px] font-medium hover:bg-brand-700">+ สคริปต์</button>
-                <button onClick={() => editBrand(b)} className="px-2 py-1 rounded-md border border-slate-300 text-[11px] text-slate-600 hover:bg-slate-50">แก้ไข</button>
+                <button onClick={() => editBrand(b)} className="px-2 py-1 rounded-md border border-[var(--line-strong)] text-[11px] text-[var(--ink-2)] hover:bg-[var(--ground)]">แก้ไข</button>
                 <button onClick={() => deleteBrand(b)} className="px-2 py-1 rounded-md text-[11px] text-rose-600 hover:bg-rose-50"><Trash2 size={12} /></button>
               </div>
             </div>
             <div className="divide-y divide-slate-100">
-              {bs.length === 0 ? <div className="px-4 py-4 text-center text-xs text-slate-400">ยังไม่มีสคริปต์ — กด "+ สคริปต์"</div> : bs.map((s) => (
+              {bs.length === 0 ? <div className="px-4 py-4 text-center text-xs text-[var(--ink-3)]">ยังไม่มีสคริปต์ — กด "+ สคริปต์"</div> : bs.map((s) => (
                 <div key={s.pine_id} className="flex items-center justify-between gap-2 px-4 py-2.5">
                   <div className="min-w-0">
-                    <div className="font-medium text-slate-800 truncate text-sm">{s.name}</div>
-                    <div className="text-[11px] text-slate-400 truncate font-mono">{s.pine_id}</div>
+                    <div className="font-medium text-[var(--ink)] truncate text-sm">{s.name}</div>
+                    <div className="text-[11px] text-[var(--ink-3)] truncate font-mono">{s.pine_id}</div>
                   </div>
                   <button onClick={() => deleteScript(s)} className="flex items-center gap-1 text-[11px] font-medium text-rose-600 hover:bg-rose-50 rounded-md px-2 py-1 shrink-0" title="ลบสคริปต์นี้"><Trash2 size={13} /> ลบ</button>
                 </div>
@@ -915,12 +915,12 @@ function TvAdminSettingsPanel() {
       })}
       {/* สคริปต์ที่ยังไม่มีแบรนด์ (ถ้ามี) */}
       {scripts.some((s) => !s.brand_id) && (
-        <div className="bg-white rounded-2xl border border-amber-200 overflow-hidden">
+        <div className="bg-[var(--surface)] rounded-2xl border border-amber-200 overflow-hidden">
           <div className="px-4 py-3 border-b border-slate-100 font-medium text-amber-700 text-sm">สคริปต์ที่ยังไม่มีแบรนด์ — แนะนำให้ลบแล้วเพิ่มใหม่ในแบรนด์ที่ต้องการ</div>
           <div className="divide-y divide-slate-100">
             {scripts.filter((s) => !s.brand_id).map((s) => (
               <div key={s.pine_id} className="flex items-center justify-between gap-2 px-4 py-2.5">
-                <div className="min-w-0"><div className="font-medium text-slate-800 truncate text-sm">{s.name}</div><div className="text-[11px] text-slate-400 truncate font-mono">{s.pine_id}</div></div>
+                <div className="min-w-0"><div className="font-medium text-[var(--ink)] truncate text-sm">{s.name}</div><div className="text-[11px] text-[var(--ink-3)] truncate font-mono">{s.pine_id}</div></div>
                 <button onClick={() => deleteScript(s)} className="text-[11px] font-medium text-rose-600 hover:bg-rose-50 rounded-md px-2 py-1 shrink-0"><Trash2 size={13} /> ลบ</button>
               </div>
             ))}
@@ -1002,40 +1002,40 @@ function TvBackfillPanel({ scripts }) {
         {done ? <CheckCircle2 size={15} /> : n}
       </div>
       <div className="min-w-0 pt-0.5">
-        <div className="text-sm font-semibold text-slate-800">{title}</div>
-        {hint && <div className="text-xs text-slate-500 mt-0.5">{hint}</div>}
+        <div className="text-sm font-semibold text-[var(--ink)]">{title}</div>
+        {hint && <div className="text-xs text-[var(--ink-3)] mt-0.5">{hint}</div>}
       </div>
     </div>
   );
   const Seg = ({ value, onChange, options, size = "md" }) => (
-    <div className={`inline-flex rounded-lg bg-slate-100 p-0.5 ${size === "sm" ? "text-[11px]" : "text-xs"}`}>
+    <div className={`inline-flex rounded-lg bg-[var(--ground)] p-0.5 ${size === "sm" ? "text-[11px]" : "text-xs"}`}>
       {options.map(([v, label]) => (
         <button key={v} type="button" onClick={() => onChange(v)}
-          className={`rounded-md font-medium transition ${size === "sm" ? "px-2 py-1" : "px-3 py-1.5"} ${value === v ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>
+          className={`rounded-md font-medium transition ${size === "sm" ? "px-2 py-1" : "px-3 py-1.5"} ${value === v ? "bg-[var(--surface)] text-[var(--ink)] shadow-sm" : "text-[var(--ink-3)] hover:text-[var(--ink-2)]"}`}>
           {label}
         </button>
       ))}
     </div>
   );
   const Stat = ({ tone, n, title, rule }) => {
-    const t = { green: "border-emerald-200 bg-emerald-50/60 text-emerald-700", amber: "border-amber-200 bg-amber-50/60 text-amber-700", slate: "border-slate-200 bg-slate-50 text-slate-700" }[tone];
+    const t = { green: "border-emerald-200 bg-emerald-50/60 text-emerald-700", amber: "border-amber-200 bg-amber-50/60 text-amber-700", slate: "border-[var(--line)] bg-[var(--ground)] text-[var(--ink-2)]" }[tone];
     return (
       <div className={`rounded-xl border p-3 ${t}`}>
         <div className="text-2xl font-bold tabular-nums leading-none">{n}</div>
-        <div className="text-xs font-medium mt-1.5 text-slate-700">{title}</div>
-        <div className="text-[11px] text-slate-500 mt-0.5">→ {rule}</div>
+        <div className="text-xs font-medium mt-1.5 text-[var(--ink-2)]">{title}</div>
+        <div className="text-[11px] text-[var(--ink-3)] mt-0.5">→ {rule}</div>
       </div>
     );
   };
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+    <div className="rounded-2xl border border-[var(--line)] bg-[var(--surface)] shadow-sm overflow-hidden">
       {/* หัวการ์ด */}
       <div className="flex items-start gap-3 px-5 py-4 border-b border-slate-100">
         <div className="w-10 h-10 rounded-xl bg-brand-50 text-brand-700 flex items-center justify-center shrink-0"><Tv size={20} /></div>
         <div className="min-w-0">
-          <h4 className="font-semibold text-slate-800">ให้สิทธิ์สคริปต์ใหม่ย้อนหลัง</h4>
-          <p className="text-xs text-slate-500 mt-0.5">ลูกค้าที่มีสิทธิ์สคริปต์เดิมและยังไม่หมดอายุ จะได้สคริปต์ใหม่ด้วย · ข้ามคนที่มีอยู่แล้ว · กดซ้ำได้ปลอดภัย</p>
+          <h4 className="font-semibold text-[var(--ink)]">ให้สิทธิ์สคริปต์ใหม่ย้อนหลัง</h4>
+          <p className="text-xs text-[var(--ink-3)] mt-0.5">ลูกค้าที่มีสิทธิ์สคริปต์เดิมและยังไม่หมดอายุ จะได้สคริปต์ใหม่ด้วย · ข้ามคนที่มีอยู่แล้ว · กดซ้ำได้ปลอดภัย</p>
         </div>
       </div>
 
@@ -1045,21 +1045,21 @@ function TvBackfillPanel({ scripts }) {
           <Step n={1} title="เลือกสคริปต์" done={!!preview && !preview.loading} />
           <div className="ml-10 grid gap-3 lg:grid-cols-[1fr_auto_1.3fr] lg:items-end">
             <div>
-              <label className="text-[11px] font-medium uppercase tracking-wide text-slate-400">สคริปต์ใหม่ที่จะให้</label>
+              <label className="text-[11px] font-medium uppercase tracking-wide text-[var(--ink-3)]">สคริปต์ใหม่ที่จะให้</label>
               <select value={target} onChange={(e) => { setTarget(e.target.value); setSources((s) => s.filter((x) => x !== e.target.value)); }}
-                className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 focus:border-brand-500 focus:outline-none">
+                className="mt-1 w-full rounded-lg border border-[var(--line-strong)] bg-[var(--surface)] px-3 py-2 text-sm font-medium text-[var(--ink)] focus:border-brand-500 focus:outline-none">
                 {scripts.map((s) => <option key={s.pine_id} value={s.pine_id}>{s.name}</option>)}
               </select>
             </div>
-            <div className="hidden lg:flex items-center justify-center pb-2.5 text-slate-300"><ChevronLeft size={18} /></div>
+            <div className="hidden lg:flex items-center justify-center pb-2.5 text-[var(--ink-3)]"><ChevronLeft size={18} /></div>
             <div>
-              <label className="text-[11px] font-medium uppercase tracking-wide text-slate-400">ให้ลูกค้าที่มีสิทธิ์</label>
+              <label className="text-[11px] font-medium uppercase tracking-wide text-[var(--ink-3)]">ให้ลูกค้าที่มีสิทธิ์</label>
               <div className="mt-1 flex flex-wrap items-center gap-2">
                 {scripts.filter((s) => s.pine_id !== target).map((s) => {
                   const on = sources.includes(s.pine_id);
                   return (
                     <button key={s.pine_id} type="button" onClick={() => setSources((x) => on ? x.filter((y) => y !== s.pine_id) : [...x, s.pine_id])}
-                      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition ${on ? "border-brand-500 bg-brand-50 text-brand-700 font-medium" : "border-slate-300 text-slate-500 hover:border-slate-400"}`}>
+                      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition ${on ? "border-brand-500 bg-brand-50 text-brand-700 font-medium" : "border-[var(--line-strong)] text-[var(--ink-3)] hover:border-[var(--line-strong)]"}`}>
                       {on ? <CheckCircle2 size={14} /> : <Plus size={14} />} {s.name}
                     </button>
                   );
@@ -1071,11 +1071,11 @@ function TvBackfillPanel({ scripts }) {
           {!run && (
             <div className="ml-10">
               <button onClick={check} disabled={!target || !sources.length || preview?.loading}
-                className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                className="inline-flex items-center gap-2 rounded-lg border border-[var(--line-strong)] bg-[var(--surface)] px-4 py-2 text-sm font-medium text-[var(--ink-2)] hover:bg-[var(--ground)] disabled:opacity-50">
                 {preview?.loading ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />}
                 {preview && !preview.loading ? "ตรวจรายชื่อใหม่" : "ตรวจรายชื่อ"}
               </button>
-              <span className="ml-3 text-xs text-slate-400">แค่นับจำนวน ยังไม่ให้สิทธิ์ใคร</span>
+              <span className="ml-3 text-xs text-[var(--ink-3)]">แค่นับจำนวน ยังไม่ให้สิทธิ์ใคร</span>
             </div>
           )}
         </section>
@@ -1101,37 +1101,37 @@ function TvBackfillPanel({ scripts }) {
         {preview && !preview.loading && !run && preview.decide > 0 && (
           <section className="space-y-3">
             <Step n={3} title={`กลุ่มตลอดชีพแค่บางตัว ${preview.decide} คน ให้ ${nameOf(target)} แบบไหน?`} hint="เลือกทั้งกลุ่ม แล้วแก้รายคนได้ถ้าบางคนต้องการต่างออกไป · 1 เดือน = 30 วันนับจากวันที่กด" />
-            <div className="ml-10 rounded-xl border border-slate-200 overflow-hidden">
-              <div className="flex flex-wrap items-center gap-3 bg-slate-50 px-3 py-2.5 border-b border-slate-200">
-                <span className="text-xs font-medium text-slate-600">ทั้งกลุ่ม</span>
+            <div className="ml-10 rounded-xl border border-[var(--line)] overflow-hidden">
+              <div className="flex flex-wrap items-center gap-3 bg-[var(--ground)] px-3 py-2.5 border-b border-[var(--line)]">
+                <span className="text-xs font-medium text-[var(--ink-2)]">ทั้งกลุ่ม</span>
                 <Seg value={decideDefault} onChange={setDecideDefault} options={[["month", "1 เดือน"], ["lifetime", "ตลอดชีพ"]]} />
-                <span className="text-xs text-slate-500">ตลอดชีพ <b className="text-emerald-700">{decideLifetime}</b> · 1 เดือน <b className="text-slate-700">{decideMonth}</b></span>
+                <span className="text-xs text-[var(--ink-3)]">ตลอดชีพ <b className="text-emerald-700">{decideLifetime}</b> · 1 เดือน <b className="text-[var(--ink-2)]">{decideMonth}</b></span>
                 <div className="ml-auto flex items-center gap-2">
                   <div className="relative">
-                    <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--ink-3)]" />
                     <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหา username / ชื่อ"
-                      className="w-48 rounded-lg border border-slate-300 bg-white py-1.5 pl-7 pr-2 text-xs focus:border-brand-500 focus:outline-none" />
+                      className="w-48 rounded-lg border border-[var(--line-strong)] bg-[var(--surface)] py-1.5 pl-7 pr-2 text-xs focus:border-brand-500 focus:outline-none" />
                   </div>
                   {changedCount > 0 && (
                     <button type="button" onClick={() => setChangedOnly((v) => !v)}
-                      className={`rounded-lg border px-2 py-1.5 text-xs ${changedOnly ? "border-amber-400 bg-amber-50 text-amber-700" : "border-slate-300 text-slate-500"}`}>
+                      className={`rounded-lg border px-2 py-1.5 text-xs ${changedOnly ? "border-amber-400 bg-amber-50 text-amber-700" : "border-[var(--line-strong)] text-[var(--ink-3)]"}`}>
                       ต่างจากกลุ่ม {changedCount}
                     </button>
                   )}
                 </div>
               </div>
               <div className="max-h-80 overflow-auto divide-y divide-slate-100">
-                {shownDecide.length === 0 && <div className="px-3 py-6 text-center text-xs text-slate-400">ไม่พบรายชื่อ</div>}
+                {shownDecide.length === 0 && <div className="px-3 py-6 text-center text-xs text-[var(--ink-3)]">ไม่พบรายชื่อ</div>}
                 {shownDecide.map((d) => {
                   const changed = overrides[d.key] && overrides[d.key] !== decideDefault;
                   return (
                     <div key={d.key} className={`flex items-center gap-3 px-3 py-2 ${changed ? "bg-amber-50/50" : ""}`}>
-                      <div className="w-8 h-8 shrink-0 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center text-xs font-semibold uppercase">{d.username.slice(0, 1)}</div>
+                      <div className="w-8 h-8 shrink-0 rounded-full bg-[var(--ground)] text-[var(--ink-3)] flex items-center justify-center text-xs font-semibold uppercase">{d.username.slice(0, 1)}</div>
                       <div className="min-w-0 flex-1">
-                        <div className="text-sm text-slate-800 truncate"><span className="font-medium">{d.username}</span>{d.display_name ? <span className="text-slate-400"> · {d.display_name}</span> : null}</div>
+                        <div className="text-sm text-[var(--ink)] truncate"><span className="font-medium">{d.username}</span>{d.display_name ? <span className="text-[var(--ink-3)]"> · {d.display_name}</span> : null}</div>
                         <div className="mt-0.5 flex flex-wrap gap-1">
                           {d.lifetime_pines.map((p) => <span key={p} className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10.5px] text-emerald-700">{nameOf(p)} · ตลอดชีพ</span>)}
-                          {d.timed_pines.map((p) => <span key={p} className="rounded bg-slate-100 px-1.5 py-0.5 text-[10.5px] text-slate-600">{nameOf(p)} · ถึง {thDate(d.max_expiration)}</span>)}
+                          {d.timed_pines.map((p) => <span key={p} className="rounded bg-[var(--ground)] px-1.5 py-0.5 text-[10.5px] text-[var(--ink-2)]">{nameOf(p)} · ถึง {thDate(d.max_expiration)}</span>)}
                         </div>
                       </div>
                       <Seg size="sm" value={choiceOf(d.key)} onChange={(v) => setOverrides((o) => ({ ...o, [d.key]: v }))} options={[["month", "1 เดือน"], ["lifetime", "ตลอดชีพ"]]} />
@@ -1148,28 +1148,28 @@ function TvBackfillPanel({ scripts }) {
           <section className="space-y-3">
             <Step n={run.running ? "…" : 4} title={run.running ? `กำลังให้สิทธิ์ ${nameOf(target)}...` : run.remaining ? "หยุดไว้ชั่วคราว" : "ให้สิทธิ์เสร็จแล้ว"}
               hint={run.running ? "เปิดหน้านี้ค้างไว้จนเสร็จ" : null} done={!run.running && !run.remaining} />
-            <div className="ml-10 rounded-xl border border-slate-200 p-4 space-y-3">
+            <div className="ml-10 rounded-xl border border-[var(--line)] p-4 space-y-3">
               <div className="flex items-end justify-between gap-3">
-                <div className="text-3xl font-bold tabular-nums text-slate-900">{pct}%</div>
+                <div className="text-3xl font-bold tabular-nums text-[var(--ink)]">{pct}%</div>
                 <div className="flex gap-4 text-xs text-right">
                   <div><div className="text-lg font-semibold tabular-nums text-emerald-600">{run.granted}</div>สำเร็จ</div>
                   <div><div className="text-lg font-semibold tabular-nums text-rose-600">{run.failed.length}</div>ไม่สำเร็จ</div>
-                  <div><div className="text-lg font-semibold tabular-nums text-slate-700">{run.remaining}</div>เหลือ</div>
+                  <div><div className="text-lg font-semibold tabular-nums text-[var(--ink-2)]">{run.remaining}</div>เหลือ</div>
                 </div>
               </div>
-              <div className="h-2.5 rounded-full bg-slate-100 overflow-hidden">
+              <div className="h-2.5 rounded-full bg-[var(--ground)] overflow-hidden">
                 <div className={`h-full transition-all duration-500 ${run.running ? "bg-brand-600" : run.remaining ? "bg-amber-500" : "bg-emerald-500"}`} style={{ width: `${pct}%` }} />
               </div>
               <div className="flex flex-wrap gap-2">
                 {run.running
-                  ? <button onClick={() => { stopRef.current = true; }} className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50">หยุดชั่วคราว</button>
-                  : <button onClick={() => { setRun(null); check(); }} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"><RefreshCw size={13} /> {run.remaining || run.failed.length ? "ตรวจใหม่ / ทำต่อ" : "ตรวจอีกครั้ง"}</button>}
+                  ? <button onClick={() => { stopRef.current = true; }} className="rounded-lg border border-[var(--line-strong)] px-3 py-1.5 text-xs font-medium text-[var(--ink-2)] hover:bg-[var(--ground)]">หยุดชั่วคราว</button>
+                  : <button onClick={() => { setRun(null); check(); }} className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--line-strong)] px-3 py-1.5 text-xs font-medium text-[var(--ink-2)] hover:bg-[var(--ground)]"><RefreshCw size={13} /> {run.remaining || run.failed.length ? "ตรวจใหม่ / ทำต่อ" : "ตรวจอีกครั้ง"}</button>}
               </div>
               {run.failed.length > 0 && (
                 <details className="rounded-lg bg-rose-50/60 px-3 py-2 text-xs">
                   <summary className="cursor-pointer font-medium text-rose-700">ไม่สำเร็จ {run.failed.length} คน — กด "ตรวจใหม่ / ทำต่อ" เพื่อลองใหม่</summary>
                   <ul className="mt-2 max-h-40 overflow-auto space-y-1">
-                    {run.failed.map((f) => <li key={f.username} className="text-slate-600"><b className="text-slate-800">{f.username}</b> — {f.error}</li>)}
+                    {run.failed.map((f) => <li key={f.username} className="text-[var(--ink-2)]"><b className="text-[var(--ink)]">{f.username}</b> — {f.error}</li>)}
                   </ul>
                 </details>
               )}
@@ -1180,11 +1180,11 @@ function TvBackfillPanel({ scripts }) {
 
       {/* แถบยืนยันด้านล่าง */}
       {preview && !preview.loading && !run && preview.pending > 0 && (
-        <div className="border-t border-slate-200 bg-slate-50 px-5 py-3">
+        <div className="border-t border-[var(--line)] bg-[var(--ground)] px-5 py-3">
           {!confirming ? (
             <div className="flex flex-wrap items-center gap-3">
-              <div className="text-xs text-slate-600">
-                จะให้ <b className="text-slate-800">{nameOf(target)}</b> {preview.pending} คน · ตลอดชีพ <b className="text-emerald-700">{totalLifetime}</b> · 1 เดือน <b>{decideMonth}</b> · ตามวันเดิม <b>{preview.timed}</b>
+              <div className="text-xs text-[var(--ink-2)]">
+                จะให้ <b className="text-[var(--ink)]">{nameOf(target)}</b> {preview.pending} คน · ตลอดชีพ <b className="text-emerald-700">{totalLifetime}</b> · 1 เดือน <b>{decideMonth}</b> · ตามวันเดิม <b>{preview.timed}</b>
               </div>
               <button onClick={() => setConfirming(true)} className="ml-auto rounded-lg bg-brand-600 px-5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700">
                 ให้สิทธิ์ {preview.pending} คน
@@ -1193,9 +1193,9 @@ function TvBackfillPanel({ scripts }) {
           ) : (
             <div className="flex flex-wrap items-center gap-3">
               <AlertTriangle size={18} className="text-amber-500 shrink-0" />
-              <div className="text-sm text-slate-700">ยืนยันให้สิทธิ์ <b>{nameOf(target)}</b> กับลูกค้า <b>{preview.pending} คน</b> บน TradingView จริง?</div>
+              <div className="text-sm text-[var(--ink-2)]">ยืนยันให้สิทธิ์ <b>{nameOf(target)}</b> กับลูกค้า <b>{preview.pending} คน</b> บน TradingView จริง?</div>
               <div className="ml-auto flex gap-2">
-                <button onClick={() => setConfirming(false)} className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm text-slate-600 hover:bg-slate-50">ยกเลิก</button>
+                <button onClick={() => setConfirming(false)} className="rounded-lg border border-[var(--line-strong)] bg-[var(--surface)] px-4 py-2 text-sm text-[var(--ink-2)] hover:bg-[var(--ground)]">ยกเลิก</button>
                 <button onClick={start} className="rounded-lg bg-brand-600 px-5 py-2 text-sm font-semibold text-white shadow-sm hover:bg-brand-700">ยืนยัน เริ่มให้สิทธิ์</button>
               </div>
             </div>
@@ -1333,10 +1333,10 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
   function field(obj, setObj, key, label, type = "text") {
     return (
       <div>
-        <label className="text-sm text-slate-600">{label}</label>
+        <label className="text-sm text-[var(--ink-2)]">{label}</label>
         <input
           type={type}
-          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+          className="mt-1 w-full rounded-lg border border-[var(--line-strong)] px-3 py-2 text-sm"
           value={obj[key] ?? ""}
           onChange={(e) => setObj({ ...obj, [key]: type === "number" ? parseFloat(e.target.value) : e.target.value })}
         />
@@ -1368,15 +1368,15 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
       <SectionTitle eyebrow="WORKSPACE SETTINGS" title="ตั้งค่า" subtitle="ปรับการทำงานของระบบ คีย์ API สิทธิ์ผู้ใช้ และงานอัตโนมัติ" />
       <div className="settings-page-overview ds-card flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <div className="text-sm font-semibold text-night-ink">{cur.label}</div>
+          <div className="text-sm font-semibold text-[var(--ink)]">{cur.label}</div>
         </div>
         <div className="relative w-full sm:max-w-xs">
-          <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--ink-3)]" />
           <input
             value={sectionQuery}
             onChange={(e) => setSectionQuery(e.target.value)}
             placeholder="ค้นหาหัวข้อตั้งค่า..."
-            className="w-full rounded-control border border-slate-300 bg-white py-2.5 pl-9 pr-3 text-sm"
+            className="w-full rounded-control border border-[var(--line-strong)] bg-[var(--surface)] py-2.5 pl-9 pr-3 text-sm"
           />
         </div>
       </div>
@@ -1384,44 +1384,44 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
       {/* แถบเมนูตั้งค่า — มือถือ: โชว์เป็นลิสต์เหมือนหน้าโฮม (ซ่อนเมื่อเข้าไปดูหัวข้อ) */}
       <div className={`settings-page-nav md:w-56 shrink-0 ${mobileDetail ? "hidden md:block" : "block"}`}>
         {/* มือถือ: ลิสต์หัวข้อแนวตั้งแบบเมนูหน้าโฮม แตะเพื่อเข้าไปดูเนื้อหา */}
-        <nav className="md:hidden flex flex-col gap-2 bg-white rounded-2xl border border-slate-200 p-2">
+        <nav className="md:hidden flex flex-col gap-2 bg-[var(--surface)] rounded-2xl border border-[var(--line)] p-2">
           {groupedSections.map((group) => (
             <div key={group.label} className="settings-nav-group rounded-xl border border-slate-100 overflow-hidden">
               <button
                 type="button"
                 onClick={() => setOpenSettingsGroups((open) => ({ ...open, [group.label]: !(open[group.label] ?? group.items.some((s) => s.key === section)) }))}
-                className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left hover:bg-slate-50"
+                className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left hover:bg-[var(--ground)]"
               >
-                <span className="text-sm font-bold text-slate-300">{group.label}</span>
-                <ChevronDown size={15} className={`text-slate-400 transition-transform ${(openSettingsGroups[group.label] ?? group.items.some((s) => s.key === section)) ? "" : "-rotate-90"}`} />
+                <span className="text-sm font-bold text-[var(--ink-3)]">{group.label}</span>
+                <ChevronDown size={15} className={`text-[var(--ink-3)] transition-transform ${(openSettingsGroups[group.label] ?? group.items.some((s) => s.key === section)) ? "" : "-rotate-90"}`} />
               </button>
               {(openSettingsGroups[group.label] ?? group.items.some((s) => s.key === section)) && group.items.map((s) => (
                 <button
                   key={s.key}
                   onClick={() => { setSection(s.key); setOpenSettingsGroups((open) => ({ ...open, [group.label]: true })); setMobileDetail(true); window.scrollTo({ top: 0, behavior: "smooth" }); }}
-                  className={`flex w-full items-center gap-2 px-4 py-2 text-xs font-medium text-left ${section === s.key ? "bg-brand-50 text-brand-700" : "text-slate-700 hover:bg-slate-50"}`}
+                  className={`flex w-full items-center gap-2 px-4 py-2 text-xs font-medium text-left ${section === s.key ? "bg-brand-50 text-brand-700" : "text-[var(--ink-2)] hover:bg-[var(--ground)]"}`}
                 >
-                  <s.icon size={15} className="shrink-0 text-slate-500" />
+                  <s.icon size={15} className="shrink-0 text-[var(--ink-3)]" />
                   <span className="truncate flex-1">{s.label}</span>
-                  <ChevronDown size={15} className="-rotate-90 text-slate-300 shrink-0" />
+                  <ChevronDown size={15} className="-rotate-90 text-[var(--ink-3)] shrink-0" />
                 </button>
               ))}
             </div>
           ))}
-          {filteredSections.length === 0 && <div className="p-3 text-center text-xs text-slate-400">ไม่พบหัวข้อนี้</div>}
+          {filteredSections.length === 0 && <div className="p-3 text-center text-xs text-[var(--ink-3)]">ไม่พบหัวข้อนี้</div>}
         </nav>
 
         {/* เดสก์ท็อป: รายการแนวตั้งติดขอบจอ */}
-        <div className="settings-page-nav-desktop hidden md:flex md:flex-col gap-1 bg-white rounded-2xl border border-slate-200 p-2 md:sticky md:top-24">
+        <div className="settings-page-nav-desktop hidden md:flex md:flex-col gap-1 bg-[var(--surface)] rounded-2xl border border-[var(--line)] p-2 md:sticky md:top-24">
           {groupedSections.map((group) => (
             <div key={group.label} className="settings-nav-group">
               <button
                 type="button"
                 onClick={() => setOpenSettingsGroups((open) => ({ ...open, [group.label]: !(open[group.label] ?? group.items.some((s) => s.key === section)) }))}
-                className="flex w-full items-center justify-between gap-2 px-3 pb-1 pt-2 text-left hover:text-slate-600"
+                className="flex w-full items-center justify-between gap-2 px-3 pb-1 pt-2 text-left hover:text-[var(--ink-2)]"
               >
-                <span className="text-xs font-bold text-slate-300">{group.label}</span>
-                <ChevronDown size={14} className={`text-slate-400 transition-transform ${(openSettingsGroups[group.label] ?? group.items.some((s) => s.key === section)) ? "" : "-rotate-90"}`} />
+                <span className="text-xs font-bold text-[var(--ink-3)]">{group.label}</span>
+                <ChevronDown size={14} className={`text-[var(--ink-3)] transition-transform ${(openSettingsGroups[group.label] ?? group.items.some((s) => s.key === section)) ? "" : "-rotate-90"}`} />
               </button>
               {(openSettingsGroups[group.label] ?? group.items.some((s) => s.key === section)) && group.items.map((s) => (
                 <button
@@ -1430,7 +1430,7 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
                   className={`flex w-full items-center gap-2 px-3 py-1.5 rounded-control text-xs font-medium whitespace-nowrap text-left shrink-0 border-l-[3px] ${
                     section === s.key
                       ? "border-brand-600 bg-brand-50 text-brand-700"
-                      : "border-transparent text-slate-600 hover:bg-slate-50"
+                      : "border-transparent text-[var(--ink-2)] hover:bg-[var(--ground)]"
                   }`}
                 >
                   <s.icon size={16} /> <span className="truncate">{s.label}</span>
@@ -1438,7 +1438,7 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
               ))}
             </div>
           ))}
-          {filteredSections.length === 0 && <div className="p-3 text-center text-xs text-slate-400">ไม่พบหัวข้อนี้</div>}
+          {filteredSections.length === 0 && <div className="p-3 text-center text-xs text-[var(--ink-3)]">ไม่พบหัวข้อนี้</div>}
         </div>
       </div>
 
@@ -1447,11 +1447,11 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
         {/* มือถือ: ปุ่มย้อนกลับไปลิสต์เมนู + ชื่อหัวข้อปัจจุบัน */}
         <button
           onClick={() => { setMobileDetail(false); window.scrollTo({ top: 0, behavior: "smooth" }); }}
-          className="md:hidden flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-slate-900 -mb-2"
+          className="md:hidden flex items-center gap-2 text-sm font-medium text-[var(--ink-2)] hover:text-[var(--ink)] -mb-2"
         >
           <ChevronDown size={18} className="rotate-90 shrink-0" />
           <span>ตั้งค่า</span>
-          {cur && <span className="text-slate-400">/ {cur.label}</span>}
+          {cur && <span className="text-[var(--ink-3)]">/ {cur.label}</span>}
         </button>
       {section === "general" && (
         <AiAssistPanel
@@ -1491,24 +1491,24 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
       {section === "import_old" && <ImportOldDbPanel />}
 
       {section === "campaign" && (<>
-      <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
-        <h3 className="font-semibold text-slate-800">ค่าเริ่มต้นแคมเปญ (Meta)</h3>
+      <div className="bg-[var(--surface)] rounded-2xl border border-[var(--line)] p-5 shadow-sm space-y-4">
+        <h3 className="font-semibold text-[var(--ink)]">ค่าเริ่มต้นแคมเปญ (Meta)</h3>
         {/* บัญชีโฆษณา — เลือกจากรายการจริง ไม่ให้พิมพ์ ID เอง
             ยิงผิดบัญชี = เงินออกจากที่ผิด และบางบัญชีถูก Meta จำกัดอยู่ ต้องเห็นสถานะก่อนเลือก */}
         <div>
-          <label className="text-sm text-slate-600">บัญชีโฆษณา (ใช้เป็นค่าเริ่มต้นตอนยิงแอด)</label>
+          <label className="text-sm text-[var(--ink-2)]">บัญชีโฆษณา (ใช้เป็นค่าเริ่มต้นตอนยิงแอด)</label>
           {adAccounts === null ? (
-            <div className="mt-1.5 text-sm text-slate-400">กำลังโหลดรายการบัญชี…</div>
+            <div className="mt-1.5 text-sm text-[var(--ink-3)]">กำลังโหลดรายการบัญชี…</div>
           ) : adAccounts.length === 0 ? (
             <input
-              className="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              className="mt-1.5 w-full rounded-lg border border-[var(--line-strong)] px-3 py-2 text-sm"
               placeholder="ดึงรายการไม่ได้ — กรอก Ad Account ID เอง (ไม่ต้องมี act_)"
               value={campaignDefaults.ad_account_id || ""}
               onChange={(e) => setCampaignDefaults({ ...campaignDefaults, ad_account_id: e.target.value.trim().replace(/^act_/, "") })}
             />
           ) : (
             <select
-              className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+              className="mt-1.5 w-full rounded-lg border border-[var(--line-strong)] bg-[var(--surface)] px-3 py-2 text-sm"
               value={campaignDefaults.ad_account_id || ""}
               onChange={(e) => setCampaignDefaults({ ...campaignDefaults, ad_account_id: e.target.value })}
             >
@@ -1524,7 +1524,7 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
               })}
             </select>
           )}
-          <p className="mt-1 text-[11px] text-slate-400">
+          <p className="mt-1 text-[11px] text-[var(--ink-3)]">
             บัญชีที่ Meta จำกัดไว้จะเลือกไม่ได้ · ยิงแอดข้ามบัญชีเป็นครั้งๆ ทำได้จากหน้า "แคมเปญ" โดยไม่ต้องแก้ค่านี้
           </p>
         </div>
@@ -1534,10 +1534,10 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
         {field(campaignDefaults, setCampaignDefaults, "age_min", "อายุขั้นต่ำ (ใช้เมื่อยังไม่มี Audience ID)", "number")}
         {field(campaignDefaults, setCampaignDefaults, "age_max", "อายุสูงสุด (ใช้เมื่อยังไม่มี Audience ID)", "number")}
         <div>
-          <label className="text-sm text-slate-600">ความสนใจ/พฤติกรรม (Interests targeting)</label>
+          <label className="text-sm text-[var(--ink-2)]">ความสนใจ/พฤติกรรม (Interests targeting)</label>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             {(campaignDefaults.interests || []).length === 0 ? (
-              <span className="text-xs text-slate-400">
+              <span className="text-xs text-[var(--ink-3)]">
                 ยังไม่มี — ระบบจะหาให้อัตโนมัติจากช่อง "กลุ่มเป้าหมาย" ทุกครั้งที่กดสร้างคอนเทนต์ในแท็บ "สร้างคอนเทนต์"
               </span>
             ) : (
@@ -1557,8 +1557,8 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
       )}
 
       {section === "decision" && (
-      <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
-        <h3 className="font-semibold text-slate-800">เกณฑ์การตัดสินใจอัตโนมัติ</h3>
+      <div className="bg-[var(--surface)] rounded-2xl border border-[var(--line)] p-5 shadow-sm space-y-4">
+        <h3 className="font-semibold text-[var(--ink)]">เกณฑ์การตัดสินใจอัตโนมัติ</h3>
         {field(thresholds, setThresholds, "target_cpa_thb", "เป้า CPA (บาท)", "number")}
         {field(thresholds, setThresholds, "min_spend_before_judging_thb", "Spend ขั้นต่ำก่อนตัดสิน (บาท)", "number")}
         {field(thresholds, setThresholds, "underperform_multiplier", "ตัวคูณ underperform (เช่น 1.5)", "number")}
@@ -1568,14 +1568,14 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
       )}
 
       {section === "brand" && (<>
-      <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
+      <div className="bg-[var(--surface)] rounded-2xl border border-[var(--line)] p-5 shadow-sm space-y-4">
         <div>
-          <h3 className="font-semibold text-slate-800">จัดการแบรนด์ CI</h3>
-          <p className="text-xs text-slate-500 mt-1">แยกโลโก้ ริบบิ้น และสไตล์ภาพของแต่ละแบรนด์ แล้วเลือกใช้แบรนด์ที่ต้องการได้ในหน้าสร้างคอนเทนต์</p>
+          <h3 className="font-semibold text-[var(--ink)]">จัดการแบรนด์ CI</h3>
+          <p className="text-xs text-[var(--ink-3)] mt-1">แยกโลโก้ ริบบิ้น และสไตล์ภาพของแต่ละแบรนด์ แล้วเลือกใช้แบรนด์ที่ต้องการได้ในหน้าสร้างคอนเทนต์</p>
         </div>
         <div className="flex flex-col sm:flex-row gap-2">
           <select
-            className="flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+            className="flex-1 rounded-lg border border-[var(--line-strong)] bg-[var(--surface)] px-3 py-2 text-sm"
             value={selectedBrandId}
             onChange={(e) => selectBrand(e.target.value)}
           >
@@ -1589,9 +1589,9 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
           </button>
         </div>
         <div>
-          <label className="text-sm text-slate-600">ชื่อแบรนด์</label>
+          <label className="text-sm text-[var(--ink-2)]">ชื่อแบรนด์</label>
           <input
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            className="mt-1 w-full rounded-lg border border-[var(--line-strong)] px-3 py-2 text-sm"
             value={selectedBrand?.name || ""}
             onChange={(e) => renameSelectedBrand(e.target.value)}
             placeholder="เช่น BeSight, AlphardVIP"
@@ -1599,16 +1599,16 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
         </div>
         <div className="rounded-lg bg-blue-50 px-3 py-2 text-xs text-blue-700">กำลังแก้ไข: {selectedBrand?.name || "-"} · กด “บันทึก” ด้านล่างเพื่อเก็บการตั้งค่า</div>
       </div>
-      <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
-        <h3 className="font-semibold text-slate-800">โทนแบรนด์ (ใช้เป็นค่าเริ่มต้นตอนสร้างคอนเทนต์)</h3>
+      <div className="bg-[var(--surface)] rounded-2xl border border-[var(--line)] p-5 shadow-sm space-y-4">
+        <h3 className="font-semibold text-[var(--ink)]">โทนแบรนด์ (ใช้เป็นค่าเริ่มต้นตอนสร้างคอนเทนต์)</h3>
         {field(brandVoice, setBrandVoice, "brand_voice", "โทนแบรนด์")}
         {field(brandVoice, setBrandVoice, "target_audience_desc", "กลุ่มเป้าหมาย")}
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-5">
+      <div className="bg-[var(--surface)] rounded-2xl border border-[var(--line)] p-5 shadow-sm space-y-5">
         <div>
-          <h3 className="font-semibold text-slate-800">โลโก้ / ป้ายริบบิ้นแบรนด์</h3>
-          <p className="text-xs text-slate-500 mt-1">
+          <h3 className="font-semibold text-[var(--ink)]">โลโก้ / ป้ายริบบิ้นแบรนด์</h3>
+          <p className="text-xs text-[var(--ink-3)] mt-1">
             อัปโหลดไว้ครั้งเดียว ระบบจะซ้อนภาพนี้ลงบนรูปโฆษณาทุกรูปที่สร้างใหม่ตามตำแหน่งที่กำหนด
             (แนะนำไฟล์ PNG พื้นหลังโปร่งใส เพื่อความคมชัดตอนซ้อนภาพ)
           </p>
@@ -1630,9 +1630,9 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
           setAssets={setBrandAssets}
         />
         <div>
-          <label className="text-sm text-slate-600">หมายเหตุตำแหน่งเพิ่มเติม (ไม่บังคับ)</label>
+          <label className="text-sm text-[var(--ink-2)]">หมายเหตุตำแหน่งเพิ่มเติม (ไม่บังคับ)</label>
           <textarea
-            className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            className="mt-1 w-full rounded-lg border border-[var(--line-strong)] px-3 py-2 text-sm"
             rows={2}
             placeholder="เช่น อยากให้โลโก้อยู่มุมขวาล่างเสมอ ห่างขอบนิดหน่อย ไม่บังข้อความในภาพ"
             value={brandAssets.placement_notes ?? ""}
@@ -1641,10 +1641,10 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
+      <div className="bg-[var(--surface)] rounded-2xl border border-[var(--line)] p-5 shadow-sm space-y-4">
         <div>
-          <h3 className="font-semibold text-slate-800">CI แบรนด์ (โทนสี / สไตล์ภาพ)</h3>
-          <p className="text-xs text-slate-500 mt-1">
+          <h3 className="font-semibold text-[var(--ink)]">CI แบรนด์ (โทนสี / สไตล์ภาพ)</h3>
+          <p className="text-xs text-[var(--ink-3)] mt-1">
             อัปโหลดภาพตัวอย่างงานดีไซน์ของแบรนด์ (โปสเตอร์ โบรชัวร์ หรือรูปโฆษณาเก่า) แล้วให้ AI ช่วยสกัดเป็นคำอธิบายสี/สไตล์
             หรือพิมพ์อธิบายเองก็ได้ — ใช้เป็นแนวทางตอนสร้างรูปโฆษณาใหม่ให้เข้ากับ CI
           </p>
@@ -1654,36 +1654,36 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
       </>)}
 
       {section === "ai_models" && (
-      <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
+      <div className="bg-[var(--surface)] rounded-2xl border border-[var(--line)] p-5 shadow-sm space-y-4">
         <div>
-          <h3 className="font-semibold text-slate-800">โมเดล AI เริ่มต้นของแต่ละงาน</h3>
-          <p className="text-xs text-slate-500 mt-1">เลือกว่าจะใช้ AI ตัวไหนเป็นค่าเริ่มต้นในแต่ละงาน (ปรับเฉพาะครั้งได้ในหน้านั้นๆ)</p>
+          <h3 className="font-semibold text-[var(--ink)]">โมเดล AI เริ่มต้นของแต่ละงาน</h3>
+          <p className="text-xs text-[var(--ink-3)] mt-1">เลือกว่าจะใช้ AI ตัวไหนเป็นค่าเริ่มต้นในแต่ละงาน (ปรับเฉพาะครั้งได้ในหน้านั้นๆ)</p>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label className="text-sm text-slate-600">เขียนคอนเทนต์</label>
-            <select className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white" value={aiModels.content_text} onChange={(e) => setAiModels({ ...aiModels, content_text: e.target.value })}>
+            <label className="text-sm text-[var(--ink-2)]">เขียนคอนเทนต์</label>
+            <select className="mt-1 w-full rounded-lg border border-[var(--line-strong)] px-3 py-2 text-sm bg-[var(--surface)]" value={aiModels.content_text} onChange={(e) => setAiModels({ ...aiModels, content_text: e.target.value })}>
               <option value="claude">Claude (ต้องมี API key)</option>
               <option value="openai">OpenAI (GPT-5)</option>
             </select>
           </div>
           <div>
-            <label className="text-sm text-slate-600">สร้างรูป</label>
-            <select className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white" value={aiModels.image} onChange={(e) => setAiModels({ ...aiModels, image: e.target.value })}>
+            <label className="text-sm text-[var(--ink-2)]">สร้างรูป</label>
+            <select className="mt-1 w-full rounded-lg border border-[var(--line-strong)] px-3 py-2 text-sm bg-[var(--surface)]" value={aiModels.image} onChange={(e) => setAiModels({ ...aiModels, image: e.target.value })}>
               <option value="gpt-image-1">GPT Image 1</option>
               <option value="gpt-image-2">GPT Image 2 (ล่าสุด)</option>
             </select>
           </div>
           <div>
-            <label className="text-sm text-slate-600">วิเคราะห์ ads</label>
-            <select className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white" value={aiModels.analyze_ads} onChange={(e) => setAiModels({ ...aiModels, analyze_ads: e.target.value })}>
+            <label className="text-sm text-[var(--ink-2)]">วิเคราะห์ ads</label>
+            <select className="mt-1 w-full rounded-lg border border-[var(--line-strong)] px-3 py-2 text-sm bg-[var(--surface)]" value={aiModels.analyze_ads} onChange={(e) => setAiModels({ ...aiModels, analyze_ads: e.target.value })}>
               <option value="claude">Claude (ต้องมี API key)</option>
               <option value="openai">OpenAI (GPT-5)</option>
             </select>
           </div>
           <div>
-            <label className="text-sm text-slate-600">วิเคราะห์+ตั้งค่าแคมเปญ</label>
-            <select className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white" value={aiModels.analyze_settings} onChange={(e) => setAiModels({ ...aiModels, analyze_settings: e.target.value })}>
+            <label className="text-sm text-[var(--ink-2)]">วิเคราะห์+ตั้งค่าแคมเปญ</label>
+            <select className="mt-1 w-full rounded-lg border border-[var(--line-strong)] px-3 py-2 text-sm bg-[var(--surface)]" value={aiModels.analyze_settings} onChange={(e) => setAiModels({ ...aiModels, analyze_settings: e.target.value })}>
               <option value="claude">Claude (ต้องมี API key)</option>
               <option value="openai">OpenAI (GPT-5)</option>
             </select>
@@ -1694,44 +1694,44 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
       )}
 
       {section === "ghost" && (
-      <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
+      <div className="bg-[var(--surface)] rounded-2xl border border-[var(--line)] p-5 shadow-sm space-y-4">
         <div>
-          <h3 className="font-semibold text-slate-800">ป้องกันแชทผี (Ghost chats)</h3>
-          <p className="text-xs text-slate-500 mt-1">
+          <h3 className="font-semibold text-[var(--ink)]">ป้องกันแชทผี (Ghost chats)</h3>
+          <p className="text-xs text-[var(--ink-3)] mt-1">
             กันแชทผี/ลีดขยะ (บอท, มิสคลิก, ทักแล้วเงียบ) — ตัด Audience Network ตอนลอนช์ และเฝ้าดูอัตราการตอบกลับ ถ้าต่ำผิดปกติจะแจ้งเตือนให้อนุมัติหยุด
           </p>
         </div>
 
         <label className="flex items-center justify-between gap-3">
-          <span className="text-sm text-slate-700">เปิดฟีเจอร์ป้องกันแชทผี</span>
+          <span className="text-sm text-[var(--ink-2)]">เปิดฟีเจอร์ป้องกันแชทผี</span>
           <input type="checkbox" checked={!!ghost.enabled} onChange={(e) => setGhost({ ...ghost, enabled: e.target.checked })} className="w-4 h-4" />
         </label>
         <label className="flex items-center justify-between gap-3">
-          <span className="text-sm text-slate-700">ตัด Audience Network ตอนลอนช์ (แนะนำ)</span>
+          <span className="text-sm text-[var(--ink-2)]">ตัด Audience Network ตอนลอนช์ (แนะนำ)</span>
           <input type="checkbox" checked={!!ghost.exclude_audience_network} onChange={(e) => setGhost({ ...ghost, exclude_audience_network: e.target.checked })} className="w-4 h-4" />
         </label>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
-            <label className="text-sm text-slate-600">แชทขั้นต่ำก่อนตัดสิน</label>
+            <label className="text-sm text-[var(--ink-2)]">แชทขั้นต่ำก่อนตัดสิน</label>
             <NumInput min={0}
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-lg border border-[var(--line-strong)] px-3 py-2 text-sm"
               value={ghost.min_conversations ?? 10}
               onChange={(n) => setGhost({ ...ghost, min_conversations: n })}
             />
           </div>
           <div>
-            <label className="text-sm text-slate-600">อัตราตอบขั้นต่ำ (%)</label>
+            <label className="text-sm text-[var(--ink-2)]">อัตราตอบขั้นต่ำ (%)</label>
             <NumInput min={0} max={100}
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+              className="mt-1 w-full rounded-lg border border-[var(--line-strong)] px-3 py-2 text-sm"
               value={Math.round((ghost.min_reply_rate ?? 0.4) * 100)}
               onChange={(n) => setGhost({ ...ghost, min_reply_rate: n / 100 })}
             />
           </div>
           <div>
-            <label className="text-sm text-slate-600">เมื่อพบแชทผี</label>
+            <label className="text-sm text-[var(--ink-2)]">เมื่อพบแชทผี</label>
             <select
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white"
+              className="mt-1 w-full rounded-lg border border-[var(--line-strong)] px-3 py-2 text-sm bg-[var(--surface)]"
               value={ghost.action || "alert"}
               onChange={(e) => setGhost({ ...ghost, action: e.target.value })}
             >
@@ -1785,7 +1785,7 @@ function EditableCell({ row, field, onSaved, numeric }) {
       inputMode={numeric ? "numeric" : undefined}
       placeholder="—"
       title="คลิกเพื่อแก้ไข"
-      className={`w-full min-w-0 rounded px-1.5 py-0.5 text-[11px] bg-transparent border ${saved ? "border-emerald-400 bg-emerald-50" : "border-transparent hover:border-slate-300 focus:border-slate-400 focus:bg-white"}`}
+      className={`w-full min-w-0 rounded px-1.5 py-0.5 text-[11px] bg-transparent border ${saved ? "border-emerald-400 bg-emerald-50" : "border-transparent hover:border-[var(--line-strong)] focus:border-[var(--line-strong)] focus:bg-[var(--surface)]"}`}
     />
   );
 }
@@ -1917,17 +1917,17 @@ export function SavedRepliesPanel({ allowedPages = null }) {
     if (it.id) { if (!window.confirm("ลบข้อความนี้?")) return; await supabase.from("saved_replies").delete().eq("id", it.id); }
     setItems((list) => list.filter((_, i) => i !== idx));
   }
-  if (!items) return <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm"><Spinner label="กำลังโหลด..." /></div>;
+  if (!items) return <div className="bg-[var(--surface)] rounded-2xl border border-[var(--line)] p-5 shadow-sm"><Spinner label="กำลังโหลด..." /></div>;
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
+    <div className="bg-[var(--surface)] rounded-2xl border border-[var(--line)] p-5 shadow-sm space-y-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h3 className="font-semibold text-slate-800">ข้อความบันทึกไว้</h3>
-          <p className="text-xs text-slate-500 mt-0.5">ข้อความสำเร็จรูปสำหรับกดใช้ในหน้า "ตอบแชท" (แนบรูปได้) · เลือกได้ว่าใช้ทุกเพจหรือเฉพาะเพจ</p>
+          <h3 className="font-semibold text-[var(--ink)]">ข้อความบันทึกไว้</h3>
+          <p className="text-xs text-[var(--ink-3)] mt-0.5">ข้อความสำเร็จรูปสำหรับกดใช้ในหน้า "ตอบแชท" (แนบรูปได้) · เลือกได้ว่าใช้ทุกเพจหรือเฉพาะเพจ</p>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={shrinkOldImages} disabled={!!shrink?.running} title="ย่อรูปที่ใหญ่เกิน 400 KB ให้เล็กลง โหลดเร็วขึ้นและประหยัดโควตา"
-            className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-60">
+            className="rounded-lg border border-[var(--line-strong)] px-3 py-2 text-sm text-[var(--ink-2)] hover:bg-[var(--ground)] disabled:opacity-60">
             {shrink?.running ? `กำลังย่อรูป ${shrink.done}/${shrink.total}...` : "ย่อรูปเก่าให้เล็กลง"}
           </button>
           <button onClick={addNew} className="bg-brand-600 text-white rounded-lg px-3 py-2 text-sm font-medium hover:bg-brand-700">+ เพิ่มใหม่</button>
@@ -1947,33 +1947,33 @@ export function SavedRepliesPanel({ allowedPages = null }) {
       )}
       <div className="space-y-3">
         {items.map((it, idx) => (
-          <div key={it.id || it.tmp} className="rounded-xl border border-slate-200 p-3 space-y-2">
+          <div key={it.id || it.tmp} className="rounded-xl border border-[var(--line)] p-3 space-y-2">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              <input value={it.title || ""} onChange={(e) => setField(idx, "title", e.target.value)} placeholder="หัวข้อ (เช่น ทักทาย, ราคา, วิธีสมัคร)" className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-              <select value={it.brand_id || ""} onChange={(e) => setField(idx, "brand_id", e.target.value ? Number(e.target.value) : null)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white">
+              <input value={it.title || ""} onChange={(e) => setField(idx, "title", e.target.value)} placeholder="หัวข้อ (เช่น ทักทาย, ราคา, วิธีสมัคร)" className="rounded-lg border border-[var(--line-strong)] px-3 py-2 text-sm" />
+              <select value={it.brand_id || ""} onChange={(e) => setField(idx, "brand_id", e.target.value ? Number(e.target.value) : null)} className="rounded-lg border border-[var(--line-strong)] px-3 py-2 text-sm bg-[var(--surface)]">
                 <option value="">ทุกแบรนด์</option>
                 {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
               </select>
-              <select value={it.page_id || ""} onChange={(e) => setField(idx, "page_id", e.target.value || null)} className="rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white">
+              <select value={it.page_id || ""} onChange={(e) => setField(idx, "page_id", e.target.value || null)} className="rounded-lg border border-[var(--line-strong)] px-3 py-2 text-sm bg-[var(--surface)]">
                 <option value="">ทุกเพจ</option>
                 {pages.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
             </div>
-            <textarea rows={3} value={it.message || ""} onChange={(e) => setField(idx, "message", e.target.value)} placeholder="ข้อความตอบกลับอัตโนมัติ/ข้อความสำเร็จรูป..." className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+            <textarea rows={3} value={it.message || ""} onChange={(e) => setField(idx, "message", e.target.value)} placeholder="ข้อความตอบกลับอัตโนมัติ/ข้อความสำเร็จรูป..." className="w-full rounded-lg border border-[var(--line-strong)] px-3 py-2 text-sm" />
             {/* LINE ตอบอัตโนมัติเองเมื่อลูกค้ากดเมนู/พิมพ์คำที่ตั้งใน LINE OA Manager แต่ไม่ส่งข้อความนั้นมาให้ระบบ
                 ใส่คำเดียวกับใน LINE ไว้ตรงนี้ → แชทในเว็บจะขึ้นข้อความนี้ว่า "ตอบอัตโนมัติ (LINE OA)" ให้แอดมินรู้ว่าลูกค้าได้อะไรไปแล้ว */}
             <div>
               <input value={it.line_triggers_text ?? (it.line_triggers || []).join(", ")} onChange={(e) => setField(idx, "line_triggers_text", e.target.value)}
                 placeholder="คำที่ลูกค้าพิมพ์/กดเมนูใน LINE เช่น สนใจ Premium (คั่นด้วย ,)"
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-              <p className="mt-0.5 text-[11px] text-slate-400">ใส่ให้ตรงกับคีย์เวิร์ดตอบกลับอัตโนมัติใน LINE OA Manager — เมื่อลูกค้าส่งคำนี้มา แชทในเว็บจะแสดงข้อความนี้ให้แอดมินเห็นว่า LINE ตอบไปแล้ว (ไม่ส่งซ้ำให้ลูกค้า) · ในข้อความ: บรรทัด <code>---</code> = แยกบับเบิล · บับเบิล <code>[รูป 2]</code> = วางรูปที่ 2 ตรงนั้น · <code>{"{ชื่อผู้ใช้}"}</code> = ชื่อลูกค้า</p>
+                className="w-full rounded-lg border border-[var(--line-strong)] px-3 py-2 text-sm" />
+              <p className="mt-0.5 text-[11px] text-[var(--ink-3)]">ใส่ให้ตรงกับคีย์เวิร์ดตอบกลับอัตโนมัติใน LINE OA Manager — เมื่อลูกค้าส่งคำนี้มา แชทในเว็บจะแสดงข้อความนี้ให้แอดมินเห็นว่า LINE ตอบไปแล้ว (ไม่ส่งซ้ำให้ลูกค้า) · ในข้อความ: บรรทัด <code>---</code> = แยกบับเบิล · บับเบิล <code>[รูป 2]</code> = วางรูปที่ 2 ตรงนั้น · <code>{"{ชื่อผู้ใช้}"}</code> = ชื่อลูกค้า</p>
             </div>
             {/* รูปแนบ — เรียงตามลำดับที่จะถูกส่งในแชท กดลูกศรสลับตำแหน่งได้ */}
             {imagesOf(it).length > 0 && (
               <div className="flex flex-wrap gap-2">
                 {imagesOf(it).map((url, i) => (
                   <div key={url} className="group relative">
-                    <img src={url} alt="" className="h-16 w-16 rounded-lg border border-slate-200 object-cover" />
+                    <img src={url} alt="" className="h-16 w-16 rounded-lg border border-[var(--line)] object-cover" />
                     <span className="absolute left-1 top-1 rounded bg-black/60 px-1 text-[10px] font-semibold text-white">{i + 1}</span>
                     <button onClick={() => removeImg(idx, url)} title="ลบรูปนี้"
                       className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-rose-600 text-white shadow">
@@ -1981,9 +1981,9 @@ export function SavedRepliesPanel({ allowedPages = null }) {
                     </button>
                     <div className="mt-1 flex justify-center gap-1">
                       <button onClick={() => moveImg(idx, i, -1)} disabled={i === 0} title="เลื่อนไปหน้า"
-                        className="rounded px-1 text-[11px] text-slate-500 hover:bg-slate-100 disabled:opacity-30">←</button>
+                        className="rounded px-1 text-[11px] text-[var(--ink-3)] hover:bg-[var(--ground)] disabled:opacity-30">←</button>
                       <button onClick={() => moveImg(idx, i, 1)} disabled={i === imagesOf(it).length - 1} title="เลื่อนไปหลัง"
-                        className="rounded px-1 text-[11px] text-slate-500 hover:bg-slate-100 disabled:opacity-30">→</button>
+                        className="rounded px-1 text-[11px] text-[var(--ink-3)] hover:bg-[var(--ground)] disabled:opacity-30">→</button>
                     </div>
                   </div>
                 ))}
@@ -2103,12 +2103,12 @@ function KnowledgeBasePanel({ allowedPages = null }) {
     buttons.push(approvedPageCount);
     return buttons;
   })();
-  if (items === null) return <div className="bg-white rounded-2xl border border-slate-200 p-5"><Spinner label="กำลังโหลดคลังคำตอบ..." /></div>;
+  if (items === null) return <div className="bg-[var(--surface)] rounded-2xl border border-[var(--line)] p-5"><Spinner label="กำลังโหลดคลังคำตอบ..." /></div>;
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4">
+    <div className="bg-[var(--surface)] rounded-2xl border border-[var(--line)] p-5 shadow-sm space-y-4">
       <div>
-        <h3 className="font-semibold text-slate-800">คลังคำถาม–คำตอบ</h3>
-        <p className="text-xs text-slate-500 mt-1">กำหนดคำค้นหรือวลีสำคัญหลายแบบให้คำตอบเดียว · คั่นแต่ละคำด้วยจุลภาคหรือขึ้นบรรทัดใหม่ · การค้นหาจะแยกตามเพจ</p>
+        <h3 className="font-semibold text-[var(--ink)]">คลังคำถาม–คำตอบ</h3>
+        <p className="text-xs text-[var(--ink-3)] mt-1">กำหนดคำค้นหรือวลีสำคัญหลายแบบให้คำตอบเดียว · คั่นแต่ละคำด้วยจุลภาคหรือขึ้นบรรทัดใหม่ · การค้นหาจะแยกตามเพจ</p>
       </div>
       <div className="knowledge-manual-card rounded-xl p-4 space-y-3">
         <div className="knowledge-manual-title font-medium text-sm">เพิ่มคำถาม–คำตอบเอง</div>
@@ -2120,7 +2120,7 @@ function KnowledgeBasePanel({ allowedPages = null }) {
         </label>
         <label className="knowledge-manual-label block text-xs">คำค้น / Keywords
           <textarea rows={2} value={draft.question} onChange={(e) => setDraft({ ...draft, question: e.target.value })} placeholder="เช่น เปิดบัญชีเพิ่ม, เพิ่มบัญชี XM, มีบัญชีแล้วสมัครเพิ่ม" className="knowledge-manual-field mt-1 w-full rounded-lg px-3 py-2 text-sm" />
-          <span className="mt-1 block text-[10px] text-slate-400">ใส่ได้หลายคำหรือหลายวลี โดยคั่นด้วยจุลภาค (,) หรือขึ้นบรรทัดใหม่</span>
+          <span className="mt-1 block text-[10px] text-[var(--ink-3)]">ใส่ได้หลายคำหรือหลายวลี โดยคั่นด้วยจุลภาค (,) หรือขึ้นบรรทัดใหม่</span>
         </label>
         <label className="knowledge-manual-label block text-xs">คำตอบ
           <textarea rows={3} value={draft.answer} onChange={(e) => setDraft({ ...draft, answer: e.target.value })} placeholder="กรอกคำตอบที่พนักงานสามารถนำไปใช้ได้" className="knowledge-manual-field mt-1 w-full rounded-lg px-3 py-2 text-sm" />
@@ -2131,8 +2131,8 @@ function KnowledgeBasePanel({ allowedPages = null }) {
       </div>
       {msg && <div className={`text-xs ${msg.includes("✓") ? "text-emerald-600" : "text-rose-600"}`}>{msg}</div>}
       <div className="flex items-center justify-between gap-3 pt-2">
-        <h4 className="text-sm font-semibold text-slate-700">รายการรอตรวจสอบ</h4>
-        <span className="text-xs text-slate-400">{items.length} รายการ</span>
+        <h4 className="text-sm font-semibold text-[var(--ink-2)]">รายการรอตรวจสอบ</h4>
+        <span className="text-xs text-[var(--ink-3)]">{items.length} รายการ</span>
       </div>
       {items.length === 0 && (
         <EmptyState
@@ -2143,10 +2143,10 @@ function KnowledgeBasePanel({ allowedPages = null }) {
       )}
       <div className="space-y-3">
         {items.map((item) => (
-          <div key={item.id} className="rounded-xl border border-slate-200 p-3 space-y-2">
-            <div className="text-[11px] text-slate-400">เพจ {item.page_id} · {item.source || "Messenger"} · ผู้ตอบ {item.created_by || "ไม่ระบุ"}</div>
-            <label className="block text-xs text-slate-500">คำค้น / Keywords<textarea rows={2} value={item.question} onChange={(e) => edit(item.id, "question", e.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800" /></label>
-            <label className="block text-xs text-slate-500">คำตอบ<textarea rows={3} value={item.answer} onChange={(e) => edit(item.id, "answer", e.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800" /></label>
+          <div key={item.id} className="rounded-xl border border-[var(--line)] p-3 space-y-2">
+            <div className="text-[11px] text-[var(--ink-3)]">เพจ {item.page_id} · {item.source || "Messenger"} · ผู้ตอบ {item.created_by || "ไม่ระบุ"}</div>
+            <label className="block text-xs text-[var(--ink-3)]">คำค้น / Keywords<textarea rows={2} value={item.question} onChange={(e) => edit(item.id, "question", e.target.value)} className="mt-1 w-full rounded-lg border border-[var(--line-strong)] px-3 py-2 text-sm text-[var(--ink)]" /></label>
+            <label className="block text-xs text-[var(--ink-3)]">คำตอบ<textarea rows={3} value={item.answer} onChange={(e) => edit(item.id, "answer", e.target.value)} className="mt-1 w-full rounded-lg border border-[var(--line-strong)] px-3 py-2 text-sm text-[var(--ink)]" /></label>
             <div className="flex justify-end gap-2">
               <button onClick={() => review(item, "rejected")} disabled={saving === item.id} className="rounded-lg border border-rose-200 text-rose-600 px-3 py-1.5 text-xs disabled:opacity-50">ไม่ใช้</button>
               <button onClick={() => review(item, "approved")} disabled={saving === item.id || !item.question.trim() || !item.answer.trim()} className="rounded-lg bg-emerald-700 text-white px-3 py-1.5 text-xs disabled:opacity-50">อนุมัติ</button>
@@ -2154,50 +2154,50 @@ function KnowledgeBasePanel({ allowedPages = null }) {
           </div>
         ))}
       </div>
-      <div className="border-t border-slate-200 pt-5 space-y-3">
+      <div className="border-t border-[var(--line)] pt-5 space-y-3">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
-            <h4 className="text-sm font-semibold text-slate-800">รายการคำถาม–คำตอบที่ใช้งานอยู่</h4>
-            <p className="text-[11px] text-slate-500 mt-0.5">เรียงตามตัวอักษร ก–ฮ และ A–Z · แก้ไขหรือลบได้</p>
+            <h4 className="text-sm font-semibold text-[var(--ink)]">รายการคำถาม–คำตอบที่ใช้งานอยู่</h4>
+            <p className="text-[11px] text-[var(--ink-3)] mt-0.5">เรียงตามตัวอักษร ก–ฮ และ A–Z · แก้ไขหรือลบได้</p>
           </div>
-          <span className="text-xs text-slate-400">ทั้งหมด {approvedTotal.toLocaleString()} รายการ</span>
+          <span className="text-xs text-[var(--ink-3)]">ทั้งหมด {approvedTotal.toLocaleString()} รายการ</span>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(180px,260px)_auto] gap-2">
           <div className="relative">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input value={approvedSearch} onChange={(e) => { setApprovedSearch(e.target.value); setApprovedPageNumber(1); }} placeholder="ค้นหาคำถามหรือคำตอบ..." className="w-full rounded-lg border border-slate-300 pl-9 pr-3 py-2 text-sm" />
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--ink-3)]" />
+            <input value={approvedSearch} onChange={(e) => { setApprovedSearch(e.target.value); setApprovedPageNumber(1); }} placeholder="ค้นหาคำถามหรือคำตอบ..." className="w-full rounded-lg border border-[var(--line-strong)] pl-9 pr-3 py-2 text-sm" />
           </div>
-          <select value={approvedPage} onChange={(e) => { setApprovedPage(e.target.value); setApprovedPageNumber(1); }} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">
+          <select value={approvedPage} onChange={(e) => { setApprovedPage(e.target.value); setApprovedPageNumber(1); }} className="rounded-lg border border-[var(--line-strong)] bg-[var(--surface)] px-3 py-2 text-sm">
             <option value="">ทุกเพจ</option>
             {pages.map((page) => <option key={page.id} value={page.id}>{page.name}</option>)}
           </select>
-          <label className="flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-500 whitespace-nowrap">แสดง
-            <select value={approvedPageSize} onChange={(e) => { setApprovedPageSize(Number(e.target.value)); setApprovedPageNumber(1); }} className="bg-transparent text-sm font-medium text-slate-700 outline-none">
+          <label className="flex items-center gap-2 rounded-lg border border-[var(--line-strong)] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--ink-3)] whitespace-nowrap">แสดง
+            <select value={approvedPageSize} onChange={(e) => { setApprovedPageSize(Number(e.target.value)); setApprovedPageNumber(1); }} className="bg-transparent text-sm font-medium text-[var(--ink-2)] outline-none">
               {[5, 10, 20, 50, 100].map((size) => <option key={size} value={size}>{size}</option>)}
             </select>
             รายการ
           </label>
         </div>
         {approvedItems === null ? <Spinner label="กำลังโหลดรายการที่ใช้งานอยู่..." /> : approvedItems.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-slate-300 py-8 text-center text-sm text-slate-500">ไม่พบรายการที่ตรงกับการค้นหา</div>
+          <div className="rounded-xl border border-dashed border-[var(--line-strong)] py-8 text-center text-sm text-[var(--ink-3)]">ไม่พบรายการที่ตรงกับการค้นหา</div>
         ) : (
           <div className="space-y-2">
             {approvedItems.map((item) => {
               const expanded = expandedApproved === item.id;
-              return <div key={item.id} className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-                <button type="button" onClick={() => setExpandedApproved(expanded ? null : item.id)} className="flex w-full items-center gap-3 px-3 py-3 text-left hover:bg-slate-50">
-                  <ChevronDown size={17} className={`shrink-0 text-slate-400 transition-transform ${expanded ? "rotate-180" : ""}`} />
+              return <div key={item.id} className="overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--surface)]">
+                <button type="button" onClick={() => setExpandedApproved(expanded ? null : item.id)} className="flex w-full items-center gap-3 px-3 py-3 text-left hover:bg-[var(--ground)]">
+                  <ChevronDown size={17} className={`shrink-0 text-[var(--ink-3)] transition-transform ${expanded ? "rotate-180" : ""}`} />
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium text-slate-800">{item.question}</span>
-                    <span className="mt-0.5 block truncate text-[11px] text-slate-400">เพจ {pageNameById.get(String(item.page_id)) || item.page_id} · ใช้แล้ว {item.use_count || 0} ครั้ง</span>
+                    <span className="block truncate text-sm font-medium text-[var(--ink)]">{item.question}</span>
+                    <span className="mt-0.5 block truncate text-[11px] text-[var(--ink-3)]">เพจ {pageNameById.get(String(item.page_id)) || item.page_id} · ใช้แล้ว {item.use_count || 0} ครั้ง</span>
                   </span>
                 </button>
-                {expanded && <div className="space-y-3 border-t border-slate-200 bg-slate-50/60 p-3">
-                  <label className="block text-xs text-slate-500">คำค้น / Keywords
-                    <textarea rows={2} value={item.question} onChange={(e) => editApproved(item.id, "question", e.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800" />
+                {expanded && <div className="space-y-3 border-t border-[var(--line)] bg-[var(--ground)]/60 p-3">
+                  <label className="block text-xs text-[var(--ink-3)]">คำค้น / Keywords
+                    <textarea rows={2} value={item.question} onChange={(e) => editApproved(item.id, "question", e.target.value)} className="mt-1 w-full rounded-lg border border-[var(--line-strong)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--ink)]" />
                   </label>
-                  <label className="block text-xs text-slate-500">คำตอบ
-                    <textarea rows={4} value={item.answer} onChange={(e) => editApproved(item.id, "answer", e.target.value)} className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800" />
+                  <label className="block text-xs text-[var(--ink-3)]">คำตอบ
+                    <textarea rows={4} value={item.answer} onChange={(e) => editApproved(item.id, "answer", e.target.value)} className="mt-1 w-full rounded-lg border border-[var(--line-strong)] bg-[var(--surface)] px-3 py-2 text-sm text-[var(--ink)]" />
                   </label>
                   <div className="flex justify-end gap-2">
                     <button onClick={() => deleteApproved(item)} disabled={saving === item.id} className="rounded-lg border border-rose-300 px-3 py-1.5 text-xs font-medium text-rose-600 hover:bg-rose-50 disabled:opacity-50">ลบทิ้ง</button>
@@ -2209,11 +2209,11 @@ function KnowledgeBasePanel({ allowedPages = null }) {
           </div>
         )}
         {approvedTotal > 0 && <div className="flex flex-col gap-2 pt-1 sm:flex-row sm:items-center sm:justify-between">
-          <span className="text-center text-xs text-slate-400 sm:text-left">แสดง {(approvedPageNumber - 1) * approvedPageSize + 1}–{Math.min(approvedPageNumber * approvedPageSize, approvedTotal)} จาก {approvedTotal.toLocaleString()}</span>
+          <span className="text-center text-xs text-[var(--ink-3)] sm:text-left">แสดง {(approvedPageNumber - 1) * approvedPageSize + 1}–{Math.min(approvedPageNumber * approvedPageSize, approvedTotal)} จาก {approvedTotal.toLocaleString()}</span>
           <div className="flex flex-wrap items-center justify-center gap-1">
-            <button type="button" aria-label="หน้าก่อนหน้า" onClick={() => setApprovedPageNumber((page) => Math.max(1, page - 1))} disabled={approvedPageNumber <= 1} className="rounded-lg border border-slate-300 p-2 text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35"><ChevronLeft size={15} /></button>
-            {approvedPageButtons.map((page) => typeof page === "number" ? <button type="button" key={page} onClick={() => setApprovedPageNumber(page)} className={`min-w-8 rounded-lg border px-2 py-1.5 text-xs font-medium ${approvedPageNumber === page ? "border-brand-600 bg-brand-600 text-white" : "border-slate-300 text-slate-600 hover:bg-slate-50"}`}>{page}</button> : <span key={page} className="px-1 text-xs text-slate-400">…</span>)}
-            <button type="button" aria-label="หน้าถัดไป" onClick={() => setApprovedPageNumber((page) => Math.min(approvedPageCount, page + 1))} disabled={approvedPageNumber >= approvedPageCount} className="rounded-lg border border-slate-300 p-2 text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-35"><ChevronRight size={15} /></button>
+            <button type="button" aria-label="หน้าก่อนหน้า" onClick={() => setApprovedPageNumber((page) => Math.max(1, page - 1))} disabled={approvedPageNumber <= 1} className="rounded-lg border border-[var(--line-strong)] p-2 text-[var(--ink-2)] hover:bg-[var(--ground)] disabled:cursor-not-allowed disabled:opacity-35"><ChevronLeft size={15} /></button>
+            {approvedPageButtons.map((page) => typeof page === "number" ? <button type="button" key={page} onClick={() => setApprovedPageNumber(page)} className={`min-w-8 rounded-lg border px-2 py-1.5 text-xs font-medium ${approvedPageNumber === page ? "border-brand-600 bg-brand-600 text-white" : "border-[var(--line-strong)] text-[var(--ink-2)] hover:bg-[var(--ground)]"}`}>{page}</button> : <span key={page} className="px-1 text-xs text-[var(--ink-3)]">…</span>)}
+            <button type="button" aria-label="หน้าถัดไป" onClick={() => setApprovedPageNumber((page) => Math.min(approvedPageCount, page + 1))} disabled={approvedPageNumber >= approvedPageCount} className="rounded-lg border border-[var(--line-strong)] p-2 text-[var(--ink-2)] hover:bg-[var(--ground)] disabled:cursor-not-allowed disabled:opacity-35"><ChevronRight size={15} /></button>
           </div>
         </div>}
       </div>

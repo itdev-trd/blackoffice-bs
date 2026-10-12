@@ -76,7 +76,7 @@ export default function AdChatsTab({ active = true, onOpenChat }) {
           {RANGES.map((r) => (
             <FilterPill key={r.key} active={range === r.key} onClick={() => setRange(r.key)}>{r.label}</FilterPill>
           ))}
-          <button type="button" onClick={load} title="รีเฟรช" className="rounded-lg border border-slate-300 p-1.5 text-slate-500 hover:bg-slate-50">
+          <button type="button" onClick={load} title="รีเฟรช" className="rounded-lg border border-[var(--line-strong)] p-1.5 text-[var(--ink-3)] hover:bg-[var(--ground)]">
             <RefreshCw size={14} />
           </button>
         </div>
@@ -85,13 +85,13 @@ export default function AdChatsTab({ active = true, onOpenChat }) {
       {err && <div className="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-sm text-rose-700">{err}</div>}
 
       {/* ที่มาของตัวเลขต้องอยู่ติดกับตัวเลข — ไม่งั้นคนอ่านรายงานเดาเอง แล้วเอาไปใช้ตัดสินใจผิด */}
-      <details className="attribution-notes rounded-xl border border-slate-200 bg-white">
-        <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold text-slate-700">
+      <details className="attribution-notes rounded-xl border border-[var(--line)] bg-[var(--surface)]">
+        <summary className="cursor-pointer select-none px-3 py-2 text-xs font-semibold text-[var(--ink-2)]">
           ตัวเลขในหน้านี้นับมาจากไหน (กดเพื่อดู)
         </summary>
-        <div className="space-y-2.5 border-t border-slate-100 px-3 py-2.5 text-[11.5px] leading-relaxed text-slate-600">
+        <div className="space-y-2.5 border-t border-[var(--line)] px-3 py-2.5 text-[11.5px] leading-relaxed text-[var(--ink-2)]">
           <div>
-            <div className="font-semibold text-slate-700">แหล่งข้อมูล</div>
+            <div className="font-semibold text-[var(--ink-2)]">แหล่งข้อมูล</div>
             ทุกตัวเลขนับจากตาราง <span className="font-mono">chat_customers</span> (ห้องแชท/คอมเมนต์ของเราเอง)
             ไม่ได้ดึงสดจาก Meta ตอนเปิดหน้า · รวมยอดด้วยฟังก์ชันในฐานข้อมูล
             (<span className="font-mono">app_ad_chat_stats</span> / <span className="font-mono">app_ad_chat_totals</span>)
@@ -99,7 +99,7 @@ export default function AdChatsTab({ active = true, onOpenChat }) {
           </div>
 
           <div>
-            <div className="font-semibold text-slate-700">ที่มาของ “แอด” ต่อ 1 ลูกค้า (นับแอดเดียวเท่านั้น)</div>
+            <div className="font-semibold text-[var(--ink-2)]">ที่มาของ “แอด” ต่อ 1 ลูกค้า (นับแอดเดียวเท่านั้น)</div>
             <ul className="ml-4 list-disc space-y-0.5">
               <li><b>ทักจากแอด</b> = ช่อง <span className="font-mono">entry_ad_id</span> ที่ Meta ส่งมาพร้อม event
                 <span className="font-mono"> messaging_referrals</span> ตอนลูกค้ากดปุ่มส่งข้อความจากโฆษณา (Click-to-Messenger)</li>
@@ -109,7 +109,7 @@ export default function AdChatsTab({ active = true, onOpenChat }) {
           </div>
 
           <div>
-            <div className="font-semibold text-slate-700">“ลูกค้าใหม่” กับ “ลูกค้าเก่า” ตัดสินจากอะไร</div>
+            <div className="font-semibold text-[var(--ink-2)]">“ลูกค้าใหม่” กับ “ลูกค้าเก่า” ตัดสินจากอะไร</div>
             เทียบ <b>เวลากดแอดครั้งแรก</b> กับ <b>เวลาที่คุยกับเพจครั้งแรก</b> ที่ระบบรู้
             (เวลาที่คุยครั้งแรก = ค่าที่เก่าสุดระหว่าง <span className="font-mono">first_customer_message_at</span>,
             <span className="font-mono"> created_at</span> ของห้อง และข้อความแรกของลูกค้าในบทสนทนา)
@@ -126,7 +126,7 @@ export default function AdChatsTab({ active = true, onOpenChat }) {
           </div>
 
           <div>
-            <div className="font-semibold text-slate-700">ความหมายของแต่ละคอลัมน์</div>
+            <div className="font-semibold text-[var(--ink-2)]">ความหมายของแต่ละคอลัมน์</div>
             <ul className="ml-4 list-disc space-y-0.5">
               <li><b>ลูกค้า</b> = จำนวนห้องที่ผูกกับแอดนั้น (กดที่แถวเพื่อดูรายชื่อว่าใครทักมา)</li>
               <li><b>ใหม่ / เก่า</b> = แยกตามเกณฑ์ข้างบน · เลข <span className="font-mono">+n?</span> ข้างช่อง “เก่า” คือจำนวนที่แยกไม่ได้</li>
@@ -140,7 +140,7 @@ export default function AdChatsTab({ active = true, onOpenChat }) {
           </div>
 
           <div>
-            <div className="font-semibold text-slate-700">ข้อจำกัดที่ต้องรู้ก่อนใช้ตัดสินใจ</div>
+            <div className="font-semibold text-[var(--ink-2)]">ข้อจำกัดที่ต้องรู้ก่อนใช้ตัดสินใจ</div>
             <ul className="ml-4 list-disc space-y-0.5">
               <li>ad_id เก็บได้เฉพาะลูกค้าที่ทักเข้ามา <b>ตั้งแต่ 07/09/2569 04:41</b> เป็นต้นไป (เวลาที่ webhook เริ่มส่ง referral เข้าระบบ)
                 — ก่อนหน้านั้น Meta ไม่ให้ดึงย้อนหลัง จึงขึ้นเป็น “ไม่รู้ที่มา” ทั้งหมด</li>
@@ -172,13 +172,13 @@ export default function AdChatsTab({ active = true, onOpenChat }) {
               ["ลูกค้าใหม่จากแอด", totals?.ad_new ?? 0, "ทักครั้งแรกพร้อมกับการกดแอด — คนที่แอดหามาได้จริง", "text-emerald-700"],
               ["ลูกค้าเก่ากลับมา", totals?.ad_old ?? 0, "เคยคุยกับเพจอยู่แล้วแต่กดแอดเข้ามาใหม่ — ไม่ใช่คนใหม่ที่แอดหามาได้", "text-amber-700"]].map(([label, value, hint, tone]) => (
               <div key={label} className="attribution-metric" title={hint}>
-                <div className="text-[11px] text-slate-500">{label}</div>
-                <div className={`text-lg font-semibold ${tone || "text-slate-800"}`}>{Number(value).toLocaleString("th-TH")}</div>
+                <div className="text-[11px] text-[var(--ink-3)]">{label}</div>
+                <div className={`text-lg font-semibold ${tone || "text-[var(--ink)]"}`}>{Number(value).toLocaleString("th-TH")}</div>
               </div>
             ))}
           </div>
 
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-[11px] text-slate-500">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-[11px] text-[var(--ink-3)]">
             <span>ไม่รู้ที่มา {Math.max(0, (totals?.total ?? 0) - (totals?.with_ad ?? 0)).toLocaleString("th-TH")}</span>
             <span>เปิดบัญชีแล้วทั้งหมด {Number(totals?.opened ?? 0).toLocaleString("th-TH")}</span>
             {Number(totals?.ad_unknown ?? 0) > 0 && (
@@ -190,16 +190,16 @@ export default function AdChatsTab({ active = true, onOpenChat }) {
 
           <div className="studio-table-toolbar">
             <SearchInput aria-label="ค้นหาโฆษณา" placeholder="ค้นหาชื่อหรือไอดีโฆษณา" value={query} onChange={(event) => setQuery(event.target.value)} />
-            <label className="flex items-center gap-2 text-sm text-night-ink-2">เรียงตาม
-              <select value={sort} onChange={(event) => setSort(event.target.value)} className="ds-select border border-night-border bg-night-surface px-3 py-2">
+            <label className="flex items-center gap-2 text-sm text-[var(--ink-2)]">เรียงตาม
+              <select value={sort} onChange={(event) => setSort(event.target.value)} className="ds-select border border-[var(--line)] bg-[var(--surface)] px-3 py-2">
                 <option value="chats">ลูกค้ามากที่สุด</option><option value="new_cust">ลูกค้าใหม่มากที่สุด</option><option value="opened">เปิดบัญชีมากที่สุด</option>
               </select>
             </label>
-            <span className="text-xs text-night-ink-3">{visibleAds.length} โฆษณา</span>
+            <span className="text-xs text-[var(--ink-3)]">{visibleAds.length} โฆษณา</span>
           </div>
-          <div className="studio-data-table overflow-x-auto border border-slate-200 bg-white">
+          <div className="studio-data-table overflow-x-auto border border-[var(--line)] bg-[var(--surface)]">
             <table className="min-w-full text-sm">
-              <thead className="bg-slate-50 text-[11px] uppercase text-slate-500">
+              <thead className="bg-[var(--ground)] text-[11px] uppercase text-[var(--ink-3)]">
                 <tr>
                   <th className="px-3 py-2 text-left font-semibold" title="ชื่อ/ไอดีโฆษณาที่ลูกค้าเข้ามาจาก · กดที่แถวเพื่อดูรายชื่อคนที่ทักมา">โฆษณา</th>
                   <th className="px-3 py-2 text-right font-semibold" title="จำนวนห้องแชท/คอมเมนต์ที่ผูกกับแอดนี้">ลูกค้า</th>
@@ -214,45 +214,45 @@ export default function AdChatsTab({ active = true, onOpenChat }) {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {visibleAds.length === 0 && <tr><td colSpan={10} className="p-8 text-center text-night-ink-3">ไม่พบโฆษณาที่ตรงกับคำค้น</td></tr>}
+                {visibleAds.length === 0 && <tr><td colSpan={10} className="p-8 text-center text-[var(--ink-3)]">ไม่พบโฆษณาที่ตรงกับคำค้น</td></tr>}
                 {visibleAds.map((a) => {
                   const isOpen = openAd === a.ad_id;
                   const rows = people[a.ad_id];
                   return [
                     <tr key={a.ad_id} onClick={() => toggleAd(a.ad_id)}
-                      className={`cursor-pointer ${isOpen ? "bg-brand-50/50" : "hover:bg-slate-50/60"}`}>
+                      className={`cursor-pointer ${isOpen ? "bg-brand-50/50" : "hover:bg-[var(--ground)]/60"}`}>
                       <td className="px-3 py-2">
                         <div className="flex items-start gap-1.5">
                           {isOpen ? <ChevronDown size={14} className="mt-0.5 shrink-0 text-brand-600" />
-                                  : <ChevronRight size={14} className="mt-0.5 shrink-0 text-slate-400" />}
+                                  : <ChevronRight size={14} className="mt-0.5 shrink-0 text-[var(--ink-3)]" />}
                           <div>
-                            <div className="font-medium text-slate-800">{a.ad_name || "(ยังไม่รู้ชื่อแอด)"}</div>
-                            <div className="font-mono text-[10.5px] text-slate-400">{a.ad_id}</div>
+                            <div className="font-medium text-[var(--ink)]">{a.ad_name || "(ยังไม่รู้ชื่อแอด)"}</div>
+                            <div className="font-mono text-[10.5px] text-[var(--ink-3)]">{a.ad_id}</div>
                           </div>
                         </div>
                       </td>
-                      <td className="px-3 py-2 text-right font-semibold text-slate-800">{Number(a.chats).toLocaleString("th-TH")}</td>
+                      <td className="px-3 py-2 text-right font-semibold text-[var(--ink)]">{Number(a.chats).toLocaleString("th-TH")}</td>
                       <td className="px-3 py-2 text-right font-semibold text-emerald-700">{Number(a.new_cust).toLocaleString("th-TH")}</td>
-                      <td className={`px-3 py-2 text-right ${Number(a.old_cust) > 0 ? "font-medium text-amber-700" : "text-slate-400"}`}>
+                      <td className={`px-3 py-2 text-right ${Number(a.old_cust) > 0 ? "font-medium text-amber-700" : "text-[var(--ink-3)]"}`}>
                         {Number(a.old_cust).toLocaleString("th-TH")}
-                        {Number(a.unknown_cust) > 0 && <span className="ml-1 text-[10px] text-slate-400" title="แยกเก่า/ใหม่ไม่ได้">+{Number(a.unknown_cust)}?</span>}
+                        {Number(a.unknown_cust) > 0 && <span className="ml-1 text-[10px] text-[var(--ink-3)]" title="แยกเก่า/ใหม่ไม่ได้">+{Number(a.unknown_cust)}?</span>}
                       </td>
-                      <td className="px-3 py-2 text-right text-slate-600">{Number(a.dm).toLocaleString("th-TH")}</td>
-                      <td className="px-3 py-2 text-right text-slate-600">{Number(a.comments).toLocaleString("th-TH")}</td>
+                      <td className="px-3 py-2 text-right text-[var(--ink-2)]">{Number(a.dm).toLocaleString("th-TH")}</td>
+                      <td className="px-3 py-2 text-right text-[var(--ink-2)]">{Number(a.comments).toLocaleString("th-TH")}</td>
                       <td className="px-3 py-2 text-right font-semibold text-emerald-700">
                         {Number(a.opened).toLocaleString("th-TH")}
                         {Number(a.opened) !== Number(a.opened_new) && (
-                          <span className="ml-1 text-[10px] font-normal text-slate-400" title="เฉพาะลูกค้าใหม่">({Number(a.opened_new)})</span>
+                          <span className="ml-1 text-[10px] font-normal text-[var(--ink-3)]" title="เฉพาะลูกค้าใหม่">({Number(a.opened_new)})</span>
                         )}
                       </td>
-                      <td className="px-3 py-2 text-right text-slate-600">
+                      <td className="px-3 py-2 text-right text-[var(--ink-2)]">
                         {Number(a.new_cust) ? `${Math.round((Number(a.opened_new) / Number(a.new_cust)) * 100)}%` : "—"}
                       </td>
-                      <td className={`px-3 py-2 text-right ${Number(a.waiting) > 0 ? "text-amber-700 font-medium" : "text-slate-400"}`}>{Number(a.waiting).toLocaleString("th-TH")}</td>
-                      <td className="px-3 py-2 text-left text-[11.5px] text-slate-500">{fmt(a.last_at)}</td>
+                      <td className={`px-3 py-2 text-right ${Number(a.waiting) > 0 ? "text-amber-700 font-medium" : "text-[var(--ink-3)]"}`}>{Number(a.waiting).toLocaleString("th-TH")}</td>
+                      <td className="px-3 py-2 text-left text-[11.5px] text-[var(--ink-3)]">{fmt(a.last_at)}</td>
                     </tr>,
                     isOpen && (
-                      <tr key={`${a.ad_id}-people`} className="bg-slate-50/70">
+                      <tr key={`${a.ad_id}-people`} className="bg-[var(--ground)]/70">
                         <td colSpan={10} className="px-3 py-2.5">
                           <PeopleList rows={rows} fmt={fmt} onOpenChat={onOpenChat} />
                         </td>
@@ -272,9 +272,9 @@ export default function AdChatsTab({ active = true, onOpenChat }) {
 // รายชื่อคนที่ทักมาจากแอดหนึ่ง ๆ — แยกกลุ่มลูกค้าเก่า/ใหม่ให้เห็นด้วยตา ไม่ต้องอ่านตัวเลขเทียบ
 // ทำเป็นการ์ดไม่ใช่ตารางซ้อนตาราง เพราะซ้อนแล้วจอมือถืออ่านไม่ได้
 function PeopleList({ rows, fmt, onOpenChat }) {
-  if (rows === "loading" || rows === undefined) return <div className="py-1 text-[11.5px] text-slate-500">กำลังโหลดรายชื่อ…</div>;
+  if (rows === "loading" || rows === undefined) return <div className="py-1 text-[11.5px] text-[var(--ink-3)]">กำลังโหลดรายชื่อ…</div>;
   if (rows?.error) return <div className="py-1 text-[11.5px] text-rose-600">{rows.error}</div>;
-  if (!rows.length) return <div className="py-1 text-[11.5px] text-slate-500">ไม่มีรายชื่อในช่วงเวลานี้</div>;
+  if (!rows.length) return <div className="py-1 text-[11.5px] text-[var(--ink-3)]">ไม่มีรายชื่อในช่วงเวลานี้</div>;
 
   const groups = [
     { key: "old", label: "ลูกค้าเก่ากลับมา", icon: Repeat, tone: "text-amber-700 bg-amber-50 border-amber-200", border: "border-amber-200",
@@ -283,7 +283,7 @@ function PeopleList({ rows, fmt, onOpenChat }) {
     { key: "new", label: "ลูกค้าใหม่", icon: Sparkles, tone: "text-emerald-700 bg-emerald-50 border-emerald-200", border: "border-emerald-200",
       hint: "ทักครั้งแรกพร้อมกับการกดแอดนี้",
       items: rows.filter((r) => r.is_returning === false) },
-    { key: "unknown", label: "แยกไม่ได้", icon: HelpCircle, tone: "text-slate-600 bg-slate-100 border-slate-200", border: "border-slate-200",
+    { key: "unknown", label: "แยกไม่ได้", icon: HelpCircle, tone: "text-[var(--ink-2)] bg-[var(--ground)] border-[var(--line)]", border: "border-[var(--line)]",
       hint: "ไม่มีเวลากดแอดให้เทียบ (มาจากคอมเมนต์)",
       items: rows.filter((r) => r.is_returning === null || r.is_returning === undefined) },
   ].filter((g) => g.items.length);
@@ -292,34 +292,34 @@ function PeopleList({ rows, fmt, onOpenChat }) {
     <div className="space-y-2.5">
       {groups.map((g) => (
         <div key={g.key}>
-          <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold text-slate-600" title={g.hint}>
+          <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold text-[var(--ink-2)]" title={g.hint}>
             <g.icon size={12} /> {g.label} · {g.items.length} คน
           </div>
           <div className="grid gap-1.5 md:grid-cols-2">
             {g.items.map((r) => (
-              <div key={r.id} className={`rounded-lg border bg-white px-2.5 py-2 ${g.border}`}>
+              <div key={r.id} className={`rounded-lg border bg-[var(--surface)] px-2.5 py-2 ${g.border}`}>
                 <div className="flex items-start gap-2">
                   {r.profile_pic
                     ? <img src={r.profile_pic} alt="" className="h-7 w-7 shrink-0 rounded-full object-cover"
                         onError={(e) => { e.currentTarget.style.display = "none"; }} />
-                    : <div className="h-7 w-7 shrink-0 rounded-full bg-slate-200" />}
+                    : <div className="h-7 w-7 shrink-0 rounded-full bg-[var(--line)]" />}
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="truncate text-[12.5px] font-medium text-slate-800">{r.customer_name || "(ไม่ทราบชื่อ)"}</span>
+                      <span className="truncate text-[12.5px] font-medium text-[var(--ink)]">{r.customer_name || "(ไม่ทราบชื่อ)"}</span>
                       <span className={`rounded-full border px-1.5 py-[1px] text-[10px] font-semibold ${g.tone}`} title={r.why}>
                         {g.key === "old" ? "เก่า" : g.key === "new" ? "ใหม่" : "?"}
                       </span>
                       {r.is_opened && <span className="rounded-full bg-emerald-100 px-1.5 py-[1px] text-[10px] font-semibold text-emerald-700">เปิดบัญชีแล้ว</span>}
                       {r.is_waiting && <span className="rounded-full bg-amber-100 px-1.5 py-[1px] text-[10px] font-semibold text-amber-700">ค้างตอบ</span>}
                       {Number(r.clicks) > 1 && (
-                        <span className="rounded-full bg-slate-100 px-1.5 py-[1px] text-[10px] text-slate-500" title="กดโฆษณาตัวนี้เข้ามาหลายครั้ง">
+                        <span className="rounded-full bg-[var(--ground)] px-1.5 py-[1px] text-[10px] text-[var(--ink-3)]" title="กดโฆษณาตัวนี้เข้ามาหลายครั้ง">
                           กดแอด {Number(r.clicks)} ครั้ง
                         </span>
                       )}
                     </div>
                     {/* เหตุผลที่จัดเป็นเก่า/ใหม่ — ต้องเห็นตรงนี้ ไม่ให้เชื่อป้ายลอย ๆ */}
-                    <div className="mt-0.5 text-[10.5px] leading-snug text-slate-500">{r.why}</div>
-                    <div className="mt-0.5 flex flex-wrap gap-x-2.5 gap-y-0.5 text-[10.5px] text-slate-400">
+                    <div className="mt-0.5 text-[10.5px] leading-snug text-[var(--ink-3)]">{r.why}</div>
+                    <div className="mt-0.5 flex flex-wrap gap-x-2.5 gap-y-0.5 text-[10.5px] text-[var(--ink-3)]">
                       <span title="เพจที่ลูกค้าทักเข้ามา">{r.page_name || "—"}</span>
                       <span title="ช่องทางที่ผูกกับแอด">{r.is_dm ? "ทักจากแอด" : "คอมเมนต์"}</span>
                       <span title="เวลาที่คุยกับเพจครั้งแรกที่ระบบรู้">คุยครั้งแรก {fmt(r.first_contact)}</span>
@@ -331,7 +331,7 @@ function PeopleList({ rows, fmt, onOpenChat }) {
                   {onOpenChat && (
                     <button type="button" onClick={(e) => { e.stopPropagation(); onOpenChat(r.id); }}
                       title="เปิดห้องแชทนี้ในกล่องแชท"
-                      className="shrink-0 rounded-lg border border-slate-300 p-1 text-slate-500 hover:bg-slate-50">
+                      className="shrink-0 rounded-lg border border-[var(--line-strong)] p-1 text-[var(--ink-3)] hover:bg-[var(--ground)]">
                       <MessageSquare size={13} />
                     </button>
                   )}

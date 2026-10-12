@@ -44,7 +44,7 @@ const AI_FIELD_LABEL = { trade_id: "ไอดีเทรด", email: "อีเ
 function RetryAiButton({ onClick, label = "ลองใหม่อีกครั้ง" }) {
   return (
     <button type="button" onClick={onClick}
-      className="inline-flex items-center gap-1 rounded-full border border-brand-400/60 px-2.5 py-1 text-[10.5px] font-semibold text-brand-600 hover:bg-white">
+      className="inline-flex items-center gap-1 rounded-full border border-brand-400/60 px-2.5 py-1 text-[10.5px] font-semibold text-brand-600 hover:bg-[var(--surface)]">
       <Sparkles size={11} /> {label}
     </button>
   );
@@ -75,15 +75,15 @@ export function TradeIdChecker({ darkMode = false, standalone = false }) {
     logActivity("check_trade_id", { trade_id: id, pass: !!data.pass, via: data.via });
   }
   return (
-    <div className={`${darkMode ? "chat-trade-checker" : ""} ${standalone ? "" : "border-t border-slate-200 pt-3 mt-1"} space-y-1.5`}>
-      <label className="text-xs text-slate-400 flex items-center gap-1"><CheckCircle2 size={13} /> เช็คไอดีเทรด (XM)</label>
+    <div className={`${darkMode ? "chat-trade-checker" : ""} ${standalone ? "" : "border-t border-[var(--line)] pt-3 mt-1"} space-y-1.5`}>
+      <label className="text-xs text-[var(--ink-3)] flex items-center gap-1"><CheckCircle2 size={13} /> เช็คไอดีเทรด (XM)</label>
       <div className="flex gap-1.5">
         <input
           value={tid}
           onChange={(e) => { setTid(e.target.value); if (res) setRes(null); }}
           onKeyDown={(e) => { if (e.key === "Enter") check(); }}
           inputMode="numeric" placeholder="วางเลขไอดีเทรด"
-          className="flex-1 min-w-0 rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+          className="flex-1 min-w-0 rounded-lg border border-[var(--line-strong)] px-2 py-1.5 text-sm" />
         <button onClick={check} disabled={busy || !tid.trim()}
           className="shrink-0 bg-brand-600 text-white rounded-lg px-3 py-1.5 text-sm font-medium disabled:opacity-50 flex items-center gap-1.5">
           {busy ? <Loader2 className="animate-spin" size={14} /> : null} เช็ค
@@ -174,10 +174,10 @@ export function CustomerAddressBox({ row, onSaved, draft = null, compact = false
   }
 
   const bkk = isBangkok(f.province);
-  const inCls = "mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm";
+  const inCls = "mt-0.5 w-full rounded-lg border border-[var(--line-strong)] px-2 py-1.5 text-sm";
   const inp = (k, label, ph, span = false) => (
     <div className={`min-w-0 ${span ? "col-span-2" : ""}`}>
-      <label className="text-[11px] text-slate-400">{label}</label>
+      <label className="text-[11px] text-[var(--ink-3)]">{label}</label>
       <input value={f[k]} onChange={(e) => set(k, e.target.value)} placeholder={ph} className={inCls} />
     </div>
   );
@@ -185,17 +185,17 @@ export function CustomerAddressBox({ row, onSaved, draft = null, compact = false
   const at = saved?.updated_at ? new Date(saved.updated_at).toLocaleString("th-TH", { day: "numeric", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
 
   return (
-    <div ref={boxRef} className={`rounded-lg border border-slate-300 ${compact ? "p-2" : "p-2.5"} space-y-2`}>
+    <div ref={boxRef} className={`rounded-lg border border-[var(--line-strong)] ${compact ? "p-2" : "p-2.5"} space-y-2`}>
       <div className="flex items-center justify-between gap-2">
-        <div className="text-[11px] font-semibold text-slate-600 flex items-center gap-1"><MapPin size={12} /> ที่อยู่ลูกค้า</div>
+        <div className="text-[11px] font-semibold text-[var(--ink-2)] flex items-center gap-1"><MapPin size={12} /> ที่อยู่ลูกค้า</div>
         {!editing && hasAddress(saved) && (
           <div className="flex items-center gap-1">
             <button type="button" onClick={copy} title="คัดลอกที่อยู่ (ชื่อ เบอร์ ที่อยู่) ไปวางใบจ่าหน้า/ขนส่ง"
-              className="inline-flex items-center gap-1 rounded-full border border-slate-300 px-2 py-0.5 text-[10.5px] font-medium text-slate-600 hover:bg-slate-50">
+              className="inline-flex items-center gap-1 rounded-full border border-[var(--line-strong)] px-2 py-0.5 text-[10.5px] font-medium text-[var(--ink-2)] hover:bg-[var(--ground)]">
               {copied ? <CheckCircle2 size={11} /> : <Copy size={11} />} {copied ? "คัดลอกแล้ว" : "คัดลอก"}
             </button>
             <button type="button" onClick={() => { setEditing(true); setMsg(null); }}
-              className="inline-flex items-center gap-1 rounded-full border border-slate-300 px-2 py-0.5 text-[10.5px] font-medium text-slate-600 hover:bg-slate-50">
+              className="inline-flex items-center gap-1 rounded-full border border-[var(--line-strong)] px-2 py-0.5 text-[10.5px] font-medium text-[var(--ink-2)] hover:bg-[var(--ground)]">
               <Pencil size={11} /> แก้ไข
             </button>
           </div>
@@ -204,13 +204,13 @@ export function CustomerAddressBox({ row, onSaved, draft = null, compact = false
 
       {!editing && (hasAddress(saved) ? (
         <div className="space-y-1">
-          <div className="text-[12.5px] leading-relaxed text-slate-600 whitespace-pre-line break-words">{formatAddress(saved)}</div>
-          {saved.note && <div className="text-[11px] text-slate-500">หมายเหตุ: {saved.note}</div>}
-          {(by || at) && <div className="text-[10px] text-slate-400">บันทึกโดย {by || "-"}{at ? ` · ${at}` : ""}</div>}
+          <div className="text-[12.5px] leading-relaxed text-[var(--ink-2)] whitespace-pre-line break-words">{formatAddress(saved)}</div>
+          {saved.note && <div className="text-[11px] text-[var(--ink-3)]">หมายเหตุ: {saved.note}</div>}
+          {(by || at) && <div className="text-[10px] text-[var(--ink-3)]">บันทึกโดย {by || "-"}{at ? ` · ${at}` : ""}</div>}
         </div>
       ) : (
         <button type="button" onClick={() => { setEditing(true); setMsg(null); }}
-          className="w-full rounded-lg border border-dashed border-slate-300 px-2 py-2 text-[12px] text-slate-500 hover:bg-slate-50">
+          className="w-full rounded-lg border border-dashed border-[var(--line-strong)] px-2 py-2 text-[12px] text-[var(--ink-3)] hover:bg-[var(--ground)]">
           + เพิ่มที่อยู่ลูกค้า
         </button>
       ))}
@@ -218,10 +218,10 @@ export function CustomerAddressBox({ row, onSaved, draft = null, compact = false
       {editing && (
         <div className="space-y-2">
           <div>
-            <label className="text-[11px] text-slate-400">วางข้อความที่อยู่ที่ลูกค้าส่งมา (ไม่บังคับ)</label>
+            <label className="text-[11px] text-[var(--ink-3)]">วางข้อความที่อยู่ที่ลูกค้าส่งมา (ไม่บังคับ)</label>
             <textarea value={paste} onChange={(e) => setPaste(e.target.value)} rows={compact ? 2 : 3}
               placeholder={"เช่น สมชาย ใจดี 081-234-5678\n99/1 ม.5 ต.สุเทพ อ.เมือง จ.เชียงใหม่ 50200"}
-              className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm resize-y" />
+              className="mt-0.5 w-full rounded-lg border border-[var(--line-strong)] px-2 py-1.5 text-sm resize-y" />
             <button type="button" onClick={applyPaste} disabled={!paste.trim()}
               className="mt-1 inline-flex items-center gap-1 rounded-full border border-brand-400/50 px-2 py-0.5 text-[10.5px] font-semibold text-brand-600 hover:bg-brand-50 disabled:opacity-50">
               <Sparkles size={11} /> แยกช่องให้อัตโนมัติ
@@ -238,8 +238,8 @@ export function CustomerAddressBox({ row, onSaved, draft = null, compact = false
             {inp("note", "หมายเหตุ (เช่น จุดสังเกต/เวลาที่สะดวก)", "", true)}
           </div>
           {hasAddress(cleanAddress(f)) && (
-            <div className="rounded-lg bg-slate-50 px-2 py-1.5 text-[11.5px] text-slate-500 whitespace-pre-line break-words">
-              <span className="text-[10px] text-slate-400">จะแสดงเป็น</span>{"\n"}{formatAddress(cleanAddress(f))}
+            <div className="rounded-lg bg-[var(--ground)] px-2 py-1.5 text-[11.5px] text-[var(--ink-3)] whitespace-pre-line break-words">
+              <span className="text-[10px] text-[var(--ink-3)]">จะแสดงเป็น</span>{"\n"}{formatAddress(cleanAddress(f))}
             </div>
           )}
           <div className="flex gap-1.5">
@@ -248,7 +248,7 @@ export function CustomerAddressBox({ row, onSaved, draft = null, compact = false
               {busy ? <Loader2 className="animate-spin" size={13} /> : <CheckCircle2 size={13} />} บันทึกที่อยู่
             </button>
             <button type="button" onClick={() => { setEditing(false); setF(toForm(saved)); setPaste(""); setMsg(null); }} disabled={busy}
-              className="shrink-0 rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-50">
+              className="shrink-0 rounded-lg border border-[var(--line-strong)] px-3 py-1.5 text-sm text-[var(--ink-2)] hover:bg-[var(--ground)] disabled:opacity-50">
               ยกเลิก
             </button>
           </div>
@@ -589,9 +589,9 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
 
   const inp = (k, label, ph) => (
     <div className="min-w-0">
-      <label className="text-[11px] text-slate-400">{label}</label>
+      <label className="text-[11px] text-[var(--ink-3)]">{label}</label>
       <input value={f[k]} onChange={(e) => setF((s) => ({ ...s, [k]: e.target.value }))} placeholder={ph}
-        className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+        className="mt-0.5 w-full rounded-lg border border-[var(--line-strong)] px-2 py-1.5 text-sm" />
     </div>
   );
   async function askAi() {
@@ -616,14 +616,14 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
   };
 
   return (
-    <div className={`${darkMode ? "chat-customer-form" : ""} ${compact ? "space-y-2" : "border-t border-slate-200 pt-3 mt-1 space-y-2"}`}>
+    <div className={`${darkMode ? "chat-customer-form" : ""} ${compact ? "space-y-2" : "border-t border-[var(--line)] pt-3 mt-1 space-y-2"}`}>
       <div className="flex items-center justify-between gap-2 flex-wrap">
         {compact ? (
-          <span className="text-[11px] text-slate-500">
+          <span className="text-[11px] text-[var(--ink-3)]">
             {row?.manual_data && row?.manual_data_by ? `บันทึกโดย ${String(row.manual_data_by).split("@")[0]}` : "ยังไม่เคยบันทึก"}
           </span>
         ) : (
-          <label className="text-xs font-medium text-slate-500 flex items-center gap-1"><CheckCircle2 size={13} /> ข้อมูลลูกค้า (แอดมินป้อนเอง)</label>
+          <label className="text-xs font-medium text-[var(--ink-3)] flex items-center gap-1"><CheckCircle2 size={13} /> ข้อมูลลูกค้า (แอดมินป้อนเอง)</label>
         )}
         <div className="flex items-center gap-2">
           {!compact && row?.manual_data && row?.manual_data_by && (
@@ -643,7 +643,7 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
           คนกดแล้วเห็นหน้าจอนิ่งจึงสรุปว่าปุ่มเสีย แล้วกดซ้ำ — ต้องมีที่ว่างบอกสถานะให้ชัด
           ห้องที่สแกนไปแล้วและบทสนทนายังไม่เปลี่ยน จะคืนผลจากแคชทันที กล่องนี้แทบไม่ทันขึ้น */}
       {aiBusy && (
-        <div className="flex items-center gap-2 rounded-lg border border-brand-400/40 bg-brand-50/40 p-2.5 text-[11px] text-slate-600">
+        <div className="flex items-center gap-2 rounded-lg border border-brand-400/40 bg-brand-50/40 p-2.5 text-[11px] text-[var(--ink-2)]">
           <Loader2 size={13} className="animate-spin text-brand-600" />
           กำลังให้ AI อ่านบทสนทนา… ใช้เวลาประมาณ 3-4 วินาที
         </div>
@@ -655,7 +655,7 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
             /* อ่านไม่สำเร็จ (เน็ต/โมเดลล่ม) — ให้กดซ้ำได้ตรงนี้เลย ไม่ต้องเลื่อนขึ้นไปหาปุ่มสแกน */
             <div className="space-y-1.5">
               <div className="text-[11px] text-rose-600">AI อ่านไม่สำเร็จ — ลองใหม่อีกครั้ง</div>
-              <div className="text-[10px] text-slate-400 break-words">{ai.error}</div>
+              <div className="text-[10px] text-[var(--ink-3)] break-words">{ai.error}</div>
               <RetryAiButton onClick={askAi} />
             </div>
           ) : ai.dropped?.length ? (
@@ -665,22 +665,22 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
               <div className="text-[11px] text-amber-700">
                 AI ตอบค่าที่ใช้ไม่ได้ ({ai.dropped.map((k) => AI_FIELD_LABEL[k] || k).join(", ")}) — ลองใหม่อีกครั้ง
               </div>
-              <div className="text-[10px] text-slate-500">ถ้าลองแล้วยังไม่ได้ แปลว่าข้อความในแชทยังไม่ชัดพอ ให้กรอกเองด้านล่างได้เลย</div>
+              <div className="text-[10px] text-[var(--ink-3)]">ถ้าลองแล้วยังไม่ได้ แปลว่าข้อความในแชทยังไม่ชัดพอ ให้กรอกเองด้านล่างได้เลย</div>
               <RetryAiButton onClick={askAi} />
             </div>
           ) : !ai.suggestion || !Object.values(ai.suggestion).some(Boolean) ? (
             /* อ่านสำเร็จแต่ไม่เจออะไร — เดิมจะขึ้นกล่องเปล่าที่มีแค่หัวข้อ ดูเหมือนค้าง */
             <div className="space-y-1.5">
-              <div className="text-[11px] text-slate-600">
+              <div className="text-[11px] text-[var(--ink-2)]">
                 AI อ่านแล้วแต่ไม่พบไอดีเทรด อีเมล หรือ User TradingView ในบทสนทนานี้
-                {ai.note && <div className="mt-1 text-[10.5px] text-slate-500">{ai.note}</div>}
+                {ai.note && <div className="mt-1 text-[10.5px] text-[var(--ink-3)]">{ai.note}</div>}
               </div>
               <RetryAiButton onClick={askAi} label="ลองใหม่อีกครั้ง" />
             </div>
           ) : (
             <>
               <div className="flex items-center justify-between gap-2">
-                <span className="text-[11px] font-semibold text-slate-600">AI เสนอ (ยังไม่บันทึก)</span>
+                <span className="text-[11px] font-semibold text-[var(--ink-2)]">AI เสนอ (ยังไม่บันทึก)</span>
                 <button type="button" onClick={acceptAll} className="text-[10.5px] font-semibold text-brand-600 hover:underline">
                   รับทั้งหมด
                 </button>
@@ -690,27 +690,27 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
                 .map(([k, label, formKey]) => (
                   <div key={k} className="flex items-start justify-between gap-2 text-[11px]">
                     <div className="min-w-0">
-                      <span className="text-slate-400">{label}: </span>
-                      <span className="font-mono font-semibold text-slate-700">{ai.suggestion[k]}</span>
+                      <span className="text-[var(--ink-3)]">{label}: </span>
+                      <span className="font-mono font-semibold text-[var(--ink-2)]">{ai.suggestion[k]}</span>
                       {ai.confidence?.[k] != null && (
                         <span className={`ml-1 ${Number(ai.confidence[k]) >= 0.8 ? "text-emerald-600" : "text-amber-600"}`}>
                           ({Math.round(Number(ai.confidence[k]) * 100)}%)
                         </span>
                       )}
                       {ai.evidence?.[k] && (
-                        <div className="truncate text-[10px] text-slate-400" title={ai.evidence[k]}>จาก: “{ai.evidence[k]}”</div>
+                        <div className="truncate text-[10px] text-[var(--ink-3)]" title={ai.evidence[k]}>จาก: “{ai.evidence[k]}”</div>
                       )}
                     </div>
                     <button type="button" onClick={() => acceptOne(formKey, ai.suggestion[k])}
-                      className="shrink-0 rounded border border-slate-300 px-1.5 py-0.5 text-[10px] font-medium text-slate-600 hover:bg-white">
+                      className="shrink-0 rounded border border-[var(--line-strong)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--ink-2)] hover:bg-[var(--surface)]">
                       ใส่
                     </button>
                   </div>
                 ))}
               {!Object.values(ai.suggestion || {}).some(Boolean) && (
-                <div className="text-[11px] text-slate-400">AI ไม่พบข้อมูลที่มั่นใจในบทสนทนานี้</div>
+                <div className="text-[11px] text-[var(--ink-3)]">AI ไม่พบข้อมูลที่มั่นใจในบทสนทนานี้</div>
               )}
-              {ai.note && <div className="text-[10px] text-slate-400">หมายเหตุ: {ai.note}</div>}
+              {ai.note && <div className="text-[10px] text-[var(--ink-3)]">หมายเหตุ: {ai.note}</div>}
               <div className="pt-0.5"><RetryAiButton onClick={askAi} label="ค่าไม่ถูก? ลองใหม่อีกครั้ง" /></div>
             </>
           )}
@@ -722,9 +722,9 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
         {inp("phone", "เบอร์โทร", "เบอร์โทร")}
         {inp("email", "อีเมล", "อีเมล")}
         <div className="min-w-0 col-span-2">
-          <label className="text-[11px] text-slate-400">ประเทศของลูกค้า</label>
+          <label className="text-[11px] text-[var(--ink-3)]">ประเทศของลูกค้า</label>
           <select value={f.country} onChange={(e) => setF((st) => ({ ...st, country: e.target.value }))}
-            className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm bg-white">
+            className="mt-0.5 w-full rounded-lg border border-[var(--line-strong)] px-2 py-1.5 text-sm bg-[var(--surface)]">
             <option value="">— ยังไม่ระบุ —</option>
             {COUNTRIES.map((c) => <option key={c} value={c}>{c}</option>)}
             {/* ค่าที่มีอยู่แต่ไม่อยู่ในลิสต์ (ข้อมูลเก่า) ต้องยังเลือกอยู่ได้ ไม่ถูกล้างเงียบ ๆ */}
@@ -734,11 +734,11 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
         <div className="min-w-0 col-span-2">
           {/* ป้ายกำกับ broker ที่แอดมินเลือกเอง (XM หลัก / Exness รอง) — ไม่ได้เช็คจริงกับฝั่ง broker
               ระบบเช็คไอดีเทรดตอนนี้ผูกกับ XM เท่านั้น ป้ายนี้ไว้ช่วยคัดกรอง/บันทึกไว้ก่อน */}
-          <label className="text-[11px] text-slate-400">Broker</label>
+          <label className="text-[11px] text-[var(--ink-3)]">Broker</label>
           <div className="mt-0.5 grid grid-cols-2 gap-1.5">
             {["XM", "Exness"].map((b) => (
               <button key={b} type="button" onClick={() => setF((st) => ({ ...st, broker: b }))}
-                className={`rounded-lg border px-2 py-1.5 text-sm font-medium ${f.broker === b ? "border-brand-500 bg-brand-50 text-brand-700" : "border-slate-300 text-slate-600 hover:bg-slate-50"}`}>
+                className={`rounded-lg border px-2 py-1.5 text-sm font-medium ${f.broker === b ? "border-brand-500 bg-brand-50 text-brand-700" : "border-[var(--line-strong)] text-[var(--ink-2)] hover:bg-[var(--ground)]"}`}>
                 {b}
               </button>
             ))}
@@ -757,24 +757,24 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div className="min-w-0">
-              <label className="text-[11px] text-slate-400">User TradingView</label>
+              <label className="text-[11px] text-[var(--ink-3)]">User TradingView</label>
               <input value={tvEditUsername} onChange={(e) => setTvEditUsername(e.target.value)}
-                className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+                className="mt-0.5 w-full rounded-lg border border-[var(--line-strong)] px-2 py-1.5 text-sm" />
             </div>
             <div className="min-w-0">
-              <label className="text-[11px] text-slate-400">ไอดีเทรด</label>
+              <label className="text-[11px] text-[var(--ink-3)]">ไอดีเทรด</label>
               <input value={tvEditTradeId} onChange={(e) => setTvEditTradeId(e.target.value)}
-                className="mt-0.5 w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+                className="mt-0.5 w-full rounded-lg border border-[var(--line-strong)] px-2 py-1.5 text-sm" />
             </div>
           </div>
           {/* เตือนเฉพาะตอนช่องต่างจากของจริง กันขึ้นเตือนพร่ำเพรื่อทั้งที่ยังไม่ได้แก้อะไรเลย */}
           {tvEditUsername.trim().toLowerCase() !== String(linkedTv.username || "").trim().toLowerCase() && (
-            <div className="text-[10.5px] text-amber-700 bg-white/70 rounded-lg px-2 py-1.5">
+            <div className="text-[10.5px] text-amber-700 bg-[var(--surface)]/70 rounded-lg px-2 py-1.5">
               จะถอนสิทธิ์ <b>{linkedTv.username}</b> บน TradingView แล้วให้สิทธิ์ <b>{tvEditUsername.trim() || "ชื่อใหม่"}</b> ในสคริปต์เดิมทั้งหมด (วันหมดอายุเท่าเดิม)
             </div>
           )}
           <button type="button" onClick={updateExistingTv} disabled={tvUpdateBusy}
-            className="w-full rounded-lg border border-amber-400 bg-white text-amber-800 px-3 py-1.5 text-xs font-semibold hover:bg-amber-100 disabled:opacity-50 flex items-center justify-center gap-1.5">
+            className="w-full rounded-lg border border-amber-400 bg-[var(--surface)] text-amber-800 px-3 py-1.5 text-xs font-semibold hover:bg-amber-100 disabled:opacity-50 flex items-center justify-center gap-1.5">
             {tvUpdateBusy ? <Loader2 className="animate-spin" size={13} /> : <RefreshCw size={13} />} บันทึกการเปลี่ยนแปลง
           </button>
           {tvUpdateMsg && <div className={`text-[11px] ${tvUpdateMsg.ok ? "text-emerald-600" : "text-rose-600"}`}>{tvUpdateMsg.text}</div>}
@@ -783,26 +783,26 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
 
       {/* ตัวเลือก TV (เหมือนหน้าจัดการสมาชิก TV) — เห็นเฉพาะแอดมินจนกว่าจะปล่อย */}
       {tvOn && (
-        <div className="rounded-lg border border-slate-300 p-2.5 space-y-2">
+        <div className="rounded-lg border border-[var(--line-strong)] p-2.5 space-y-2">
           <div className="flex items-center justify-between gap-2 flex-wrap">
-            <div className="text-[11px] font-semibold text-slate-600 flex items-center gap-1"><Tv size={12} /> เพิ่มสิทธิ์ TradingView</div>
+            <div className="text-[11px] font-semibold text-[var(--ink-2)] flex items-center gap-1"><Tv size={12} /> เพิ่มสิทธิ์ TradingView</div>
             {contactChannelOfChat(row) && (
-              <span className="text-[10px] text-slate-400">ช่องทาง: {CHANNEL_LABELS[contactChannelOfChat(row)]}</span>
+              <span className="text-[10px] text-[var(--ink-3)]">ช่องทาง: {CHANNEL_LABELS[contactChannelOfChat(row)]}</span>
             )}
           </div>
           <div>
-            <label className="text-[11px] text-slate-400">เลือกสคริปต์ที่จะให้สิทธิ์</label>
-            <div className="mt-0.5 rounded-lg border border-slate-300 divide-y divide-slate-100 max-h-60 overflow-y-auto bg-white">
-              {scripts.length === 0 && <div className="px-2 py-1.5 text-sm text-slate-400">ยังไม่มีสคริปต์</div>}
+            <label className="text-[11px] text-[var(--ink-3)]">เลือกสคริปต์ที่จะให้สิทธิ์</label>
+            <div className="mt-0.5 rounded-lg border border-[var(--line-strong)] divide-y divide-slate-100 max-h-60 overflow-y-auto bg-[var(--surface)]">
+              {scripts.length === 0 && <div className="px-2 py-1.5 text-sm text-[var(--ink-3)]">ยังไม่มีสคริปต์</div>}
               {scripts.map((s) => {
                 const on = pineIds.includes(s.pine_id);
                 const d = getDur(s.pine_id);
                 return (
                   <div key={s.pine_id} className={on ? "bg-brand-50/40" : ""}>
-                    <label className="flex items-center gap-2 px-2 py-1.5 text-sm cursor-pointer hover:bg-slate-50">
+                    <label className="flex items-center gap-2 px-2 py-1.5 text-sm cursor-pointer hover:bg-[var(--ground)]">
                       <input type="checkbox" checked={on} onChange={() => toggleScript(s.pine_id, on)} />
                       <span className="truncate flex-1">{s.name}</span>
-                      {on && <span className="text-[10px] text-slate-400 shrink-0">{durLabel(d)}</span>}
+                      {on && <span className="text-[10px] text-[var(--ink-3)] shrink-0">{durLabel(d)}</span>}
                     </label>
                     {on && (
                       <div className="px-2 pb-2 pl-7 space-y-1">
@@ -811,15 +811,15 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
                           <label className="flex items-center gap-1"><input type="radio" checked={d.mode === "days"} onChange={() => setDurFor(s.pine_id, { mode: "days" })} /> จำกัดวัน</label>
                           <label className="flex items-center gap-1"><input type="radio" checked={d.mode === "date"} onChange={() => setDurFor(s.pine_id, { mode: "date" })} /> เลือกวัน</label>
                         </div>
-                        {d.mode === "days" && <input type="number" min={1} value={d.days} onChange={(e) => setDurFor(s.pine_id, { days: e.target.value })} className="w-full rounded-lg border border-slate-300 px-2 py-1 text-sm" />}
-                        {d.mode === "date" && <input type="date" value={d.expDate} min={todayTH} onChange={(e) => setDurFor(s.pine_id, { expDate: beToCe(e.target.value) })} className="w-full rounded-lg border border-slate-300 px-2 py-1 text-sm" />}
+                        {d.mode === "days" && <input type="number" min={1} value={d.days} onChange={(e) => setDurFor(s.pine_id, { days: e.target.value })} className="w-full rounded-lg border border-[var(--line-strong)] px-2 py-1 text-sm" />}
+                        {d.mode === "date" && <input type="date" value={d.expDate} min={todayTH} onChange={(e) => setDurFor(s.pine_id, { expDate: beToCe(e.target.value) })} className="w-full rounded-lg border border-[var(--line-strong)] px-2 py-1 text-sm" />}
                       </div>
                     )}
                   </div>
                 );
               })}
             </div>
-            {pineIds.length > 0 && <div className="text-[11px] text-slate-400 mt-0.5">เลือกแล้ว {pineIds.length} สคริปต์</div>}
+            {pineIds.length > 0 && <div className="text-[11px] text-[var(--ink-3)] mt-0.5">เลือกแล้ว {pineIds.length} สคริปต์</div>}
           </div>
         </div>
       )}
@@ -847,7 +847,7 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
         {grantSuccess && (
           <div className="space-y-2">
             <div className="font-semibold text-emerald-700">🎉 {grantSuccess.renewed ? "ต่ออายุให้" : "ให้สิทธิ์"} {grantSuccess.username} แล้ว</div>
-            <ul className="text-sm text-slate-600 list-disc pl-5 space-y-0.5">
+            <ul className="text-sm text-[var(--ink-2)] list-disc pl-5 space-y-0.5">
               {grantSuccess.items.map((it) => <li key={it}>{it}</li>)}
             </ul>
             {grantSuccess.fails?.length > 0 && (
@@ -1512,24 +1512,24 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
     ? `Ads ${adNameOf(r) || "โฆษณา"}${adIdOf(r) ? ` (ads id: ${adIdOf(r)})` : ""}`
     : SOURCE_LABELS[srcOf(r)];
   const patchRow = (id, patch) => { setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r))); invalidateSharedReportCache(); };
-  const selCls = "rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white";
+  const selCls = "rounded-lg border border-[var(--line-strong)] px-3 py-2 text-sm bg-[var(--surface)]";
 
   const SortHead = ({ k, children, className = "" }) => (
     <th className={`px-3 py-2 font-medium ${className}`}>
-      <button onClick={() => toggleSort(k)} className="inline-flex items-center gap-1 hover:text-slate-800">
+      <button onClick={() => toggleSort(k)} className="inline-flex items-center gap-1 hover:text-[var(--ink)]">
         {children}
-        {sortKey === k ? (sortDir === "asc" ? <ChevronUp size={13} /> : <ChevronDown size={13} />) : <ArrowUpDown size={13} className="text-slate-300" />}
+        {sortKey === k ? (sortDir === "asc" ? <ChevronUp size={13} /> : <ChevronDown size={13} />) : <ArrowUpDown size={13} className="text-[var(--ink-3)]" />}
       </button>
     </th>
   );
 
   return (
     <div className="space-y-4">
-      <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3">
+      <div className="bg-[var(--surface)] rounded-2xl border border-[var(--line)] p-4 shadow-sm space-y-3">
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
-            <h3 className="font-semibold text-slate-800">รีพอร์ตลูกค้าทักแชท</h3>
-            <p className="text-xs text-slate-500 mt-0.5">ข้อมูลลูกค้าทั้งหมดที่ซิงก์มาจาก Supabase — ค้นหา กรอง เรียงลำดับ และดาวน์โหลดได้</p>
+            <h3 className="font-semibold text-[var(--ink)]">รีพอร์ตลูกค้าทักแชท</h3>
+            <p className="text-xs text-[var(--ink-3)] mt-0.5">ข้อมูลลูกค้าทั้งหมดที่ซิงก์มาจาก Supabase — ค้นหา กรอง เรียงลำดับ และดาวน์โหลดได้</p>
           </div>
           {/* ปุ่มพวกนี้ทำงานได้ต่อเมื่อเลือกเพจแล้ว — เดิมโชว์ตลอดเวลาแบบกดไม่ได้
               คนเปิดหน้ามาครั้งแรกจึงเห็นปุ่มเทา 3 ปุ่มก่อนจะรู้ว่าต้องเลือกเพจก่อน */}
@@ -1538,10 +1538,10 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
             <button onClick={() => pageFilter ? importInputRef.current?.click() : setError("กรุณาเลือกเพจก่อน Import Excel")} disabled={!!importState?.loading} title="จับคู่ด้วยชื่อลูกค้าในเพจที่เลือก และเขียนทับเฉพาะช่องที่มีข้อมูลในไฟล์" className="border border-emerald-300 text-emerald-700 rounded-lg px-3 py-2 text-sm font-medium hover:bg-emerald-50 disabled:opacity-50 flex items-center gap-1.5">
               {importState?.loading ? <Loader2 className="animate-spin" size={15} /> : <Upload size={15} />} Import Excel
             </button>
-            <button onClick={() => { customerDatabaseReportCache.clear(); load(true); }} disabled={loading || !reportPageId} title="คลิกเพื่อดึงข้อมูลปัจจุบันจากฐานข้อมูลและอัปเดตให้ทุก user" className="bg-white text-slate-700 border border-slate-300 rounded-control hover:bg-slate-50 px-4 py-2 text-sm font-semibold   disabled:opacity-50 flex items-center gap-1.5">
+            <button onClick={() => { customerDatabaseReportCache.clear(); load(true); }} disabled={loading || !reportPageId} title="คลิกเพื่อดึงข้อมูลปัจจุบันจากฐานข้อมูลและอัปเดตให้ทุก user" className="bg-[var(--surface)] text-[var(--ink-2)] border border-[var(--line-strong)] rounded-control hover:bg-[var(--ground)] px-4 py-2 text-sm font-semibold   disabled:opacity-50 flex items-center gap-1.5">
               {loading ? <Loader2 className="animate-spin" size={15} /> : <RefreshCw size={15} />} รีเฟรชข้อมูลล่าสุด
             </button>
-            <button onClick={openExportDialog} disabled={!pageFilter || exporting} className="bg-white text-slate-700 border border-slate-300 rounded-control px-3 py-2 text-sm font-medium hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1.5">
+            <button onClick={openExportDialog} disabled={!pageFilter || exporting} className="bg-[var(--surface)] text-[var(--ink-2)] border border-[var(--line-strong)] rounded-control px-3 py-2 text-sm font-medium hover:bg-[var(--ground)] disabled:opacity-50 flex items-center gap-1.5">
               {exporting ? <Loader2 className="animate-spin" size={15} /> : <FileDown size={15} />} Export
             </button>
           </div>
@@ -1549,8 +1549,8 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
 
         {/* ลำดับบนหน้าจอ = ลำดับที่ต้องทำ: เลือกเพจ+ช่วงเวลา → กดดึง → แล้วค่อยมีของให้ค้นหา/กรอง
             เดิมช่องค้นหากับตัวกรองอยู่ข้างบนกล่องนี้ ทั้งที่ยังไม่มีข้อมูลให้กรองเลย */}
-        <div className="rounded-card border border-slate-200 bg-slate-50 p-3 space-y-2">
-          <div className="text-xs font-medium text-slate-600">เลือกเพจและช่วงเวลา แล้วกด “ดึงรายงาน”</div>
+        <div className="rounded-card border border-[var(--line)] bg-[var(--ground)] p-3 space-y-2">
+          <div className="text-xs font-medium text-[var(--ink-2)]">เลือกเพจและช่วงเวลา แล้วกด “ดึงรายงาน”</div>
           <div className="flex flex-wrap gap-2">
           <select value={pageFilter} onChange={(e) => setPageFilter(e.target.value)} className={selCls} title="เพจ">
             <option value="">— เลือกเพจ —</option>
@@ -1576,7 +1576,7 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
           {dateFilter === "custom" && (
             <div className="flex items-center gap-1.5">
               <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className={selCls} title="ตั้งแต่วันที่" />
-              <span className="text-slate-400 text-sm">–</span>
+              <span className="text-[var(--ink-3)] text-sm">–</span>
               <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className={selCls} title="ถึงวันที่" />
             </div>
           )}
@@ -1591,7 +1591,7 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
         {/* ค้นหา/กรอง = ทำงานกับข้อมูลที่ดึงมาแล้วเท่านั้น จึงโชว์หลังมีข้อมูล
             ไม่ต้องมีป้าย "ขั้นที่ 2" อีก เพราะมันโผล่มาตอนที่ใช้ได้จริงพอดี */}
         {reportPageId && (
-          <div className="space-y-2.5 rounded-card border border-slate-200 p-3">
+          <div className="space-y-2.5 rounded-card border border-[var(--line)] p-3">
             <SearchInput value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหา ชื่อ / เบอร์ / ไอดีเทรด / username / ข้อความ" />
             <div className="flex gap-1.5 overflow-x-auto -mx-0.5 px-0.5 pb-0.5">
               <FilterPill active={stageFilter === "all"} onClick={() => setStageFilter("all")}>ทั้งหมด</FilterPill>
@@ -1613,7 +1613,7 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
               </select>
               {(q || stageFilter !== "all" || dataFilter !== "all" || sourceFilter !== "all") && (
                 <button type="button" onClick={() => { setQ(""); setStageFilter("all"); setDataFilter("all"); setSourceFilter("all"); }}
-                  className="text-xs text-slate-500 underline hover:text-slate-700">ล้างตัวกรอง</button>
+                  className="text-xs text-[var(--ink-3)] underline hover:text-[var(--ink-2)]">ล้างตัวกรอง</button>
               )}
             </div>
           </div>
@@ -1626,7 +1626,7 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
             <div className="text-xs text-brand-700">หากต้องการข้อมูลปัจจุบัน ให้คลิกปุ่ม “รีเฟรชข้อมูลล่าสุด” ด้านบน</div>
           </div>
         )}
-        {reportPageId && <div className="text-xs text-slate-500">พบ {total.toLocaleString()} รายการ{total > PAGE_SIZE ? ` — แสดงหน้า ${curPage}/${totalPages}` : ""}</div>}
+        {reportPageId && <div className="text-xs text-[var(--ink-3)]">พบ {total.toLocaleString()} รายการ{total > PAGE_SIZE ? ` — แสดงหน้า ${curPage}/${totalPages}` : ""}</div>}
       </div>
 
       {exportDialogOpen && (
@@ -1656,7 +1656,7 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
                       className={`rounded-xl border px-3 py-2.5 text-left transition ${
                         exportFormat === val
                           ? "border-brand-600 bg-brand-600/10"
-                          : "border-slate-300 hover:border-slate-400 dark:border-night-border"
+                          : "border-[var(--line-strong)] hover:border-[var(--line-strong)] dark:border-night-border"
                       }`}
                     >
                       <div className="text-sm font-medium">{title}</div>
@@ -1695,7 +1695,7 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
         </div>
       )}
 
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className="bg-[var(--surface)] rounded-2xl border border-[var(--line)] shadow-sm overflow-hidden">
         {!reportPageId ? (
           <EmptyState
             icon={FileDown}
@@ -1718,17 +1718,17 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
                 const st = CHAT_STAGES.find((s) => s.key === (r.stage_manual || r.stage || "new")) || CHAT_STAGES[0];
                 const initial = (r.customer_name || "?").trim().slice(0, 1).toUpperCase();
                 return (
-                  <button key={r.id} onClick={() => setDetailRow(r)} className="w-full text-left p-3.5 hover:bg-slate-50 flex items-center gap-3">
-                    <div className="w-11 h-11 rounded-full bg-slate-100 text-slate-600 flex items-center justify-center text-sm font-semibold shrink-0">{initial}</div>
+                  <button key={r.id} onClick={() => setDetailRow(r)} className="w-full text-left p-3.5 hover:bg-[var(--ground)] flex items-center gap-3">
+                    <div className="w-11 h-11 rounded-full bg-[var(--ground)] text-[var(--ink-2)] flex items-center justify-center text-sm font-semibold shrink-0">{initial}</div>
                     <div className="min-w-0 flex-1">
-                      <div className="font-semibold text-slate-900 text-[15px] truncate">{r.customer_name || "(ไม่มีชื่อ)"}</div>
+                      <div className="font-semibold text-[var(--ink)] text-[15px] truncate">{r.customer_name || "(ไม่มีชื่อ)"}</div>
                       <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                         <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${st.cls}`}>{st.label}</span>
-                        <span className="text-xs text-slate-400 truncate">{SOURCE_LABELS[srcOf(r)] || r.page_name || "-"} · {r.trade_id || "ไม่มีไอดีเทรด"}</span>
+                        <span className="text-xs text-[var(--ink-3)] truncate">{SOURCE_LABELS[srcOf(r)] || r.page_name || "-"} · {r.trade_id || "ไม่มีไอดีเทรด"}</span>
                         {hasAddress(r.address) && <span className="inline-flex items-center gap-0.5 text-xs text-emerald-700 truncate"><MapPin size={11} />{shortArea(r.address) || "มีที่อยู่"}</span>}
                       </div>
                     </div>
-                    <ChevronRight size={18} className="text-slate-300 shrink-0" />
+                    <ChevronRight size={18} className="text-[var(--ink-3)] shrink-0" />
                   </button>
                 );
               })}
@@ -1742,7 +1742,7 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
                   <col className="w-[10%]" /><col className="w-[5%]" /><col className="w-[6%]" />
                 </colgroup>
                 <thead>
-                  <tr className="text-left text-xs text-slate-500 border-b border-slate-200 bg-slate-50">
+                  <tr className="text-left text-xs text-[var(--ink-3)] border-b border-[var(--line)] bg-[var(--ground)]">
                     <SortHead k="customer_name">ลูกค้า</SortHead>
                     <SortHead k="page_name">เพจ</SortHead>
                     <SortHead k="trade_id" className="whitespace-nowrap">ไอดีเทรด</SortHead>
@@ -1758,14 +1758,14 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {pageRows.map((r) => (
-                    <tr key={r.id} className="hover:bg-slate-50 align-top">
+                    <tr key={r.id} className="hover:bg-[var(--ground)] align-top">
                       <td className="px-2 py-2 min-w-0">
-                        <button onClick={() => onOpenChat?.(r.id, r.last_message_at)} title={`เปิดแชทของ ${r.customer_name || "ลูกค้า"}`} className="block w-full truncate text-left text-slate-800 hover:text-brand-600 font-medium underline-offset-2 hover:underline">
+                        <button onClick={() => onOpenChat?.(r.id, r.last_message_at)} title={`เปิดแชทของ ${r.customer_name || "ลูกค้า"}`} className="block w-full truncate text-left text-[var(--ink)] hover:text-brand-600 font-medium underline-offset-2 hover:underline">
                           {r.customer_name || "(ไม่มีชื่อ)"}
                         </button>
-                        {r.last_user_text && <div title={r.last_user_text} className="text-[10px] text-slate-400 truncate">{r.last_user_text}</div>}
+                        {r.last_user_text && <div title={r.last_user_text} className="text-[10px] text-[var(--ink-3)] truncate">{r.last_user_text}</div>}
                       </td>
-                      <td title={r.page_name || r.page_id || ""} className="px-1.5 py-2 text-slate-600 truncate">{r.page_name || r.page_id || "-"}</td>
+                      <td title={r.page_name || r.page_id || ""} className="px-1.5 py-2 text-[var(--ink-2)] truncate">{r.page_name || r.page_id || "-"}</td>
                       <td className="px-1 py-1.5 min-w-0"><EditableCell row={r} field="trade_id" numeric onSaved={patchRow} /></td>
                       <td className="px-1 py-1.5 min-w-0"><EditableCell row={r} field="phone" numeric onSaved={patchRow} /></td>
                       <td className="px-1 py-1.5 min-w-0"><EditableCell row={r} field="email" onSaved={patchRow} /></td>
@@ -1773,38 +1773,38 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
                       <td className="px-1 py-1.5 min-w-0">
                         {/* ที่อยู่ยาวเกินจะแก้ในช่องตาราง — กดแล้วเปิดโปรไฟล์ลูกค้า (มีกล่องที่อยู่ให้ดู/คัดลอก/แก้) */}
                         <button type="button" onClick={() => setDetailRow(r)} title={hasAddress(r.address) ? formatAddress(r.address) : "คลิกเพื่อเพิ่มที่อยู่"}
-                          className="block w-full min-w-0 rounded px-1.5 py-0.5 text-left border border-transparent hover:border-slate-300">
+                          className="block w-full min-w-0 rounded px-1.5 py-0.5 text-left border border-transparent hover:border-[var(--line-strong)]">
                           {hasAddress(r.address) ? (
                             <>
-                              <span className="flex items-center gap-1 text-[11px] text-slate-700 truncate"><MapPin size={10} className="shrink-0 text-emerald-600" />{shortArea(r.address) || "มีที่อยู่"}</span>
-                              <span className="block text-[10px] text-slate-400 truncate">{r.address.name || r.address.line1}</span>
+                              <span className="flex items-center gap-1 text-[11px] text-[var(--ink-2)] truncate"><MapPin size={10} className="shrink-0 text-emerald-600" />{shortArea(r.address) || "มีที่อยู่"}</span>
+                              <span className="block text-[10px] text-[var(--ink-3)] truncate">{r.address.name || r.address.line1}</span>
                             </>
-                          ) : <span className="text-[11px] text-slate-400">—</span>}
+                          ) : <span className="text-[11px] text-[var(--ink-3)]">—</span>}
                         </button>
                       </td>
-                      <td title={r.psid || ""} className="px-1.5 py-2 text-slate-500 truncate">{r.psid || <span className="text-slate-400">—</span>}</td>
+                      <td title={r.psid || ""} className="px-1.5 py-2 text-[var(--ink-3)] truncate">{r.psid || <span className="text-[var(--ink-3)]">—</span>}</td>
                       <td className="px-1.5 py-2 min-w-0">
                         {srcOf(r) === "ad" ? (
                           <div className="min-w-0">
-                            <div className="text-slate-600 truncate" title={`Ads ${adNameOf(r) || "โฆษณา"}`}>Ads {adNameOf(r) || "โฆษณา"}</div>
-                            {adIdOf(r) && <div className="text-[10px] text-slate-400 truncate" title={adIdOf(r)}>ads id: {adIdOf(r)}</div>}
+                            <div className="text-[var(--ink-2)] truncate" title={`Ads ${adNameOf(r) || "โฆษณา"}`}>Ads {adNameOf(r) || "โฆษณา"}</div>
+                            {adIdOf(r) && <div className="text-[10px] text-[var(--ink-3)] truncate" title={adIdOf(r)}>ads id: {adIdOf(r)}</div>}
                           </div>
                         ) : (
-                          <span className="text-slate-500 truncate block" title={SOURCE_LABELS[srcOf(r)]}>{SOURCE_LABELS[srcOf(r)]}</span>
+                          <span className="text-[var(--ink-3)] truncate block" title={SOURCE_LABELS[srcOf(r)]}>{SOURCE_LABELS[srcOf(r)]}</span>
                         )}
                       </td>
-                      <td className="px-1 py-2 text-center text-slate-600">{r.user_message_count}/{r.message_count}</td>
-                      <td title={fmtTime(r.first_customer_message_at)} className="px-1.5 py-2 text-slate-500 truncate">{fmtTime(r.first_customer_message_at)}</td>
+                      <td className="px-1 py-2 text-center text-[var(--ink-2)]">{r.user_message_count}/{r.message_count}</td>
+                      <td title={fmtTime(r.first_customer_message_at)} className="px-1.5 py-2 text-[var(--ink-3)] truncate">{fmtTime(r.first_customer_message_at)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
             {totalPages > 1 && (
-              <div className="flex items-center justify-between gap-3 px-3 py-2.5 border-t border-slate-200 text-sm">
-                <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={curPage <= 1} className="px-3 py-1.5 rounded-lg border border-slate-300 text-slate-600 disabled:opacity-40 hover:bg-slate-50">ก่อนหน้า</button>
-                <span className="text-xs text-slate-500">หน้า {curPage} / {totalPages}</span>
-                <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={curPage >= totalPages} className="px-3 py-1.5 rounded-lg border border-slate-300 text-slate-600 disabled:opacity-40 hover:bg-slate-50">ถัดไป</button>
+              <div className="flex items-center justify-between gap-3 px-3 py-2.5 border-t border-[var(--line)] text-sm">
+                <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={curPage <= 1} className="px-3 py-1.5 rounded-lg border border-[var(--line-strong)] text-[var(--ink-2)] disabled:opacity-40 hover:bg-[var(--ground)]">ก่อนหน้า</button>
+                <span className="text-xs text-[var(--ink-3)]">หน้า {curPage} / {totalPages}</span>
+                <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={curPage >= totalPages} className="px-3 py-1.5 rounded-lg border border-[var(--line-strong)] text-[var(--ink-2)] disabled:opacity-40 hover:bg-[var(--ground)]">ถัดไป</button>
               </div>
             )}
           </>
@@ -1840,36 +1840,36 @@ function CustomerImportModal({ state, pageName, onClose, onApply }) {
   const statusView = {
     matched: ["พร้อมนำเข้า", "bg-emerald-100 text-emerald-700"],
     not_found: ["ไม่พบในแอป", "bg-amber-100 text-amber-700"],
-    invalid: ["ข้อมูลไม่ครบ", "bg-slate-100 text-slate-600"],
+    invalid: ["ข้อมูลไม่ครบ", "bg-[var(--ground)] text-[var(--ink-2)]"],
   };
   const result = state.result;
   return (
     <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-black/50 sm:p-4" onMouseDown={(event) => { if (event.target === event.currentTarget && !state.applying) onClose(); }}>
-      <div className="bg-white w-full sm:max-w-4xl rounded-t-2xl sm:rounded-2xl max-h-[92vh] overflow-hidden shadow-2xl flex flex-col">
-        <div className="border-b border-slate-200 px-4 py-3 flex items-start justify-between gap-3">
+      <div className="bg-[var(--surface)] w-full sm:max-w-4xl rounded-t-2xl sm:rounded-2xl max-h-[92vh] overflow-hidden shadow-2xl flex flex-col">
+        <div className="border-b border-[var(--line)] px-4 py-3 flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <h3 className="font-semibold text-slate-800">ตรวจสอบก่อน Import Excel</h3>
-            <p className="text-xs text-slate-500 truncate">{state.fileName} · ชีต {state.sheetName} · เพจ {pageName}</p>
+            <h3 className="font-semibold text-[var(--ink)]">ตรวจสอบก่อน Import Excel</h3>
+            <p className="text-xs text-[var(--ink-3)] truncate">{state.fileName} · ชีต {state.sheetName} · เพจ {pageName}</p>
           </div>
-          <button onClick={onClose} disabled={state.applying} className="p-1 text-slate-400 hover:text-slate-700 disabled:opacity-40" aria-label="ปิด"><X size={20} /></button>
+          <button onClick={onClose} disabled={state.applying} className="p-1 text-[var(--ink-3)] hover:text-[var(--ink-2)] disabled:opacity-40" aria-label="ปิด"><X size={20} /></button>
         </div>
         <div className="p-4 overflow-y-auto space-y-4">
           <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
             จับคู่ด้วยชื่อ Facebook เท่านั้น โดยตัดช่องว่างส่วนเกินและไม่สนตัวพิมพ์เล็กใหญ่ · ชื่อเดียวกันหลายแถวใน Excel จะถูกรวมเป็นลูกค้าคนเดียวและรวมไอดีเทรดทุกบัญชี · หากในแอปมีชื่อเดียวกันหลายแถว ระบบจะอัปเดตทุกแถว · ช่องว่างในไฟล์จะไม่ลบข้อมูลเดิม
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center">
-            {[["แถว Excel", summary.total || 0, "bg-slate-50 border-slate-200", "text-slate-700"], ["ชื่อไม่ซ้ำ", summary.names || 0, "bg-blue-50 border-blue-200", "text-blue-700"], ["ชื่อที่พร้อม", matched, "bg-emerald-50 border-emerald-200", "text-emerald-700"], ["แถวในแอปที่จะอัปเดต", matchedRecords, "bg-violet-50 border-violet-200", "text-violet-700"], ["ไม่พบ/ไม่สมบูรณ์", (summary.not_found || 0) + (summary.invalid || 0), "bg-amber-50 border-amber-200", "text-amber-700"]].map(([label, value, cardClass, valueClass]) => (
-              <div key={label} className={`rounded-xl border p-2 ${cardClass}`}><div className={`text-xl font-bold ${valueClass}`}>{value}</div><div className="text-[11px] text-slate-500">{label}</div></div>
+            {[["แถว Excel", summary.total || 0, "bg-[var(--ground)] border-[var(--line)]", "text-[var(--ink-2)]"], ["ชื่อไม่ซ้ำ", summary.names || 0, "bg-blue-50 border-blue-200", "text-blue-700"], ["ชื่อที่พร้อม", matched, "bg-emerald-50 border-emerald-200", "text-emerald-700"], ["แถวในแอปที่จะอัปเดต", matchedRecords, "bg-violet-50 border-violet-200", "text-violet-700"], ["ไม่พบ/ไม่สมบูรณ์", (summary.not_found || 0) + (summary.invalid || 0), "bg-amber-50 border-amber-200", "text-amber-700"]].map(([label, value, cardClass, valueClass]) => (
+              <div key={label} className={`rounded-xl border p-2 ${cardClass}`}><div className={`text-xl font-bold ${valueClass}`}>{value}</div><div className="text-[11px] text-[var(--ink-3)]">{label}</div></div>
             ))}
           </div>
-          <div className="border border-slate-200 rounded-xl overflow-hidden">
+          <div className="border border-[var(--line)] rounded-xl overflow-hidden">
             <div className="overflow-x-auto max-h-[45vh] overflow-y-auto">
               <table className="w-full text-xs">
-                <thead className="sticky top-0 bg-slate-50 text-slate-500"><tr><th className="px-3 py-2 text-left">แถว Excel</th><th className="px-3 py-2 text-left">ชื่อ Facebook</th><th className="px-3 py-2 text-left">บัญชีเทรด</th><th className="px-3 py-2 text-left">ช่องที่จะเขียนทับ</th><th className="px-3 py-2 text-left">แถวในแอป</th><th className="px-3 py-2 text-left">ผลจับคู่</th></tr></thead>
+                <thead className="sticky top-0 bg-[var(--ground)] text-[var(--ink-3)]"><tr><th className="px-3 py-2 text-left">แถว Excel</th><th className="px-3 py-2 text-left">ชื่อ Facebook</th><th className="px-3 py-2 text-left">บัญชีเทรด</th><th className="px-3 py-2 text-left">ช่องที่จะเขียนทับ</th><th className="px-3 py-2 text-left">แถวในแอป</th><th className="px-3 py-2 text-left">ผลจับคู่</th></tr></thead>
                 <tbody className="divide-y divide-slate-100">
                   {(state.preview?.results || []).map((row, index) => {
-                    const view = statusView[row.status] || [row.status, "bg-slate-100 text-slate-600"];
-                    return <tr key={`${row.row_number}-${index}`}><td className="px-3 py-2 text-slate-400 whitespace-nowrap">{(row.row_numbers || [row.row_number]).filter(Boolean).join(", ") || "-"}</td><td className="px-3 py-2 text-slate-800 font-medium">{row.customer_name || "(ไม่มีชื่อ)"}</td><td className="px-3 py-2 text-slate-600 max-w-[220px] break-words">{(row.trade_ids || []).join(", ") || "—"}</td><td className="px-3 py-2 text-slate-600">{(row.fields || []).map((field) => fieldLabels[field] || field).join(", ") || "—"}</td><td className="px-3 py-2 text-slate-600 text-center">{row.matched_count || "—"}</td><td className="px-3 py-2"><span className={`inline-flex rounded-full px-2 py-0.5 whitespace-nowrap ${view[1]}`} title={row.reason}>{view[0]}</span></td></tr>;
+                    const view = statusView[row.status] || [row.status, "bg-[var(--ground)] text-[var(--ink-2)]"];
+                    return <tr key={`${row.row_number}-${index}`}><td className="px-3 py-2 text-[var(--ink-3)] whitespace-nowrap">{(row.row_numbers || [row.row_number]).filter(Boolean).join(", ") || "-"}</td><td className="px-3 py-2 text-[var(--ink)] font-medium">{row.customer_name || "(ไม่มีชื่อ)"}</td><td className="px-3 py-2 text-[var(--ink-2)] max-w-[220px] break-words">{(row.trade_ids || []).join(", ") || "—"}</td><td className="px-3 py-2 text-[var(--ink-2)]">{(row.fields || []).map((field) => fieldLabels[field] || field).join(", ") || "—"}</td><td className="px-3 py-2 text-[var(--ink-2)] text-center">{row.matched_count || "—"}</td><td className="px-3 py-2"><span className={`inline-flex rounded-full px-2 py-0.5 whitespace-nowrap ${view[1]}`} title={row.reason}>{view[0]}</span></td></tr>;
                   })}
                 </tbody>
               </table>
@@ -1877,8 +1877,8 @@ function CustomerImportModal({ state, pageName, onClose, onApply }) {
           </div>
           {result && <div className={`rounded-xl px-3 py-2 text-sm ${result.updated > 0 ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>{result.updated > 0 ? `นำเข้าสำเร็จ ${result.matched_names || matched} ชื่อ · อัปเดต ${result.updated} แถวในแอป · ข้าม ${result.skipped || 0} ชื่อ${result.errors?.length ? ` · ล้มเหลว ${result.errors.length} รายการ` : ""}` : `นำเข้าไม่สำเร็จ: ${result.error || result.errors?.[0]?.error || "ไม่มีรายการที่อัปเดต"}`}</div>}
         </div>
-        <div className="border-t border-slate-200 p-4 flex items-center justify-end gap-2">
-          <button onClick={onClose} disabled={state.applying} className="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-600 disabled:opacity-40">{result?.updated > 0 ? "ปิด" : "ยกเลิก"}</button>
+        <div className="border-t border-[var(--line)] p-4 flex items-center justify-end gap-2">
+          <button onClick={onClose} disabled={state.applying} className="rounded-lg border border-[var(--line-strong)] px-4 py-2 text-sm text-[var(--ink-2)] disabled:opacity-40">{result?.updated > 0 ? "ปิด" : "ยกเลิก"}</button>
           {!result?.updated && <button onClick={onApply} disabled={!matched || state.applying} className="rounded-lg bg-emerald-700 text-white px-4 py-2 text-sm font-semibold hover:bg-emerald-500 disabled:opacity-40 flex items-center gap-2">{state.applying && <Loader2 size={15} className="animate-spin" />}ยืนยันอัปเดต {matchedRecords} แถว</button>}
         </div>
       </div>
@@ -1944,7 +1944,7 @@ function CustomerDetailModal({ row, onClose, onSaved }) {
     }
   }
 
-  const fieldCls = "mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm";
+  const fieldCls = "mt-1 w-full rounded-lg border border-[var(--line-strong)] px-3 py-2 text-sm";
 
   return (
     <div
@@ -1955,27 +1955,27 @@ function CustomerDetailModal({ row, onClose, onSaved }) {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="bg-white w-full sm:max-w-2xl rounded-t-2xl sm:rounded-2xl max-h-[92vh] overflow-y-auto shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="sticky top-0 bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between gap-3">
+      <div className="bg-[var(--surface)] w-full sm:max-w-2xl rounded-t-2xl sm:rounded-2xl max-h-[92vh] overflow-y-auto shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="sticky top-0 bg-[var(--surface)] border-b border-[var(--line)] px-4 py-3 flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <h3 className="font-semibold text-slate-800 truncate">{row.customer_name || "(ไม่มีชื่อ)"}</h3>
-            <p className="text-xs text-slate-500 truncate">{row.page_name || row.page_id} · เฟสบุคไอดี {row.psid || "-"}</p>
+            <h3 className="font-semibold text-[var(--ink)] truncate">{row.customer_name || "(ไม่มีชื่อ)"}</h3>
+            <p className="text-xs text-[var(--ink-3)] truncate">{row.page_name || row.page_id} · เฟสบุคไอดี {row.psid || "-"}</p>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-700 p-1 shrink-0" aria-label="ปิด"><X size={20} /></button>
+          <button onClick={onClose} className="text-[var(--ink-3)] hover:text-[var(--ink-2)] p-1 shrink-0" aria-label="ปิด"><X size={20} /></button>
         </div>
 
         <div className="p-4 space-y-5">
           {/* สรุปข้อมูลที่มา */}
-          <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
-            <div className="text-[11px] text-slate-400">แหล่งที่มา: {srcLabel} · ข้อความลูกค้า/รวม: {row.user_message_count}/{row.message_count} · ล่าสุด: {fmt(row.last_message_at)}</div>
+          <div className="rounded-xl border border-[var(--line)] bg-[var(--ground)]/60 p-3">
+            <div className="text-[11px] text-[var(--ink-3)]">แหล่งที่มา: {srcLabel} · ข้อความลูกค้า/รวม: {row.user_message_count}/{row.message_count} · ล่าสุด: {fmt(row.last_message_at)}</div>
           </div>
 
           {/* ทดสอบส่งสถานะไป Meta (ติดเป็น Custom Label บนบทสนทนาของเพจ) */}
-          <div className="rounded-xl border border-slate-200 p-3 space-y-2">
+          <div className="rounded-xl border border-[var(--line)] p-3 space-y-2">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div>
-                <div className="text-sm font-medium text-slate-700">ส่งสถานะไป Meta (ทดสอบ)</div>
-                <p className="text-[11px] text-slate-500">ติดป้าย "{CHAT_STAGES.find((s) => s.key === row.stage)?.label || row.stage}" ให้ลูกค้าคนนี้บนกล่องข้อความของเพจ · แทนที่เฉพาะป้ายสถานะระบบเดิม (ป้ายอื่นที่แอดมินติดเอง เช่น "ชำระเงินแล้ว" ไม่ถูกแตะ)</p>
+                <div className="text-sm font-medium text-[var(--ink-2)]">ส่งสถานะไป Meta (ทดสอบ)</div>
+                <p className="text-[11px] text-[var(--ink-3)]">ติดป้าย "{CHAT_STAGES.find((s) => s.key === row.stage)?.label || row.stage}" ให้ลูกค้าคนนี้บนกล่องข้อความของเพจ · แทนที่เฉพาะป้ายสถานะระบบเดิม (ป้ายอื่นที่แอดมินติดเอง เช่น "ชำระเงินแล้ว" ไม่ถูกแตะ)</p>
               </div>
               <button onClick={pushToMeta} disabled={pushing || !row.psid} className="bg-brand-600 text-white rounded-lg px-3 py-2 text-sm font-medium hover:bg-brand-700 disabled:opacity-60 flex items-center gap-1.5 shrink-0">
                 {pushing ? <Loader2 className="animate-spin" size={14} /> : <RefreshCw size={14} />} ทดสอบส่งป้าย
@@ -1991,28 +1991,28 @@ function CustomerDetailModal({ row, onClose, onSaved }) {
 
           {/* แก้ไขข้อมูล */}
           <div>
-            <div className="text-sm font-medium text-slate-700 mb-2">แก้ไขข้อมูล</div>
+            <div className="text-sm font-medium text-[var(--ink-2)] mb-2">แก้ไขข้อมูล</div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="text-xs text-slate-500">สถานะ</label>
+                <label className="text-xs text-[var(--ink-3)]">สถานะ</label>
                 <select value={form.stage} onChange={(e) => set("stage", e.target.value)} className={fieldCls}>
                   {CHAT_STAGES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
                 </select>
               </div>
               <div>
-                <label className="text-xs text-slate-500">ไอดีเทรด</label>
+                <label className="text-xs text-[var(--ink-3)]">ไอดีเทรด</label>
                 <input value={form.trade_id} onChange={(e) => set("trade_id", e.target.value)} className={fieldCls} />
               </div>
               <div>
-                <label className="text-xs text-slate-500">เบอร์โทร</label>
+                <label className="text-xs text-[var(--ink-3)]">เบอร์โทร</label>
                 <input value={form.phone} onChange={(e) => set("phone", e.target.value)} className={fieldCls} />
               </div>
               <div>
-                <label className="text-xs text-slate-500">อีเมล</label>
+                <label className="text-xs text-[var(--ink-3)]">อีเมล</label>
                 <input value={form.email} onChange={(e) => set("email", e.target.value)} className={fieldCls} />
               </div>
               <div>
-                <label className="text-xs text-slate-500">Username (TradingView)</label>
+                <label className="text-xs text-[var(--ink-3)]">Username (TradingView)</label>
                 <input value={form.username} onChange={(e) => set("username", e.target.value)} className={fieldCls} />
               </div>
             </div>
@@ -2029,16 +2029,16 @@ function CustomerDetailModal({ row, onClose, onSaved }) {
 
           {/* บทสนทนาที่ดึงมา */}
           <div>
-            <div className="text-sm font-medium text-slate-700 mb-1">บทสนทนาที่ดึงมา ({transcript.length} ข้อความ)</div>
+            <div className="text-sm font-medium text-[var(--ink-2)] mb-1">บทสนทนาที่ดึงมา ({transcript.length} ข้อความ)</div>
             {transcript.length === 0 ? (
-              <div className="text-xs text-slate-400 bg-slate-50 rounded-lg px-3 py-4 text-center">
+              <div className="text-xs text-[var(--ink-3)] bg-[var(--ground)] rounded-lg px-3 py-4 text-center">
                 ยังไม่มีบทสนทนาเก็บไว้ — ต้อง deploy ฟังก์ชันซิงก์เวอร์ชันใหม่ + รัน migration แล้วซิงก์ใหม่ ระบบจึงจะเก็บบทสนทนาให้
               </div>
             ) : (
               <div className="space-y-2 max-h-[40vh] overflow-y-auto pr-1">
                 {transcript.map((m, i) => (
                   <div key={i} className={`flex ${m.w === "u" ? "justify-start" : "justify-end"}`}>
-                    <div className={`max-w-[80%] rounded-2xl px-3 py-1.5 text-sm ${m.w === "u" ? "bg-slate-100 text-slate-800" : "bg-brand-500 text-white"}`}>
+                    <div className={`max-w-[80%] rounded-2xl px-3 py-1.5 text-sm ${m.w === "u" ? "bg-[var(--ground)] text-[var(--ink)]" : "bg-brand-500 text-white"}`}>
                       <div className="text-[10px] opacity-70 mb-0.5">{m.w === "u" ? "ลูกค้า" : "เพจ"}{m.at ? ` · ${fmt(m.at)}` : ""}</div>
                       <div className="whitespace-pre-wrap break-words">{m.t}</div>
                     </div>
