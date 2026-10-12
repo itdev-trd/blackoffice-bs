@@ -38,6 +38,7 @@ import { SETTINGS_SECTIONS } from "@/lib/constants/settings";
 import AdTargetingCard from "@/components/features/settings/AdTargetingCard";
 import ImportOldDbPanel from "@/components/features/settings/ImportOldDbPanel";
 import ChatMenuPanel from "@/components/features/settings/ChatMenuPanel";
+import MetaSyncHealthPanel from "@/components/features/settings/MetaSyncHealthPanel";
 import { EmptyState, SectionTitle } from "@/components/ui";
 import {
   AiAssistPanel,
@@ -1464,6 +1465,7 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
 
       {section === "leadfields" && <PageLeadConfigPanel />}
       {section === "synccfg" && <ChatSyncConfigPanel />}
+      {section === "synccfg" && <MetaSyncHealthPanel />}
       {section === "notifications" && <PushNotificationPanel />}
       {section === "jobs" && <ScheduledJobsPanel />}
       {section === "prefetch" && <InsightsPrefetchPanel />}
