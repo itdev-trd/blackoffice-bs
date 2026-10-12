@@ -147,6 +147,8 @@ Deno.serve(async (req) => {
     // เปลี่ยน token = ต้องล้างแคช page token ที่แลกมาจาก token เดิม (แคชอยู่ 24 ชม. และใช้แบบ stale ตอน Meta ล่มด้วย)
     // ไม่ล้าง = ระบบยังส่ง/อ่านด้วย page token ของแอปเดิมต่อไปอีกเป็นวัน ทั้งที่หน้าเว็บบอกว่าบันทึกแล้ว
     const clearPagesCache = (key: string) => admin.from("app_secrets").delete().eq("key", key);
+    // token ใหม่อาจได้ Advanced Access ของ IG แล้ว → ล้างสถานะ "ขอเป็นชุดไม่ได้" + cooldown ให้ sync-instagram-recent ลองทางปกติทันที
+    const resetInstagramSync = () => admin.from("settings").delete().eq("key", "instagram_recent_fallback_sync");
 
     if (action === "app_status") {
       const [appId, appSecret] = await Promise.all([getMetaAppId(), getMetaAppSecret()]);
@@ -256,6 +258,7 @@ Deno.serve(async (req) => {
       if (!info.pages?.length) throw new Error("token นี้ไม่เห็นเพจใดเลย (ต้องมีสิทธิ์ pages_show_list + pages_messaging และเป็นแอดมินเพจ)");
       await admin.from("app_secrets").upsert({ key: "meta_messaging_token", value: tok, updated_at: new Date().toISOString() });
       await clearPagesCache(MESSAGING_PAGES_CACHE_KEY);
+      await resetInstagramSync();
       return new Response(JSON.stringify({ ok: true, saved: true, ...info }), { headers: { ...corsHeaders, "content-type": "application/json" } });
     }
 
@@ -392,6 +395,7 @@ Deno.serve(async (req) => {
 
     await admin.from("app_secrets").upsert({ key: "meta_access_token", value: token, updated_at: new Date().toISOString() });
     await clearPagesCache("meta_pages_cache");
+    await resetInstagramSync();
 
     return new Response(JSON.stringify({ ok: true, saved: true, ...info }), { headers: { ...corsHeaders, "content-type": "application/json" } });
   } catch (err) {

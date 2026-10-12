@@ -145,6 +145,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   const savedCacheRef = useRef({});
   const [listTab, setListTab] = useState("everything");    // everything | all(=Messenger) | line | comments
   const [unreadOnly, setUnreadOnly] = useState(false);   // กรองดูเฉพาะแชทที่ยังไม่อ่าน
+  const [igLimited, setIgLimited] = useState(false);   // Meta ยังให้ IG แค่ Standard Access → เห็นแค่ห้องบัญชีที่มี role ในแอป
   const [igSyncError, setIgSyncError] = useState("");     // Meta ปฏิเสธการดึงแชท IG (เช่นสิทธิ์ยังเป็น Standard Access)
   const [tagFilter, setTagFilter] = useState(null);      // กรองดูเฉพาะแชทที่ติดแท็กนี้ (null = ไม่กรอง)
   const [countryFilter, setCountryFilter] = useState(null); // กรองตามประเทศลูกค้า (null = ทุกประเทศ)
@@ -969,6 +970,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
       // เดิมพังเงียบ: Meta ตอบ error ทุกรอบแต่หน้าเว็บขึ้นแค่ "ยังไม่มีแชทเข้ามา" จึงดูเหมือนไม่มีลูกค้าทักเข้า IG
       if (Array.isArray(data?.errors) && data.errors.length) setIgSyncError(String(data.errors[0]?.error || "Meta ปฏิเสธคำขอ"));
       else if (data?.ok) setIgSyncError("");
+      if (typeof data?.limited === "boolean") setIgLimited(data.limited);
       if (data?.upserted > 0) { loadRef.current(); openRef.current(); scheduleUnreadRefresh(0); }
       return data;
     });
@@ -2704,6 +2706,12 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
           )}
         </div>
         <div className="flex-1 overflow-y-auto overscroll-contain divide-y divide-night-border-subtle">
+          {listTab === "instagram" && igLimited && (
+            <div className="m-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30 space-y-1">
+              <div className="text-xs font-semibold text-amber-300">แชท Instagram ยังเข้ามาไม่ครบ</div>
+              <div className="text-2xs text-night-ink-2 leading-relaxed">Meta ยังจำกัดสิทธิ์ instagram_manage_messages ของแอป (Standard Access) จึงเห็นแค่แชทของบัญชีที่มีบทบาทในแอป แชทลูกค้าจริงจะเข้ามาหลังแอปผ่าน App Review — ตอบใน IG ไปก่อน</div>
+            </div>
+          )}
           {listError && list === null ? (
             <div className="p-6 text-center space-y-3">
               <div className="text-sm font-semibold text-rose-400">โหลดแชทไม่สำเร็จ</div>

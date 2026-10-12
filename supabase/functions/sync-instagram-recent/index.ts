@@ -15,6 +15,7 @@ const WEBHOOK_HEALTH_MS = 15 * 60 * 1000;
 const MAX_TRANSCRIPT_TEXT = 10_000;
 const ONE_BY_ONE_MAX = 5;                     // จำนวนห้องสูงสุดที่ไล่เก็บทีละใบ (คุมจำนวนคำขอ Meta ต่อรอบ)
 const HEAVY_RETRY_MS = 24 * 60 * 60 * 1000;   // เว้นวรรคก่อนกลับไปลองขอเป็นชุดอีกครั้ง
+const BACKFILL_MAX_PAGES = 20;                // backfill: ไล่ paging.next สูงสุดกี่หน้า (หน้าละ ~25 ห้อง) ต่อการเรียกหนึ่งครั้ง
 const transcriptText = (value: unknown) => String(value || "").slice(0, MAX_TRANSCRIPT_TEXT);
 const corsHeaders = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type" };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "content-type": "application/json" } });
@@ -36,6 +37,8 @@ Deno.serve(async (req) => {
     const auth = await authorizeRequest(req, { tab: ["inbox", "chat"], allowService: true });
     if (!auth.ok) return json({ ok: false, error: auth.error }, auth.status);
     const body = await req.json().catch(() => ({}));
+    // backfill=true: ดึงย้อนหลังทุกห้อง (ไล่ paging) — ใช้ครั้งเดียวหลังแอปได้ Advanced Access ของ instagram_manage_messages
+    const backfill = body?.backfill === true;
     const requested = [...new Set((Array.isArray(body?.page_ids) ? body.page_ids : []).map(String).filter(Boolean))];
     // สิทธิ์ตอบแชทไม่ผูกกับเพจ — ใครเข้าหน้าตอบแชทได้ ก็ตอบได้ทุกเพจและทุก LINE OA
 
@@ -56,8 +59,10 @@ Deno.serve(async (req) => {
     const lastByPage = state.last_by_page && typeof state.last_by_page === "object" ? state.last_by_page : {};
     // เพจไหนพิสูจน์แล้วว่าขอเป็นชุดไม่ได้ (เวลาที่เจอครั้งล่าสุด) — ใช้ข้ามการลองที่รู้ผลอยู่แล้ว
     const heavyBlocked: Record<string, string> = state.heavy_blocked && typeof state.heavy_blocked === "object" ? state.heavy_blocked : {};
-    pages = pages.filter((p: any) => Date.now() - new Date(lastByPage[String(p.id)] || 0).getTime() >= COOLDOWN_MS);
-    if (!pages.length) return json({ ok: true, upserted: 0, skipped: "cooldown" });
+    // limited = Meta ยังจำกัดสิทธิ์ IG (Standard Access) เห็นได้แค่ห้องของบัญชีที่มี role ในแอป — ให้หน้าเว็บบอกตรง ๆ
+    const limitedNow = () => pages.some((p: any) => timeMs(heavyBlocked[String(p.id)]) > 0);
+    if (!backfill) pages = pages.filter((p: any) => Date.now() - new Date(lastByPage[String(p.id)] || 0).getTime() >= COOLDOWN_MS);
+    if (!pages.length) return json({ ok: true, upserted: 0, skipped: "cooldown", limited: Object.keys(heavyBlocked).length > 0 });
     const checkedAt = new Date().toISOString();
     for (const page of pages) lastByPage[String(page.id)] = checkedAt;
     await admin.from("settings").upsert({ key: STATE_KEY, value: { last_by_page: lastByPage, heavy_blocked: heavyBlocked }, updated_at: checkedAt });
@@ -81,7 +86,7 @@ Deno.serve(async (req) => {
       // 3 ครั้ง (ครั้งละ ~20 วิ) ทุกรอบ ซึ่งกินโควตาและอาจไปสะกิด rate guard ของงานอื่น
       // ยังลองทางปกติซ้ำวันละครั้ง เผื่อได้ Advanced Access แล้วจะกลับไปใช้คำขอเดียวเองอัตโนมัติ
       const heavyBlockedAt = timeMs(heavyBlocked[pageId]);
-      const skipHeavy = heavyBlockedAt > 0 && Date.now() - heavyBlockedAt < HEAVY_RETRY_MS;
+      const skipHeavy = !backfill && heavyBlockedAt > 0 && Date.now() - heavyBlockedAt < HEAVY_RETRY_MS;
       for (const attempt of (skipHeavy ? [] : attempts)) {
         const response = await fetch(`${GRAPH_BASE}/${pageId}/conversations?platform=instagram&fields=${encodeURIComponent(attempt.fields)}&limit=${attempt.limit}&access_token=${page.access_token}`);
         await recordMetaUsage(admin, response, "instagram_recent_fallback");
@@ -90,6 +95,18 @@ Deno.serve(async (req) => {
         // ยังเป็น Standard Access (Meta เสิร์ฟได้แค่ห้องของผู้ใช้ที่มี role ในแอป) → ลองชุดที่เบากว่า
         const code = Number(result?.error?.code);
         if (!result?.error || (code !== 1 && code !== -2)) break;
+      }
+      // backfill: ขอเป็นชุดได้ (= มี Advanced Access แล้ว) → ไล่หน้าถัดไปจนครบ/ถึงเพดาน
+      if (backfill && !result?.error && Array.isArray(result?.data)) {
+        let next = result?.paging?.next || "";
+        for (let i = 0; next && i < BACKFILL_MAX_PAGES; i++) {
+          const res = await fetch(next);
+          await recordMetaUsage(admin, res, "instagram_backfill");
+          const more = await res.json().catch(() => ({}));
+          if (more?.error || !Array.isArray(more?.data) || !more.data.length) break;
+          result.data.push(...more.data);
+          next = more?.paging?.next || "";
+        }
       }
       // ---- ทางถอย: เดินทีละห้อง ----
       // แอปที่ยังไม่มี Advanced Access ของ instagram_manage_messages ขอ conversations ทีละหลายห้องไม่ได้เลย
@@ -199,7 +216,7 @@ Deno.serve(async (req) => {
       }
     }
     await admin.from("settings").upsert({ key: STATE_KEY, value: { last_by_page: lastByPage, heavy_blocked: heavyBlocked }, updated_at: new Date().toISOString() });
-    return json({ ok: errors.length === 0, upserted, checked_pages: pages.length, errors });
+    return json({ ok: errors.length === 0, upserted, checked_pages: pages.length, errors, limited: limitedNow() });
   } catch (error) {
     return json({ ok: false, error: String(error instanceof Error ? error.message : error) }, 200);
   }
