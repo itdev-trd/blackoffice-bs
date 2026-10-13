@@ -10,6 +10,7 @@ import { readJsonBody } from "../_shared/security.ts";
 import { loadPointConfig, insertPointEvent, replyIdemKey } from "../_shared/points.ts";
 import {
   periodOf, periodRange, scoreReply, capFor, overCap, isExcludedCustomer, thaiDateOf, validateRules, ledgerFingerprint,
+  normalizeRules, normalizeOfficeHours,
 } from "../_shared/points-rules.ts";
 
 const corsHeaders = {
@@ -18,6 +19,7 @@ const corsHeaders = {
 };
 const KINDS = ["reply_offhours", "reply_office", "tv_grant", "tv_renew", "adjustment", "reversal"] as const;
 const PERIOD_RE = /^\d{4}-\d{2}$/;
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 async function sha256(text: string) {
@@ -72,7 +74,7 @@ Deno.serve(async (req) => {
     // ---------- ภาพรวมเดือน: อันดับ + แยกตามประเภท ----------
     if (action === "overview") {
       const [rows, pr, names, cfg, { data: periodsRows }, { count: openDisputes }] = await Promise.all([
-        eventsOf(periodArg, "id, staff_email, kind, points, refund_of:evidence->>refund_of"),
+        eventsOf(periodArg, "id, staff_email, kind, points, refund_of:evidence->>refund_of, regrade_of:evidence->>regrade_of"),
         periodRow(periodArg),
         nicknames(),
         loadPointConfig(admin),
@@ -81,18 +83,23 @@ Deno.serve(async (req) => {
       ]);
       // แต้มที่ "คืน" ให้รายการที่เคยโดนตัด (evidence.refund_of) นับกลับเข้าหมวดของรายการเดิม
       // ไม่งั้นช่อง "ปรับ/หัก" จะดูเหมือนมีการปรับแต้มมือก้อนใหญ่ ทั้งที่เป็นแต้มตอบแชทปกติ
+      // คืนแต้ม (refund_of) และคิดแต้มใหม่เพราะเปลี่ยนวันหยุด (regrade_of) เป็นส่วนหนึ่งของรายการเดิม
       const kindOf = new Map(rows.map((r: any) => [String(r.id), r.kind]));
-      const refunded = new Set(rows.filter((r: any) => r.refund_of).map((r: any) => String(r.refund_of)));
+      const linkOf = (r: any) => r.refund_of || r.regrade_of || null;
+      const topped = new Map<string, number>();
+      for (const r of rows) if (linkOf(r)) topped.set(String(linkOf(r)), (topped.get(String(linkOf(r))) || 0) + Number(r.points));
       const agg: Record<string, any> = {};
       let total = 0;
       for (const r of rows) {
         const who = String(r.staff_email);
         const a = (agg[who] = agg[who] || { email: who, name: names[who] || null, points: 0, count: 0, by_kind: Object.fromEntries(KINDS.map((k) => [k, 0])), zero: 0 });
         const pts = Number(r.points) || 0;
-        const bucket = r.refund_of && kindOf.get(String(r.refund_of)) ? kindOf.get(String(r.refund_of)) : r.kind;
+        const link = linkOf(r);
+        const bucket = link && kindOf.get(String(link)) ? kindOf.get(String(link)) : r.kind;
         a.points += pts; a.by_kind[bucket] = (a.by_kind[bucket] || 0) + pts; total += pts;
-        if (r.refund_of) continue;                                   // คืนแต้ม = ส่วนหนึ่งของรายการเดิม ไม่นับเป็นรายการใหม่
-        if (pts > 0 || refunded.has(String(r.id))) a.count++; else if (pts === 0) a.zero++;
+        if (link) continue;                                          // ไม่นับเป็นรายการใหม่
+        const effective = pts + (topped.get(String(r.id)) || 0);
+        if (effective > 0) a.count++; else if (effective === 0) a.zero++;
       }
       const board = Object.values(agg).map((a: any) => ({
         ...a, points: round2(a.points), by_kind: Object.fromEntries(Object.entries(a.by_kind).map(([k, v]) => [k, round2(Number(v))])),
@@ -133,19 +140,33 @@ Deno.serve(async (req) => {
         const { data } = await admin.from("point_events").select("id, reverses_event_id").in("reverses_event_id", ids.slice(i, i + 300));
         for (const r of data || []) reversedBy[String(r.reverses_event_id)] = r.id;
       }
-      // รายการที่เคยถูกตัดด้วยเพดานแล้วได้คืนแต้มภายหลัง (adjustment ที่ evidence.refund_of ชี้มา)
+      // แต้มที่ปรับเข้ารายการเดิมภายหลัง: คืนแต้มที่เคยโดนตัดเพดาน (refund_of) · คิดใหม่เพราะเปลี่ยนวันหยุด (regrade_of)
+      // อาจอยู่คนละเดือนกับรายการเดิม (ถ้าเดือนเดิมปิดยอดไปก่อน) จึงค้นด้วย id ไม่ใช่เดือน
       const refundedBy: Record<string, number> = {};
-      const cappedIds = rows.filter((r: any) => r.evidence?.capped).map((r: any) => String(r.id));
-      for (let i = 0; i < cappedIds.length; i += 300) {
-        const { data } = await admin.from("point_events").select("id, evidence").eq("kind", "adjustment").in("evidence->>refund_of", cappedIds.slice(i, i + 300));
-        for (const r of data || []) refundedBy[String(r.evidence?.refund_of)] = r.id;
+      const linked: Record<string, { id: number; points: number; reason: string; at: string }[]> = {};
+      const replyIds = rows.filter((r: any) => r.kind === "reply_office" || r.kind === "reply_offhours").map((r: any) => String(r.id));
+      for (const field of ["refund_of", "regrade_of"]) {
+        for (let i = 0; i < replyIds.length; i += 300) {
+          const { data } = await admin.from("point_events").select("id, points, evidence, created_at").eq("kind", "adjustment").in(`evidence->>${field}`, replyIds.slice(i, i + 300));
+          for (const r of data || []) {
+            const target = String(r.evidence?.[field]);
+            if (field === "refund_of") refundedBy[target] = r.id;
+            (linked[target] = linked[target] || []).push({ id: r.id, points: Number(r.points), reason: String(r.evidence?.reason || ""), at: r.created_at });
+          }
+        }
       }
       const { data: disputes } = await admin.from("point_disputes").select("id, event_id, status, staff_email").eq("period", periodArg).not("event_id", "is", null);
       const disputeOf: Record<string, any> = {};
       for (const d of disputes || []) if (!disputeOf[d.event_id] || d.status === "open") disputeOf[d.event_id] = d;
       return json({
         ok: true, period: periodArg, staff,
-        events: rows.map((r: any) => ({ ...r, points: Number(r.points), reversed_by: reversedBy[String(r.id)] || null, refunded_by: refundedBy[String(r.id)] || null, dispute: disputeOf[String(r.id)] || null })),
+        events: rows.map((r: any) => {
+          const adj = linked[String(r.id)] || [];
+          return {
+            ...r, points: Number(r.points), reversed_by: reversedBy[String(r.id)] || null, refunded_by: refundedBy[String(r.id)] || null,
+            adjustments: adj, extra_points: round2(adj.reduce((s, a) => s + a.points, 0)), dispute: disputeOf[String(r.id)] || null,
+          };
+        }),
       });
     }
 
@@ -190,6 +211,20 @@ Deno.serve(async (req) => {
       return json({ ok: true, disputes: (data || []).map((d: any) => ({ ...d, requested_points: d.requested_points === null ? null : Number(d.requested_points), event: d.event_id ? evMap[String(d.event_id)] || null : null })) });
     }
 
+    // ---------- ปฏิทินวันหยุด (ทุกคนดูได้) ----------
+    if (action === "holidays_get") {
+      const { data } = await admin.from("settings").select("value").eq("key", "office_hours").maybeSingle();
+      const v: any = data?.value || {};
+      const oh = normalizeOfficeHours(v);
+      const names: Record<string, string> = v.holiday_names && typeof v.holiday_names === "object" ? v.holiday_names : {};
+      const { data: closed } = await admin.from("point_periods").select("period").eq("status", "closed");
+      return json({
+        ok: true, days: oh.days, open: oh.open, close: oh.close, break_start: oh.break_start, break_end: oh.break_end,
+        holidays: oh.holidays.slice().sort().map((d) => ({ date: d, name: names[d] || "" })),
+        closed_periods: (closed || []).map((r: any) => r.period), today: thaiDateOf(Date.now()),
+      });
+    }
+
     // ---------- ประวัติกติกา (ทุกคนอ่านได้ — โปร่งใส) ----------
     if (action === "rules_history") {
       const { data } = await admin.from("point_rules").select("version, rules, note, created_at, created_by").order("version", { ascending: false }).limit(50);
@@ -197,6 +232,105 @@ Deno.serve(async (req) => {
     }
 
     // ================= ต่อจากนี้เฉพาะ owner =================
+
+    // เพิ่ม/แก้ชื่อ/ยกเลิกวันหยุด — ถ้าเป็นวันที่ผ่านมาแล้ว คิดแต้มของวันนั้นใหม่ให้อัตโนมัติ
+    // (แต้มบันทึกตามวันหยุด ณ ตอนตอบ ถ้าตั้งวันหยุดย้อนหลังโดยไม่คิดใหม่ คนที่ทำงานวันนั้นจะเสียแต้ม)
+    if (action === "holidays_update") {
+      const deny = ownerOnly(); if (deny) return deny;
+      const changes = (Array.isArray(body?.changes) ? body.changes : []).slice(0, 400)
+        .map((c: any) => ({ date: String(c?.date || ""), name: String(c?.name || "").trim().slice(0, 80), on: c?.on !== false }))
+        .filter((c: any) => DATE_RE.test(c.date));
+      if (!changes.length) return json({ ok: false, error: "ไม่มีวันที่จะบันทึก" }, 400);
+      const { data } = await admin.from("settings").select("value").eq("key", "office_hours").maybeSingle();
+      const v: any = { ...(data?.value || {}) };
+      const set = new Set<string>((Array.isArray(v.holidays) ? v.holidays : []).map((d: unknown) => String(d).slice(0, 10)));
+      const names: Record<string, string> = { ...(v.holiday_names && typeof v.holiday_names === "object" ? v.holiday_names : {}) };
+      const flipped: { date: string; on: boolean }[] = [];
+      for (const c of changes) {
+        const was = set.has(c.date);
+        if (c.on) { set.add(c.date); if (c.name) names[c.date] = c.name; }
+        else { set.delete(c.date); delete names[c.date]; }
+        if (was !== c.on) flipped.push({ date: c.date, on: c.on });
+      }
+      v.holidays = [...set].sort();
+      v.holiday_names = Object.fromEntries(Object.entries(names).filter(([d]) => set.has(d)));
+      const { error: upErr } = await admin.from("settings").upsert({ key: "office_hours", value: v, updated_at: nowIso });
+      if (upErr) throw upErr;
+
+      // คิดแต้มใหม่เฉพาะวันที่ผ่านมาแล้ว และเดือนยังไม่ปิดยอด
+      const today = thaiDateOf(Date.now());
+      const past = flipped.filter((f) => f.date <= today);
+      const regrade = { events: 0, adjusted: 0, points: 0, skipped_closed: 0 };
+      if (past.length) {
+        const oh = normalizeOfficeHours(v);
+        const { data: ruleRows } = await admin.from("point_rules").select("version, rules");
+        const rulesByVersion = new Map((ruleRows || []).map((r: any) => [Number(r.version), normalizeRules(r.rules)]));
+        const latest = Math.max(0, ...[...rulesByVersion.keys()]);
+        const { data: closedRows } = await admin.from("point_periods").select("period").eq("status", "closed");
+        const closedSet = new Set((closedRows || []).map((r: any) => r.period));
+        for (const f of past) {
+          const dayStart = Date.parse(`${f.date}T00:00:00+07:00`);
+          // คำตอบที่ลูกค้าทักหรือเราตอบในวันนั้น (ตอบข้ามวันได้ จึงดึงถึงวันถัดไป)
+          const evs = await fetchAll((a, b) => admin.from("point_events")
+            .select("id, staff_email, kind, points, period, rule_version, conversation_id, page_id, evidence")
+            .in("kind", ["reply_office", "reply_offhours"])
+            .gte("occurred_at", new Date(dayStart).toISOString()).lt("occurred_at", new Date(dayStart + 2 * 86400000).toISOString())
+            .order("id").range(a, b));
+          const hits = evs.filter((e: any) => {
+            const ev = e.evidence || {};
+            return (ev.msg_at && thaiDateOf(Date.parse(ev.msg_at)) === f.date) || (ev.reply_at && thaiDateOf(Date.parse(ev.reply_at)) === f.date);
+          });
+          if (!hits.length) continue;
+          const ids = hits.map((e: any) => String(e.id));
+          const extra = new Map<string, number>(), regradeCount = new Map<string, number>(), reversed = new Set<string>();
+          for (let i = 0; i < ids.length; i += 300) {
+            const chunk = ids.slice(i, i + 300);
+            const [{ data: refunds }, { data: regrades }, { data: revs }] = await Promise.all([
+              admin.from("point_events").select("points, evidence").eq("kind", "adjustment").in("evidence->>refund_of", chunk),
+              admin.from("point_events").select("points, evidence").eq("kind", "adjustment").in("evidence->>regrade_of", chunk),
+              admin.from("point_events").select("reverses_event_id").in("reverses_event_id", chunk),
+            ]);
+            for (const r of refunds || []) extra.set(String(r.evidence.refund_of), (extra.get(String(r.evidence.refund_of)) || 0) + Number(r.points));
+            for (const r of regrades || []) {
+              const t = String(r.evidence.regrade_of);
+              extra.set(t, (extra.get(t) || 0) + Number(r.points));
+              regradeCount.set(t, (regradeCount.get(t) || 0) + 1);
+            }
+            for (const r of revs || []) reversed.add(String(r.reverses_event_id));
+          }
+          const toInsert: any[] = [];
+          for (const e of hits) {
+            regrade.events++;
+            if (reversed.has(String(e.id))) continue;                   // owner หักแต้มรายการนี้ไปแล้ว
+            if (closedSet.has(e.period)) { regrade.skipped_closed++; continue; }
+            const ev = e.evidence || {};
+            if (!ev.msg_at || !ev.reply_at) continue;
+            const rules = rulesByVersion.get(Number(e.rule_version)) || rulesByVersion.get(latest) || normalizeRules(null);
+            const sc = scoreReply(Date.parse(ev.msg_at), Date.parse(ev.reply_at), { ...oh, slow_min: Number(ev.slow_min) || oh.slow_min }, rules);
+            const effective = round2(Number(e.points) + (extra.get(String(e.id)) || 0));
+            const diff = round2(sc.points - effective);
+            if (diff === 0) continue;
+            toInsert.push({
+              staff_email: e.staff_email, kind: "adjustment", points: diff, occurred_at: nowIso,
+              idem_key: `regrade:${e.id}:${regradeCount.get(String(e.id)) || 0}`, rule_version: e.rule_version,
+              conversation_id: e.conversation_id, page_id: e.page_id,
+              evidence: {
+                reason: `${f.date} ${f.on ? "ตั้งเป็นวันหยุด" : "ยกเลิกวันหยุด"} — คิดแต้มรายการ #${e.id} ใหม่`, regrade_of: String(e.id),
+                adjusts_period: e.period, from: effective, to: sc.points, slot_msg: sc.slot_msg, slot_reply: sc.slot_reply, holiday_date: f.date,
+              },
+              note: `คิดแต้มใหม่ (${f.on ? "เพิ่ม" : "ยกเลิก"}วันหยุด ${f.date})`, created_by: me,
+            });
+          }
+          for (let i = 0; i < toInsert.length; i += 200) {
+            const { data: ins, error } = await admin.from("point_events").upsert(toInsert.slice(i, i + 200), { onConflict: "idem_key", ignoreDuplicates: true }).select("points");
+            if (error) throw error;
+            for (const r of ins || []) { regrade.adjusted++; regrade.points = round2(regrade.points + Number(r.points)); }
+          }
+        }
+      }
+      logOwner("points_holidays_update", { changes, flipped, regrade });
+      return json({ ok: true, holidays: v.holidays.map((d: string) => ({ date: d, name: v.holiday_names[d] || "" })), flipped, regrade });
+    }
 
     if (action === "resolve_dispute") {
       const deny = ownerOnly(); if (deny) return deny;
@@ -281,14 +415,15 @@ Deno.serve(async (req) => {
       const { count: openCount } = await admin.from("point_disputes").select("id", { count: "exact", head: true }).eq("period", p).eq("status", "open");
       if (openCount && !force) return json({ ok: false, error: `ยังมีคำร้องค้าง ${openCount} รายการ — พิจารณาให้ครบก่อน` }, 400);
       if (force && note.length < 5) return json({ ok: false, error: "ปิดแบบข้ามเงื่อนไขต้องใส่หมายเหตุ" }, 400);
-      const rows = await eventsOf(p, "id, staff_email, kind, points, refund_of:evidence->>refund_of");
+      const rows = await eventsOf(p, "id, staff_email, kind, points, refund_of:evidence->>refund_of, regrade_of:evidence->>regrade_of");
       const names = await nicknames();
       const kindOf = new Map(rows.map((r: any) => [String(r.id), r.kind]));
       const snap: Record<string, any> = {};
       for (const r of rows) {
         const who = String(r.staff_email);
         const s = (snap[who] = snap[who] || { email: who, name: names[who] || null, points: 0, by_kind: {} as Record<string, number>, events: 0 });
-        const bucket = r.refund_of && kindOf.get(String(r.refund_of)) ? kindOf.get(String(r.refund_of)) : r.kind;
+        const link = r.refund_of || r.regrade_of;
+        const bucket = link && kindOf.get(String(link)) ? kindOf.get(String(link)) : r.kind;
         s.points = round2(s.points + Number(r.points)); s.by_kind[bucket] = round2((s.by_kind[bucket] || 0) + Number(r.points)); s.events++;
       }
       const board = Object.values(snap).sort((a: any, b: any) => b.points - a.points);

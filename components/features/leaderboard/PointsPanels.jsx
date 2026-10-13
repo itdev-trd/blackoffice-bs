@@ -72,8 +72,9 @@ function EvidenceText({ ev }) {
 export function EventRow({ ev, isOwner, onDispute, onReverse, onOpenChat }) {
   const e = ev.evidence || {};
   const reversed = !!ev.reversed_by;
-  // รายการที่เคยโดนตัดเพดานแล้วได้คืน — แสดงแต้มที่ได้จริงรวมกับแต้มที่คืนแล้ว
-  const effective = Number(ev.points) + (ev.refunded_by ? Number(e.full_points || 0) : 0);
+  // แต้มที่ได้จริง = แต้มตอนบันทึก + ที่ปรับเข้ารายการนี้ภายหลัง (คืนแต้มเพดาน / คิดใหม่เพราะเปลี่ยนวันหยุด)
+  const effective = Number(ev.points) + Number(ev.extra_points || 0);
+  const regrades = (ev.adjustments || []).filter((a) => !ev.refunded_by || a.id !== ev.refunded_by);
   return (
     <div className="flex gap-3 py-3" style={{ borderTop: "1px solid var(--line)" }}>
       <div className="min-w-0 flex-1 text-[12.5px] leading-relaxed" style={{ color: "var(--ink-2)" }}>
@@ -88,6 +89,11 @@ export function EventRow({ ev, isOwner, onDispute, onReverse, onOpenChat }) {
           <span className="text-2xs" style={{ color: "var(--ink-3)" }}>#{ev.id}{ev.rule_version ? ` · กติกา v${ev.rule_version}` : ""}</span>
         </div>
         <EvidenceText ev={ev} />
+        {regrades.map((a) => (
+          <div key={a.id} style={{ color: a.points > 0 ? "var(--ok)" : "var(--bad)" }}>
+            {a.reason} ({a.points > 0 ? "+" : ""}{fmtPts(a.points)} · รายการ #{a.id})
+          </div>
+        ))}
         <div className="mt-1 flex flex-wrap gap-1">
           {ev.conversation_id && onOpenChat && <Button size="sm" variant="ghost" icon={MessageSquare} onClick={() => onOpenChat(ev.conversation_id)}>เปิดแชท</Button>}
           {ev.kind !== "reversal" && onDispute && <Button size="sm" variant="ghost" icon={Flag} onClick={() => onDispute(ev)}>โต้แย้ง</Button>}
@@ -117,8 +123,9 @@ export function StaffEventsDialog({ open, period, staff, isOwner, onClose, onOpe
   useEffect(() => { if (open && staff) { setKind(""); load(); } /* eslint-disable-next-line */ }, [open, staff?.email, period]);
 
   // รายการ "คืนแต้ม" ไม่แยกแถว — รวมเข้าไปในรายการเดิมที่มันคืนให้ (ดู EventRow)
-  const shown = useMemo(() => (events || []).filter((e) => !e.evidence?.refund_of && (!kind || e.kind === kind)), [events, kind]);
-  const sum = shown.reduce((s, e) => s + Number(e.points || 0) + (e.refunded_by ? Number(e.evidence?.full_points || 0) : 0), 0);
+  const shown = useMemo(() => (events || []).filter((e) => !e.evidence?.refund_of && !e.evidence?.regrade_of && (!kind || e.kind === kind)), [events, kind]);
+  // รายการปรับที่ผูกกับรายการเดิมแต่อยู่ในเดือนนี้ ถูกรวมไว้ใน extra_points ของรายการเดิมแล้ว
+  const sum = shown.reduce((s, e) => s + Number(e.points || 0) + Number(e.extra_points || 0), 0);
 
   return (
     <>

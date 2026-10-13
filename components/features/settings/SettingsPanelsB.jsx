@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef } from "react";
-import { Loader2, RefreshCw, ChevronLeft, ChevronRight, ChevronDown, MessageSquare, CheckCircle2, Clock, AlertTriangle, ArrowUpCircle, Plus, Search } from "lucide-react";
+import { Loader2, RefreshCw, ChevronDown, MessageSquare, CheckCircle2, Clock, AlertTriangle, ArrowUpCircle, Plus, Search } from "lucide-react";
 import { StatCard as DsStatCard } from "@/components/ui";
 import { supabase } from "@/lib/supabase/client";
 import { bangkokDate } from "@/lib/utils/date";
@@ -1011,58 +1011,6 @@ export function ScheduledJobsPanel() {
   );
 }
 
-// ปฏิทินเลือกวันหยุด — เห็นวันที่ตั้งไว้ (ไฮไลต์ม่วง) คลิกวันเพื่อเพิ่ม/ลบ ได้ทันที
-export function HolidayCalendar({ holidays = [], onToggle }) {
-  const set = new Set(holidays);
-  const today = new Date();
-  const [ym, setYm] = useState({ y: today.getFullYear(), m: today.getMonth() });
-  const TH_MONTHS = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
-  const WD = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"];
-  const pad = (n) => String(n).padStart(2, "0");
-  const startWd = new Date(ym.y, ym.m, 1).getDay();
-  const daysInMonth = new Date(ym.y, ym.m + 1, 0).getDate();
-  const dstr = (d) => `${ym.y}-${pad(ym.m + 1)}-${pad(d)}`;
-  const todayStr = `${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`;
-  const cells = [];
-  for (let i = 0; i < startWd; i++) cells.push(null);
-  for (let d = 1; d <= daysInMonth; d++) cells.push(d);
-  const prev = () => setYm(({ y, m }) => (m === 0 ? { y: y - 1, m: 11 } : { y, m: m - 1 }));
-  const next = () => setYm(({ y, m }) => (m === 11 ? { y: y + 1, m: 0 } : { y, m: m + 1 }));
-  const monthCount = holidays.filter((h) => String(h).startsWith(`${ym.y}-${pad(ym.m + 1)}`)).length;
-  return (
-    <div className="rounded-xl border border-slate-200 p-3 w-full max-w-[300px] bg-white">
-      <div className="flex items-center justify-between mb-2">
-        <button type="button" onClick={prev} className="p-1 rounded-lg hover:bg-slate-100 text-slate-500"><ChevronLeft size={16} /></button>
-        <div className="text-sm font-semibold text-slate-700">{TH_MONTHS[ym.m]} {ym.y + 543}</div>
-        <button type="button" onClick={next} className="p-1 rounded-lg hover:bg-slate-100 text-slate-500"><ChevronRight size={16} /></button>
-      </div>
-      <div className="grid grid-cols-7 gap-1 text-center">
-        {WD.map((w, i) => <div key={`w${i}`} className="text-[10px] text-slate-400 font-medium py-0.5">{w}</div>)}
-        {cells.map((d, i) => d === null ? <div key={`e${i}`} /> : (() => {
-          const ds = dstr(d);
-          const on = set.has(ds);
-          const isToday = ds === todayStr;
-          return (
-            <button
-              type="button"
-              key={ds}
-              onClick={() => onToggle(ds)}
-              title={on ? "คลิกเพื่อลบวันหยุดนี้" : "คลิกเพื่อตั้งเป็นวันหยุด"}
-              className={`aspect-square rounded-lg text-xs flex items-center justify-center transition ${on ? "text-white font-semibold shadow-sm" : isToday ? "text-brand-600 font-semibold ring-1 ring-slate-300" : "text-slate-600 hover:bg-slate-100"}`}
-              style={on ? { backgroundImage: "linear-gradient(135deg,#9D6BFF,#7C4DFF)" } : undefined}
-            >
-              {d}
-            </button>
-          );
-        })())}
-      </div>
-      <div className="text-[10px] text-slate-400 mt-2 text-center">
-        {monthCount > 0 ? `เดือนนี้ตั้งไว้ ${monthCount} วัน · ` : ""}คลิกวันที่เพื่อเพิ่ม/ลบ (บันทึกทันที)
-      </div>
-    </div>
-  );
-}
-
 // สถิติการตอบแชท (admin) — ความเร็วเฉลี่ย/ตอบช้าเกินเกณฑ์ ต่อ user × เพจ + ช่วงเวลาที่ช้าบ่อย
 export function ReplyStatsPanel({ onOpenChat }) {
   const fmtD = bangkokDate;
@@ -1080,8 +1028,6 @@ export function ReplyStatsPanel({ onOpenChat }) {
   const [pageOpts, setPageOpts] = useState([]);       // รายชื่อเพจทั้งหมด
   const [selPages, setSelPages] = useState([]);       // เพจที่ติ๊กไว้ ([] = ทุกเพจ)
   const [pageMenu, setPageMenu] = useState(false);
-  const [newHoliday, setNewHoliday] = useState("");   // วันหยุดพิเศษที่กำลังจะเพิ่ม
-  const [holidayMsg, setHolidayMsg] = useState("");   // สถานะบันทึกวันหยุด (ทันที)
   const [excludeInput, setExcludeInput] = useState("");
   const [excludeMsg, setExcludeMsg] = useState("");
   const [customerNameOptions, setCustomerNameOptions] = useState([]);
@@ -1297,25 +1243,12 @@ export function ReplyStatsPanel({ onOpenChat }) {
   }, []);
   async function saveCfg() {
     setSaving(true);
-    await supabase.from("settings").upsert({ key: "office_hours", value: cfg, updated_at: new Date().toISOString() });
+    // ผสานกับค่าล่าสุดในฐานข้อมูล — วันหยุด/รายชื่อบัญชีเทสแก้จากที่อื่น (ปฏิทินวันหยุด) ห้ามทับด้วยค่าเก่าที่โหลดไว้
+    const { data: cur } = await supabase.from("settings").select("value").eq("key", "office_hours").maybeSingle();
+    const { holidays: _h, holiday_names: _n, exclude: _x, ...hours } = cfg;
+    await supabase.from("settings").upsert({ key: "office_hours", value: { ...(cur?.value || {}), ...hours }, updated_at: new Date().toISOString() });
     setSaving(false);
     load();
-  }
-  // เพิ่ม/ลบวันหยุด แล้วเซฟลง DB ทันที (ถาวร) — แยกจากปุ่ม "บันทึก" ใหญ่ และไม่ดึงสถิติใหม่
-  // ผสานกับค่าในฐานข้อมูลปัจจุบัน เพื่อไม่ทับฟิลด์เวลาทำการอื่นที่อาจแก้ค้างไว้
-  async function persistHolidays(nextHolidays) {
-    setCfg((c) => ({ ...c, holidays: nextHolidays }));
-    setHolidayMsg("กำลังบันทึก...");
-    try {
-      const { data } = await supabase.from("settings").select("value").eq("key", "office_hours").maybeSingle();
-      const base = data?.value || {};
-      const { error } = await supabase.from("settings").upsert({ key: "office_hours", value: { ...base, holidays: nextHolidays }, updated_at: new Date().toISOString() });
-      if (error) { setHolidayMsg("บันทึกไม่สำเร็จ: " + error.message); return; }
-      setHolidayMsg(`✓ บันทึกลงฐานข้อมูลแล้ว (${nextHolidays.length} วัน)`);
-    } catch (e) {
-      setHolidayMsg("บันทึกไม่สำเร็จ: " + (e?.message || e));
-    }
-    setTimeout(() => setHolidayMsg(""), 4000);
   }
   async function persistExcludedNames(nextNames) {
     setCfg((current) => ({ ...current, exclude: nextNames }));
@@ -1464,59 +1397,12 @@ export function ReplyStatsPanel({ onOpenChat }) {
             <button onClick={saveCfg} disabled={saving} className="bg-brand-600 text-white rounded-lg px-4 py-1.5 font-medium disabled:opacity-60 shrink-0">{saving ? "..." : "บันทึก"}</button>
           </div>
 
-          {/* วันหยุดพิเศษ — วันที่ในนี้จะถูกตัดออกจากการคำนวณทั้งหมด (เหมือนวันหยุดประจำสัปดาห์) · ไม่ใช้ในโหมด 24 ชม. */}
-          <div className={`border-t border-slate-200 pt-2 mt-1 ${cfg.mode === "24_7" ? "opacity-40 pointer-events-none" : ""}`}>
-            <div className="flex items-center gap-2 flex-wrap text-xs mb-1.5">
-              <span className="font-medium text-slate-600">วันหยุดพิเศษ ({(cfg.holidays || []).length} วัน)</span>
-              <span className="text-slate-400">— เช่น สงกรานต์ ปีใหม่ วันหยุดชดเชย · ตัดออกจากการคำนวณเวลาตอบ</span>
-            </div>
-            <div className="flex items-center gap-2 flex-wrap text-xs">
-              <input
-                type="date"
-                value={newHoliday}
-                onChange={(e) => setNewHoliday(e.target.value)}
-                className="rounded-lg border border-slate-300 px-1.5 py-1"
-              />
-              <button
-                onClick={() => {
-                  if (!newHoliday) return;
-                  const cur = cfg.holidays || [];
-                  if (cur.includes(newHoliday)) { setNewHoliday(""); return; }
-                  persistHolidays([...cur, newHoliday].sort());
-                  setNewHoliday("");
-                }}
-                disabled={!newHoliday}
-                className="rounded-lg bg-brand-600 text-white px-2.5 py-1 font-medium hover:bg-brand-700 disabled:opacity-40"
-              >
-                + เพิ่มวันหยุด
-              </button>
-              {(cfg.holidays || []).length > 0 && (
-                <button onClick={() => persistHolidays([])} className="text-slate-400 hover:text-rose-600">ล้างทั้งหมด</button>
-              )}
-              {holidayMsg
-                ? <span className={`text-[10px] ${holidayMsg.startsWith("✓") ? "text-emerald-600" : holidayMsg.startsWith("กำลัง") ? "text-slate-400" : "text-rose-600"}`}>{holidayMsg}</span>
-                : <span className="text-[10px] text-slate-400">กดเพิ่ม/ลบ = บันทึกลงฐานข้อมูลทันที (ถาวร)</span>}
-            </div>
-            {/* ปฏิทิน — เห็นวันหยุดที่ตั้งไว้ (ไฮไลต์ม่วง) คลิกวันเพื่อเพิ่ม/ลบ */}
-            <div className="mt-2">
-              <HolidayCalendar
-                holidays={cfg.holidays || []}
-                onToggle={(ds) => {
-                  const cur = cfg.holidays || [];
-                  persistHolidays(cur.includes(ds) ? cur.filter((x) => x !== ds) : [...cur, ds].sort());
-                }}
-              />
-            </div>
-            {(cfg.holidays || []).length > 0 && (
-              <div className="flex flex-wrap gap-1 mt-2">
-                {(cfg.holidays || []).map((h) => (
-                  <span key={h} className="inline-flex items-center gap-1 bg-slate-100 text-slate-700 rounded-full px-2 py-0.5 text-[11px]">
-                    {fmtDMY(h)}
-                    <button onClick={() => persistHolidays((cfg.holidays || []).filter((x) => x !== h))} className="text-slate-400 hover:text-rose-600" title="ลบวันหยุดนี้ (บันทึกทันที)">✕</button>
-                  </span>
-                ))}
-              </div>
-            )}
+          {/* วันหยุดพิเศษ — ย้ายไปตั้งที่ "กระดานแต้ม → ปฏิทินวันหยุด" ที่เดียว
+              (ตั้งวันหยุดย้อนหลังที่นั่นแล้วระบบคิดแต้มของวันนั้นใหม่ให้ ถ้าแก้ตรงนี้แต้มจะไม่ถูกคิดใหม่) */}
+          <div className={`border-t border-slate-200 pt-2 mt-1 text-xs ${cfg.mode === "24_7" ? "opacity-40" : ""}`}>
+            <span className="font-medium text-slate-600">วันหยุดพิเศษ ({(cfg.holidays || []).length} วัน)</span>
+            <span className="text-slate-400"> — ตัดออกจากการคำนวณเวลาตอบ · </span>
+            <a href="/leaderboard?view=holidays" className="font-semibold underline" style={{ color: "var(--brand)" }}>ตั้งในปฏิทินวันหยุด</a>
           </div>
 
           {/* ตัดลูกค้าที่ไม่ต้องการนับสถิติ (เช่น เฟสส่วนตัวที่ใช้เทสระบบ) */}

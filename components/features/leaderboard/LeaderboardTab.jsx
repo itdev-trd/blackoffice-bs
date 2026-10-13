@@ -9,6 +9,7 @@ import { Tabs } from "@/components/ui";
 import {
   callPoints, fmtPts, shortName, periodLabel, StaffEventsDialog, DisputesPanel, RulesPanel, OwnerTools, LedgerSeal,
 } from "@/components/features/leaderboard/PointsPanels";
+import HolidayCalendar from "@/components/features/leaderboard/HolidayCalendar";
 
 export default function LeaderboardTab({ active = true }) {
   const { goToChat } = useDashboard();
@@ -18,6 +19,11 @@ export default function LeaderboardTab({ active = true }) {
   const [err, setErr] = useState("");
   const [flash, setFlash] = useState(false);
   const [view, setView] = useState("board");
+  // ?view=holidays — ลิงก์ตรงมาที่ปฏิทินวันหยุด (อ่านหลัง mount กัน hydration ไม่ตรงกับหน้าที่ prerender ไว้)
+  useEffect(() => {
+    const v = new URLSearchParams(window.location.search).get("view");
+    if (["disputes", "rules", "holidays", "owner"].includes(v)) setView(v);
+  }, []);
   const [staff, setStaff] = useState(null);           // คนที่กดดูรายการแต้ม
   const nameOf = (u) => shortName(u?.email, u?.name);
 
@@ -151,6 +157,7 @@ export default function LeaderboardTab({ active = true }) {
             { value: "board", label: "อันดับ" },
             { value: "disputes", label: "คำร้องโต้แย้ง", count: res?.open_disputes || undefined },
             { value: "rules", label: "เกณฑ์การนับแต้ม" },
+            { value: "holidays", label: "ปฏิทินวันหยุด" },
             ...(res?.is_owner ? [{ value: "owner", label: "จัดการ (owner)" }] : []),
           ]} />
           <div className="lb-toolbar-controls" style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -290,6 +297,7 @@ export default function LeaderboardTab({ active = true }) {
 
       {view === "disputes" && period && <div style={{ padding: `20px ${PAD} 12px` }}><DisputesPanel period={period} isOwner={!!res?.is_owner} onChanged={() => load()} /></div>}
       {view === "rules" && res && <div style={{ padding: `20px ${PAD} 12px` }}><RulesPanel rules={res.rules} isOwner={!!res.is_owner} onChanged={() => load()} /></div>}
+      {view === "holidays" && res && <div style={{ padding: `20px ${PAD} 12px` }}><HolidayCalendar isOwner={!!res.is_owner} onChanged={() => load()} /></div>}
       {view === "owner" && res?.is_owner && <div style={{ padding: `20px ${PAD} 12px` }}><OwnerTools overview={res} onChanged={() => load()} /></div>}
 
       <div style={{ padding: `10px ${PAD} 32px` }}>
