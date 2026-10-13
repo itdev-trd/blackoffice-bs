@@ -22,6 +22,7 @@ import { hasFullData, authorizeRequest } from "../_shared/permissions.ts";
 import { readJsonBody } from "../_shared/security.ts";
 import { buildBackfill, backfillExpiration, choiceFor } from "../_shared/tv-backfill.ts";
 import { reconcileTvAccess, missingFromApp } from "../_shared/tv-reconcile.ts";
+import { awardTvPoints, reverseTvPointsOnRevoke } from "../_shared/points.ts";
 import { tvValidate, tvListUsers, tvCheckAccess, tvGrant, tvRevoke, tvPing,
   tvExtend,
 } from "../_shared/tradingview-direct.ts";
@@ -925,7 +926,7 @@ Deno.serve(async (req) => {
             contact_channel: p.contact_channel ?? null, member_type: p.member_type ?? null, broker: p.broker ?? "XM",
             phone: p.phone ?? null, country: p.country ?? null, telegram: p.telegram ?? null,
             expiration, status: "active", last_granted_at: nowIso, last_synced_at: nowIso, last_error: null,
-            granted_by: grantedBy ? `${grantedBy} (ย้อนหลัง)` : "ให้สิทธิ์ย้อนหลัง", granted_at: nowIso, updated_at: nowIso,
+            granted_by: grantedBy ? `${grantedBy} (ย้อนหลัง)` : "ให้สิทธิ์ย้อนหลัง", granted_by_email: grantEmail, granted_at: nowIso, updated_at: nowIso,
           }, { onConflict: "username,pine_id" });
           if (upErr) throw new Error(`ให้สิทธิ์บน TradingView แล้ว แต่บันทึกไม่สำเร็จ: ${upErr.message}`);
           okCount++;
@@ -1024,8 +1025,9 @@ Deno.serve(async (req) => {
           if (body?.phone) payload.phone = String(body.phone).trim();
           if (body?.country) payload.country = String(body.country).trim();
           if (body?.telegram) payload.telegram = String(body.telegram).trim();
-          if (existing) { payload.edited_by = grantedBy; payload.edited_at = nowIso; }
-          else { payload.granted_by = grantedBy; payload.granted_at = nowIso; }
+          // ชื่อเล่นไว้โชว์ · อีเมลไว้ผูกแต้ม (ชื่อเล่นซ้ำ/เปลี่ยนได้)
+          if (existing) { payload.edited_by = grantedBy; payload.edited_at = nowIso; payload.edited_by_email = grantEmail; }
+          else { payload.granted_by = grantedBy; payload.granted_at = nowIso; payload.granted_by_email = grantEmail; }
           const { error: upsertError } = await db.from("tv_access").upsert(payload, { onConflict: "username,pine_id" });
           if (upsertError) throw new Error(upsertError.message);
           const { data: savedRow, error: savedRowError } = await db.from("tv_access")
@@ -1034,6 +1036,13 @@ Deno.serve(async (req) => {
           if (savedRowError || !savedRow) throw new Error(savedRowError?.message || "บันทึกสมาชิกแล้วแต่หาแถวเพื่อตรวจสิทธิ์ไม่พบ");
           // ให้สิทธิ์/ต่ออายุสำเร็จแล้วเช็กกับ TradingView ทันที ไม่ต้องรอ cron รอบเที่ยงคืน
           const verification = await verifyTvAccessRow(db, savedRow, cookie);
+          // แต้มโบนัส: เฉพาะเมื่อ TradingView ยืนยันว่ามีสิทธิ์จริงแล้ว (ให้ไม่ติด = ไม่ได้แต้ม)
+          if (verification.ok && verification.found && grantEmail) {
+            await awardTvPoints(db, {
+              staffEmail: grantEmail, tvAccessId: Number(savedRow.id), username: realUser, pineId: pine_id,
+              existing: existing ? { expiration: existing.expiration ?? null } : null, newExpiration: expForPine, at: nowIso,
+            });
+          }
           results.push({ pine_id, ok: true, extended, renewed: renew, expiration: expForPine, verification });
         } catch (e) {
           results.push({ pine_id, ok: false, error: String(e instanceof Error ? e.message : e) });
@@ -1072,6 +1081,10 @@ Deno.serve(async (req) => {
           await db.from("tv_access").update({ status: "active", updated_at: verification.verified_at }).eq("id", row.id);
         } else if (verification.ok && verification.found === false) {
           await db.from("tv_access").update({ status: "revoked", updated_at: verification.verified_at }).eq("id", row.id);
+        }
+        // ถอนสำเร็จจริง (ปลายทางไม่พบสิทธิ์แล้ว) ภายใน N วันหลังได้แต้ม → หักแต้มคืนคนที่ได้ไป
+        if (verification.ok && verification.found === false) {
+          await reverseTvPointsOnRevoke(db, { tvAccessId: Number(row.id), actorEmail: auth.permission?.email ?? null, at: nowIso });
         }
       }
       return json({ ok: true, found: verification?.found === true, verified_at: verification?.verified_at || nowIso, verification });

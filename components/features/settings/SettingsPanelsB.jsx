@@ -1884,33 +1884,11 @@ export function ReplyStatsPanel({ onOpenChat }) {
         </div>
       )}
 
-      {/* แต้มพิเศษ (ตอบนอกเวลาทำการ) — ต่อผู้ใช้ */}
-      {res && res.points && (res.points.by_user?.length ?? 0) > 0 && (
-        <div className="ds-card p-4">
-          <div className="text-sm font-semibold mb-1 flex items-center gap-1.5" style={{ color: "#c4a9ff" }}>🏆 แต้มพิเศษ — ตอบแชทนอกเวลาทำการ <span className="text-[11px] font-normal text-slate-500">รวม {res.points.total} แต้ม</span></div>
-          <div className="text-[11px] text-slate-500 mb-2">ยิ่งตอบดึก/วันหยุด/เร็ว = ยิ่งได้แต้มเยอะ (ทัน 3 นาที = แต้มเต็ม, ช้ากว่า = ครึ่ง)</div>
-          <div className="overflow-x-auto border border-slate-200 rounded-xl bg-white">
-            <table className="w-full text-xs">
-              <thead><tr className="text-left text-slate-500 border-b border-slate-200 bg-slate-50">
-                <th className="px-3 py-2 font-medium">ผู้ตอบ</th>
-                <th className="px-3 py-2 font-medium text-center">แต้มรวม</th>
-                <th className="px-3 py-2 font-medium text-center">ตอบนอกเวลา (ครั้ง)</th>
-                <th className="px-3 py-2 font-medium text-center">ทัน 3 นาที</th>
-                <th className="px-3 py-2 font-medium text-center">ช้ากว่า</th>
-              </tr></thead>
-              <tbody className="divide-y divide-slate-100">
-                {res.points.by_user.map((p, i) => (
-                  <tr key={i}>
-                    <td className="px-3 py-2 text-slate-800 font-medium">{i === 0 ? "🥇 " : i === 1 ? "🥈 " : i === 2 ? "🥉 " : ""}{p.email}</td>
-                    <td className="px-3 py-2 text-center"><span className="font-bold text-[13px] text-amber-600 tabular-nums">{p.points}</span></td>
-                    <td className="px-3 py-2 text-center text-slate-500 tabular-nums">{p.count}</td>
-                    <td className="px-3 py-2 text-center text-emerald-600 font-medium tabular-nums">{p.in_time}</td>
-                    <td className="px-3 py-2 text-center text-slate-500 tabular-nums">{p.slow}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+      {/* แต้มโบนัสย้ายไปที่ "กระดานแต้ม" ที่เดียว (สมุดแต้ม point_events) — เดิมหน้านี้คิดแต้มอีกชุดเอง
+          ตัวเลขสองหน้าจึงไม่ตรงกันได้ ซึ่งเป็นต้นเหตุข้อโต้แย้งเรื่องแต้ม */}
+      {res && (
+        <div className="ds-card p-3 text-xs" style={{ color: "var(--ink-2)" }}>
+          🏆 แต้มโบนัสดูได้ที่เมนู <a href="/leaderboard" className="font-semibold underline" style={{ color: "var(--brand)" }}>กระดานแต้ม</a> — หน้านี้แสดงสถิติความเร็วการตอบอย่างเดียว
         </div>
       )}
 

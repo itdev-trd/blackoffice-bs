@@ -102,27 +102,7 @@ Deno.serve(async (req) => {
     const evidence: any[] = [];               // รายการแชทรายตัว ไว้ลิสต์เป็นหลักฐาน
     let counted = 0, skipped = 0, unanswered = 0, unreadNow = 0, readSlowTotal = 0, closedByCustomer = 0, missedTotal = 0;
     let offTotal = 0, offAnswered = 0, offSum = 0;   // สรุปช่วงนอกเวลาทำการ (เวลาจริง)
-    const pointAgg: Record<string, any> = {};        // แต้มพิเศษต่อผู้ใช้ (ตอบนอกเวลาทำการ)
-    let totalPoints = 0;
-    // ตารางแต้ม: [ทันเวลา, ช้ากว่า] ตามช่วงเวลา (นาทีในวัน เวลาไทย)
-    function offPoints(minOfDay: number, isHoliday: boolean, inTime: boolean): number {
-      const inRange = (a: number, b: number) => minOfDay >= a * 60 && minOfDay < b * 60;
-      let p: [number, number] = [0, 0];
-      if (isHoliday) {
-        if (inRange(9, 17)) p = [2, 1];
-        else if (inRange(17, 20)) p = [4, 2];
-        else if (inRange(20, 24)) p = [8, 4];
-        else if (inRange(0, 5)) p = [16, 12];
-        else if (inRange(5, 9)) p = [8, 4];
-      } else {
-        if (inRange(12, 13)) p = [1, 0.5];
-        else if (inRange(17, 20)) p = [2, 1];
-        else if (inRange(20, 24)) p = [4, 2];
-        else if (inRange(0, 5)) p = [8, 6];
-        else if (inRange(5, 9)) p = [4, 2];
-      }
-      return inTime ? p[0] : p[1];
-    }
+    // แต้มโบนัสย้ายไปสมุด point_events (ฟังก์ชัน points) — หน้านี้เหลือสถิติความเร็วอย่างเดียว
 
     let excluded = 0;
     for (const r of rows ?? []) {
@@ -145,14 +125,6 @@ Deno.serve(async (req) => {
         if (r.replied_at && r.source !== "missed") {
           const wm = Math.max(0, (new Date(r.replied_at).getTime() - s) / 60000);   // เวลาจริงที่ใช้ตอบ (นาที)
           oa.answered++; oa.sum += wm; offAnswered++; offSum += wm;
-          // แต้มพิเศษ: ตอบนอกเวลาทำการ (ทัน 3 นาที = แต้มเต็ม, ช้ากว่า = ครึ่ง) ตามช่วงเวลา×วันหยุด
-          const isHoliday = !days.includes(info.day) || holidays.has(thaiDateStr(s));
-          const pts = offPoints(info.min, isHoliday, wm <= slowMin);
-          if (pts > 0) {
-            const pa = (pointAgg[owho] = pointAgg[owho] || { email: owho, points: 0, count: 0, in_time: 0, slow: 0 });
-            pa.points += pts; pa.count++; if (wm <= slowMin) pa.in_time++; else pa.slow++;
-            totalPoints += pts;
-          }
         }
         continue;
       }
@@ -264,11 +236,6 @@ Deno.serve(async (req) => {
       avg_min: o.answered ? o.sum / o.answered : 0,
     })).sort((x: any, y: any) => y.count - x.count);
 
-    // แต้มพิเศษต่อผู้ใช้ (ตอบนอกเวลาทำการ) — เรียงแต้มมากสุดก่อน
-    const points = Object.values(pointAgg).map((p: any) => ({
-      email: p.email, points: Math.round(p.points * 10) / 10, count: p.count, in_time: p.in_time, slow: p.slow,
-    })).sort((x: any, y: any) => y.points - x.points);
-
     const daily = Object.values(byDay).map((d: any) => ({
       ...d, avg_min: d.answered ? d.sum / d.answered : 0,
       avg_read_min: d.read_count ? d.read_sum / d.read_count : null,
@@ -281,7 +248,6 @@ Deno.serve(async (req) => {
     return json({
       ok: true, stats, users, daily, missed: missedTotal,
       off: { total: offTotal, answered: offAnswered, unanswered: offTotal - offAnswered, avg_min: offAnswered ? offSum / offAnswered : 0, by_user: offUsers },
-      points: { total: Math.round(totalPoints * 10) / 10, by_user: points },
       evidence: evidence.slice(0, 5000),   // เพดานสูงพอสำหรับช่วง 3 เดือน
       evidence_total: evidence.length,
       slow_hours: slowHours, all_hours: allHours,

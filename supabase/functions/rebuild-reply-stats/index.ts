@@ -162,7 +162,7 @@ Deno.serve(async (req) => {
     const { data: ohRow } = await admin.from("settings").select("value").eq("key", "office_hours").maybeSingle();
     const cw = (ohRow?.value as any)?.closing_words;
     const closingWords: string[] = Array.isArray(cw) && cw.length ? cw.map(String) : DEFAULT_CLOSING;
-    const slowMin = Math.max(1, Number((ohRow?.value as any)?.slow_min) || 3);   // ใช้คำนวณ gap = slowMin×2
+    const slowMin = Math.max(1, Number((ohRow?.value as any)?.slow_min) || 5);   // ใช้คำนวณ gap = slowMin×2 (ค่าเริ่มต้นต้องตรงกับ settings.office_hours = 5)
 
     let scanned = 0, rounds = 0, saved = 0, cleaned = 0, from = 0;
     let done = true;

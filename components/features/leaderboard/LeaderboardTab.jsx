@@ -1,68 +1,46 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { supabase } from "@/lib/supabase/client";
-import { Loader2, RefreshCw, Crown, Trophy } from "lucide-react";
+// กระดานแต้มโบนัส — อ่านจากสมุดแต้ม point_events ผ่านฟังก์ชัน `points` (ไม่คิดแต้มสดอีกแล้ว)
+// แต้มทุกแต้มกดดูหลักฐานได้ · โต้แย้งได้ · owner ปิดยอดรายเดือนแล้วล็อก
+import { useCallback, useEffect, useState } from "react";
+import { Loader2, RefreshCw, Crown, Trophy, Lock } from "lucide-react";
+import { useDashboard } from "@/components/dashboard/DashboardContext";
+import { Tabs } from "@/components/ui";
+import {
+  callPoints, fmtPts, shortName, periodLabel, StaffEventsDialog, DisputesPanel, RulesPanel, OwnerTools, LedgerSeal,
+} from "@/components/features/leaderboard/PointsPanels";
 
 export default function LeaderboardTab({ active = true }) {
-  const thDay = (o = 0) => { const d = new Date(Date.now() + 7 * 3600 * 1000); d.setUTCDate(d.getUTCDate() + o); return d.toISOString().slice(0, 10); };
-  const thMonth = (mo, which) => { const d = new Date(Date.now() + 7 * 3600 * 1000); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() + mo + (which === "end" ? 1 : 0)); if (which === "end") d.setUTCDate(0); return d.toISOString().slice(0, 10); };
-  const PRESETS = [
-    ["วันนี้", () => [thDay(0), thDay(0)]],
-    ["เมื่อวาน", () => [thDay(-1), thDay(-1)]],
-    ["3 วันล่าสุด", () => [thDay(-2), thDay(0)]],
-    ["7 วันล่าสุด", () => [thDay(-6), thDay(0)]],
-    ["14 วันล่าสุด", () => [thDay(-13), thDay(0)]],
-    ["30 วันล่าสุด", () => [thDay(-29), thDay(0)]],
-    ["เดือนนี้", () => [thMonth(0, "start"), thDay(0)]],
-    ["เดือนที่แล้ว", () => [thMonth(-1, "start"), thMonth(-1, "end")]],
-    ["3 เดือนล่าสุด", () => [thMonth(-2, "start"), thDay(0)]],
-    ["6 เดือนล่าสุด", () => [thMonth(-5, "start"), thDay(0)]],
-    ["ปีนี้", () => { const d = new Date(Date.now() + 7 * 3600 * 1000); return [`${d.getUTCFullYear()}-01-01`, thDay(0)]; }],
-  ];
-  // ช่วงที่ใช้บ่อยอยู่เป็นปุ่มลัด ที่เหลืออยู่ในดรอปดาวน์ — กันแถบเครื่องมือรกด้วยชิป 11 อัน
-  const QUICK_PRESETS = [0, 1, 3, 5, 6];
-  const OTHER_PRESETS = PRESETS.map((_, i) => i).filter((i) => !QUICK_PRESETS.includes(i));
-  const [since, setSince] = useState(() => thDay(-6));
-  const [until, setUntil] = useState(() => thDay(0));
-  const [presetIdx, setPresetIdx] = useState(3);   // 7 วันล่าสุด
+  const { goToChat } = useDashboard();
+  const [period, setPeriod] = useState("");
   const [res, setRes] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [flash, setFlash] = useState(false);       // ไฮไลต์ตอนอัปเดตสด
-  const reloadRef = useRef(null);
-  const fmtDMY = (iso) => { const [y, m, d] = String(iso).split("-"); return `${Number(d)}/${Number(m)}/${y}`; };
-  const nameOf = (e) => { const s = String(e || ""); if (s.startsWith("(")) return s; const at = s.indexOf("@"); return at > 0 ? s.slice(0, at) : s; };
+  const [flash, setFlash] = useState(false);
+  const [view, setView] = useState("board");
+  const [staff, setStaff] = useState(null);           // คนที่กดดูรายการแต้ม
+  const nameOf = (u) => shortName(u?.email, u?.name);
 
   const load = useCallback(async (flashOnDone = false) => {
     setBusy(true); setErr("");
-    const { data, error } = await supabase.functions.invoke("leaderboard", { body: { since, until } });
-    setBusy(false);
-    if (error || !data?.ok) {
-      // error ที่ Supabase ส่งกลับเป็นภาษาอังกฤษเชิงเทคนิค ("Edge Function returned a non-2xx status code")
-      // ผู้ใช้อ่านแล้วไม่รู้ว่าต้องทำอะไร — แปลงเป็นข้อความที่บอกสาเหตุที่เป็นไปได้จริง
-      const raw = data?.error || error?.message || "";
-      const technical = /non-2xx|Failed to fetch|FunctionsHttpError|NetworkError/i.test(raw);
-      setErr(technical || !raw ? "โหลดกระดานแต้มไม่สำเร็จ — ตรวจว่าตั้งค่า API key ของ AI ในหน้าตั้งค่าแล้ว และมีข้อมูลการตอบแชทในช่วงเวลาที่เลือก" : raw);
-      return;
+    try {
+      const data = await callPoints({ action: "overview", ...(period ? { period } : {}) });
+      setRes(data);
+      if (!period) setPeriod(data.period);
+      if (flashOnDone) { setFlash(true); setTimeout(() => setFlash(false), 900); }
+    } catch (e) {
+      setErr(e.message || "โหลดกระดานแต้มไม่สำเร็จ");
     }
-    setRes(data);
-    if (flashOnDone) { setFlash(true); setTimeout(() => setFlash(false), 900); }
-  }, [since, until]);
-  reloadRef.current = load;
+    setBusy(false);
+  }, [period]);
 
-  useEffect(() => { if (active) load(); }, [since, until, active, load]);
-
-  // อัปเดตเรียลไทม์ — reply_stats เปลี่ยน (ส่ง/ตอบ) → รีโหลดแบบหน่วง (debounce) กัน spam
+  useEffect(() => { if (active) load(); }, [period, active, load]);
+  // ไม่ใช้ realtime (ฐานข้อมูล micro) — รีเฟรชเองทุก 60 วิ ตอนหน้าเปิดอยู่ หรือกดปุ่มรีเฟรช
   useEffect(() => {
     if (!active) return;
-    let t = null;
-    const ch = supabase.channel("lb-rt")
-      .on("postgres_changes", { event: "*", schema: "public", table: "reply_stats" }, () => {
-        clearTimeout(t); t = setTimeout(() => reloadRef.current && reloadRef.current(true), 2500);
-      }).subscribe();
-    return () => { clearTimeout(t); supabase.removeChannel(ch); };
-  }, [active]);
+    const t = setInterval(() => { if (document.visibilityState === "visible") load(true); }, 60000);
+    return () => clearInterval(t);
+  }, [active, load]);
 
   // พาเลตต์เฉพาะหน้ากระดานแต้ม — ทอง/เงิน/ทองแดงตรงกับเหรียญรางวัล
   // เป็นข้อยกเว้นที่มีเหตุผลจากพาเลตต์หลัก (accent น้ำเงิน) เพราะสีสื่ออันดับโดยตรง
@@ -81,7 +59,7 @@ export default function LeaderboardTab({ active = true }) {
   const NUM = "'IBM Plex Mono',ui-monospace,monospace";
   const board = res?.board || [];
   const top3 = board.slice(0, 3);
-  const rest = board.slice(3);
+  const GRID = "44px 1fr 92px 92px 80px 84px 92px";
   // จัดเรียงแท่น: [ที่2, ที่1, ที่3] เพื่อให้ที่1 อยู่กลาง+สูงสุด
   const podiumOrder = [top3[1], top3[0], top3[2]];
   // วัสดุโลหะ + สัดส่วนแบบ cinematic (ที่1 เด่นสุด, ข้าง ๆ ถอยลึก)
@@ -114,7 +92,7 @@ export default function LeaderboardTab({ active = true }) {
         .lb-podium{animation:lbRise .6s cubic-bezier(.2,.8,.2,1) both}
         @media(max-width:640px){
           .lb-hide-sm{display:none!important}
-          .lb-grid{grid-template-columns:38px 1fr 92px!important}
+          .lb-grid{grid-template-columns:34px 1fr 84px!important}
           .lb-masthead{padding-top:24px!important}
           .lb-masthead-inner{gap:18px!important}
           .lb-masthead-title{min-width:0!important;flex:1 1 100%!important}
@@ -146,7 +124,7 @@ export default function LeaderboardTab({ active = true }) {
                 (letterSpacing .42em ยังทำให้อ่านเป็นคำไม่ได้อีก) เมนูซ้ายบอกอยู่แล้วว่าอยู่หน้าไหน */}
             <h2 style={{ fontSize: "clamp(30px,4.6vw,52px)", fontWeight: 800, lineHeight: .98, letterSpacing: "-.025em", margin: 0 }}>กระดานแต้ม</h2>
             <p style={{ fontSize: 14, color: C.t2, margin: "14px 0 0", lineHeight: 1.5, maxWidth: 420 }}>
-              จัดอันดับแต้มพิเศษจากการตอบแชท<span style={{ color: C.t1 }}>นอกเวลาทำการ</span> — ยิ่งตอบดึก ยิ่งเป็นวันหยุด และยิ่งตอบไว ยิ่งได้แต้มมาก
+              แต้มโบนัสรายเดือนจากการตอบแชท (นอก/ในเวลา) และการให้สิทธิ์ TradingView — กดชื่อเพื่อดูหลักฐานทุกแต้ม
             </p>
           </div>
           {/* Total score — editorial figure, not a boxed card */}
@@ -161,65 +139,37 @@ export default function LeaderboardTab({ active = true }) {
               </span>
             </div>
             <div style={{ position: "relative", marginTop: 8, fontSize: 13, color: C.t2 }}>
-              <span style={{ color: C.gold, fontWeight: 600, fontFamily: NUM }}>{fmtDMY(since)}{since !== until ? `  –  ${fmtDMY(until)}` : ""}</span>
+              <span style={{ color: C.gold, fontWeight: 600, fontFamily: NUM }}>{period ? periodLabel(period) : "—"}</span>
+              {res?.status === "closed" && <span style={{ marginLeft: 8, display: "inline-flex", alignItems: "center", gap: 4, color: C.t2 }}><Lock size={12} /> ปิดยอดแล้ว</span>}
             </div>
           </div>
         </div>
 
-        {/* Toolbar: editorial tabs + date + live — separated by hairlines */}
+        {/* Toolbar: เลือกเดือน + มุมมอง */}
         <div className="lb-toolbar" style={{ marginTop: 30, borderTop: `1px solid ${C.hair}`, borderBottom: `1px solid ${C.hair}`, padding: "14px 0", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 16 }}>
-          {/* เดิมวางช่วงเวลาทั้ง 11 แบบเป็นชิปเรียงแถวเดียว ทำให้แถบเครื่องมือรกและหาปุ่มที่ต้องการยาก
-              เหลือเฉพาะช่วงที่ใช้บ่อยเป็นปุ่มลัด ที่เหลือย้ายไปดรอปดาวน์ "ช่วงอื่น" */}
-          <div className="lb-presets" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "clamp(8px,1.2vw,14px)" }}>
-            {QUICK_PRESETS.map((i) => {
-              const [label, fn] = PRESETS[i];
-              const on = presetIdx === i;
-              return (
-                <button key={label} className="lb-tab" onClick={() => { const [s, u] = fn(); setSince(s); setUntil(u); setPresetIdx(i); }}
-                  style={{ position: "relative", background: on ? "rgba(185,133,0,.14)" : "transparent", border: on ? `1px solid ${C.gold}` : "1px solid transparent", borderRadius: 8, cursor: "pointer", padding: "8px 13px", fontSize: 13.5, fontWeight: on ? 700 : 500, color: on ? C.t1 : C.t3, fontFamily: FONT, boxShadow: on ? `0 0 0 2px rgba(185,133,0,.08)` : "none" }}>
-                  {label}
-                </button>
-              );
-            })}
-            <select
-              aria-label="ช่วงเวลาอื่น"
-              value={QUICK_PRESETS.includes(presetIdx) ? "" : String(presetIdx)}
-              onChange={(e) => {
-                const i = Number(e.target.value);
-                if (!Number.isInteger(i) || !PRESETS[i]) return;
-                const [s, u] = PRESETS[i][1]();
-                setSince(s); setUntil(u); setPresetIdx(i);
-              }}
-              style={{ background: "transparent", color: OTHER_PRESETS.includes(presetIdx) ? C.t1 : C.t3, border: `1px solid ${OTHER_PRESETS.includes(presetIdx) ? C.gold : C.border}`, borderRadius: 8, padding: "8px 10px", fontSize: 13.5, fontFamily: FONT, cursor: "pointer" }}
-            >
-              <option value="">ช่วงอื่น…</option>
-              {OTHER_PRESETS.map((i) => <option key={PRESETS[i][0]} value={i}>{PRESETS[i][0]}</option>)}
-            </select>
-          </div>
+          <Tabs value={view} onChange={setView} items={[
+            { value: "board", label: "อันดับ" },
+            { value: "disputes", label: "คำร้องโต้แย้ง", count: res?.open_disputes || undefined },
+            { value: "rules", label: "เกณฑ์การนับแต้ม" },
+            ...(res?.is_owner ? [{ value: "owner", label: "จัดการ (owner)" }] : []),
+          ]} />
           <div className="lb-toolbar-controls" style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <input type="date" className="lb-date" value={since} onChange={(e) => { setSince(e.target.value); setPresetIdx(-1); }}
-              style={{ background: "transparent", color: C.t2, border: `1px solid ${C.border}`, borderRadius: 999, padding: "6px 12px", fontSize: 12.5, fontFamily: NUM }} />
-            <span style={{ color: C.t3, fontSize: 12 }}>→</span>
-            <input type="date" className="lb-date" value={until} onChange={(e) => { setUntil(e.target.value); setPresetIdx(-1); }}
-              style={{ background: "transparent", color: C.t2, border: `1px solid ${C.border}`, borderRadius: 999, padding: "6px 12px", fontSize: 12.5, fontFamily: NUM }} />
+            <select aria-label="เลือกเดือน" value={period} onChange={(e) => setPeriod(e.target.value)}
+              style={{ background: "transparent", color: C.t1, border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 10px", fontSize: 13.5, fontFamily: FONT, cursor: "pointer" }}>
+              {(res?.periods || (period ? [period] : [])).map((p) => <option key={p} value={p}>{periodLabel(p)}</option>)}
+            </select>
             <button onClick={() => load()} disabled={busy} className="lb-ico" title="รีเฟรช"
               style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 34, height: 34, borderRadius: "50%", background: "transparent", color: C.t2, border: `1px solid ${C.border}`, cursor: "pointer", opacity: busy ? .5 : 1 }}>
               {busy ? <Loader2 className="animate-spin" size={15} /> : <RefreshCw size={15} />}
             </button>
-            <span className="lb-live" style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, color: C.green, fontWeight: 600, letterSpacing: ".02em" }}>
-              <span style={{ position: "relative", width: 7, height: 7 }}>
-                <span style={{ position: "absolute", inset: 0, borderRadius: "50%", background: C.green, animation: "lbPulse 2s ease-out infinite" }} />
-                <span style={{ position: "absolute", inset: 0, borderRadius: "50%", background: C.green }} />
-              </span>
-              LIVE
-            </span>
           </div>
         </div>
+        {res && <div style={{ marginTop: 10 }}><LedgerSeal overview={res} /></div>}
         {err && <div style={{ marginTop: 16, fontSize: 13, color: C.red, background: "rgba(255,92,92,.07)", border: `1px solid rgba(255,92,92,.22)`, borderRadius: 12, padding: "10px 14px" }}>{err}</div>}
       </div>
 
       {/* ═══ CINEMATIC PODIUM STAGE (hero) ═══ */}
-      {board.length > 0 ? (
+      {view !== "board" ? null : board.length > 0 ? (
         <div style={{ position: "relative", overflow: "hidden", marginTop: 8, minHeight: 480,
           background: "radial-gradient(130% 90% at 50% -10%, rgb(var(--n-accent) / .10) 0%, var(--surface) 55%)" }}>
           {/* atmospheric top haze */}
@@ -241,7 +191,8 @@ export default function LeaderboardTab({ active = true }) {
               if (!u) return <div key={rank} style={{ width: colW }} />;
               const faceGrad = `linear-gradient(180deg, ${m.hi} 0%, ${m.mid} 30%, ${m.color} 46%, ${m.lo} 100%)`;
               return (
-                <div key={rank} style={{ width: colW, display: "flex", flexDirection: "column", alignItems: "center", zIndex: m.z, transform: `scale(${m.depth})`, opacity: m.depth, filter: rank === 1 ? "none" : "saturate(.95)" }}>
+                <div key={rank} role="button" tabIndex={0} title="กดเพื่อดูหลักฐานทุกแต้ม" onClick={() => setStaff(u)} onKeyDown={(e) => { if (e.key === "Enter") setStaff(u); }}
+                  style={{ width: colW, display: "flex", flexDirection: "column", alignItems: "center", zIndex: m.z, transform: `scale(${m.depth})`, opacity: m.depth, filter: rank === 1 ? "none" : "saturate(.95)", cursor: "pointer" }}>
                   {/* volumetric spotlight cone */}
                   <div style={{ position: "absolute", top: -30, width: "150%", height: 430, clipPath: "polygon(40% 0,60% 0,100% 100%,0 100%)", background: `linear-gradient(180deg, ${m.spot} 0%, transparent 78%)`, filter: "blur(20px)", mixBlendMode: "screen", opacity: rank === 1 ? .95 : .6, pointerEvents: "none" }} />
 
@@ -252,15 +203,15 @@ export default function LeaderboardTab({ active = true }) {
                     background: "radial-gradient(circle at 34% 28%, rgb(var(--n-ink-3) / .30), rgb(var(--n-ink-3) / .13) 78%)",
                     border: `2px solid ${m.ring}`,
                     boxShadow: `0 0 0 6px rgb(var(--n-ink) / .10), 0 22px 44px -16px ${m.glow}, 0 0 46px -6px ${m.glow}, inset 0 2px 6px rgba(255,255,255,.12)` }}>
-                    {nameOf(u.email).slice(0, 2).toUpperCase()}
+                    {nameOf(u).slice(0, 2).toUpperCase()}
                     <span style={{ position: "absolute", bottom: -8, right: -8, width: 30, height: 30, borderRadius: "50%", background: C.ink, border: `1px solid ${m.ring}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, boxShadow: `0 6px 14px rgb(var(--n-ink) / .25)` }}>{m.medal}</span>
                   </div>
 
                   {/* name + score — editorial */}
                   <div style={{ textAlign: "center", marginTop: 16, width: "100%", zIndex: 3 }}>
-                    <div title={u.email} style={{ fontSize: 13.5, fontWeight: 600, color: C.t2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>{nameOf(u.email)}</div>
-                    <div style={{ fontFamily: NUM, fontVariantNumeric: "tabular-nums", fontSize: rank === 1 ? "clamp(34px,4.2vw,50px)" : "clamp(26px,3vw,34px)", fontWeight: 800, lineHeight: 1.02, letterSpacing: "-.02em", marginTop: 6, color: m.color, textShadow: `0 0 30px ${m.glow}` }}>{u.points.toLocaleString()}</div>
-                    <div style={{ fontSize: 11.5, color: C.t3, marginTop: 3, fontFamily: NUM }}>{u.count} ครั้ง · ทัน {u.in_time}</div>
+                    <div title={u.email} style={{ fontSize: 13.5, fontWeight: 600, color: C.t2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}>{nameOf(u)}</div>
+                    <div style={{ fontFamily: NUM, fontVariantNumeric: "tabular-nums", fontSize: rank === 1 ? "clamp(34px,4.2vw,50px)" : "clamp(26px,3vw,34px)", fontWeight: 800, lineHeight: 1.02, letterSpacing: "-.02em", marginTop: 6, color: m.color, textShadow: `0 0 30px ${m.glow}` }}>{fmtPts(u.points)}</div>
+                    <div style={{ fontSize: 11.5, color: C.t3, marginTop: 3, fontFamily: NUM }}>{u.count} รายการ · ดูหลักฐาน ›</div>
                   </div>
 
                   {/* pedestal — 3D metal with foreshortened top + specular */}
@@ -292,44 +243,63 @@ export default function LeaderboardTab({ active = true }) {
         <div style={{ margin: `20px ${PAD} 40px`, textAlign: "center", padding: "72px 20px", borderRadius: 22, border: `1px solid ${C.hair}`, background: "radial-gradient(100% 100% at 50% 0%, rgb(var(--n-accent) / .07), var(--surface) 70%)" }}>
           <Trophy size={44} style={{ color: C.t3, margin: "0 auto 14px" }} />
           <div style={{ fontSize: 16, fontWeight: 700, color: C.t2 }}>ยังไม่มีแต้มในช่วงนี้</div>
-          <div style={{ fontSize: 13.5, color: C.t3, marginTop: 6 }}>แต้มจะปรากฏเมื่อมีการตอบแชทนอกเวลาทำการ</div>
+          <div style={{ fontSize: 13.5, color: C.t3, marginTop: 6 }}>แต้มจะปรากฏเมื่อมีการตอบแชทหรือให้สิทธิ์ TradingView</div>
         </div>
       ) : null}
 
-      {/* ═══ Editorial ranking list ═══ */}
-      {rest.length > 0 && (
+      {/* ═══ ตารางทุกคน แยกตามประเภท — กดแถวเพื่อดูหลักฐาน ═══ */}
+      {view === "board" && board.length > 0 && (
         <div style={{ padding: `8px ${PAD} 12px` }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "8px 0 4px" }}>
-            <span style={{ fontSize: 11, letterSpacing: ".32em", textTransform: "uppercase", color: C.t3, fontWeight: 600, fontFamily: NUM }}>อันดับ 4 เป็นต้นไป</span>
+            <span style={{ fontSize: 11, letterSpacing: ".32em", textTransform: "uppercase", color: C.t3, fontWeight: 600, fontFamily: NUM }}>แต้มทุกคน · กดชื่อเพื่อดูหลักฐาน</span>
             <span style={{ flex: 1, height: 1, background: C.hair }} />
           </div>
-          {/* column labels */}
-          <div style={{ display: "grid", gridTemplateColumns: "44px 1fr 96px 96px 80px", alignItems: "center", padding: "10px 0", fontSize: 11, letterSpacing: ".04em", color: C.t3, fontFamily: NUM }}>
+          <div className="lb-grid" style={{ display: "grid", gridTemplateColumns: GRID, alignItems: "center", padding: "10px 0", fontSize: 11, letterSpacing: ".04em", color: C.t3, fontFamily: NUM }}>
             <span>#</span><span>ผู้ตอบ</span>
-            <span style={{ textAlign: "right" }}>แต้ม</span>
-            <span style={{ textAlign: "right" }} className="lb-hide-sm">ทันเวลา</span>
-            <span style={{ textAlign: "right" }} className="lb-hide-sm">ช้ากว่า</span>
+            <span style={{ textAlign: "right" }} className="lb-hide-sm">นอกเวลา</span>
+            <span style={{ textAlign: "right" }} className="lb-hide-sm">ในเวลา</span>
+            <span style={{ textAlign: "right" }} className="lb-hide-sm">TV</span>
+            <span style={{ textAlign: "right" }} className="lb-hide-sm">ปรับ/หัก</span>
+            <span style={{ textAlign: "right" }}>รวม</span>
           </div>
-          {rest.map((u, i) => (
-            <div key={u.email} className="lb-row" style={{ display: "grid", gridTemplateColumns: "44px 1fr 96px 96px 80px", alignItems: "center", padding: "16px 0", borderTop: `1px solid ${C.hair}`, borderRadius: 8 }}>
-              <span style={{ fontFamily: NUM, fontVariantNumeric: "tabular-nums", fontSize: 15, color: C.t3, fontWeight: 300 }}>{String(i + 4).padStart(2, "0")}</span>
-              <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
-                <span style={{ width: 38, height: 38, borderRadius: "50%", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, fontFamily: NUM, color: C.t2, background: "rgb(var(--n-ink-3) / .13)", border: `1px solid ${C.border}` }}>{nameOf(u.email).slice(0, 2).toUpperCase()}</span>
-                <span title={u.email} style={{ color: C.t1, fontWeight: 500, fontSize: 15, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{nameOf(u.email)}</span>
-              </div>
-              <span style={{ textAlign: "right", fontFamily: NUM, fontVariantNumeric: "tabular-nums", fontWeight: 800, fontSize: 19, color: C.purple, textShadow: `0 0 18px rgb(var(--n-accent) / .27)` }}>{u.points.toLocaleString()}</span>
-              <span style={{ textAlign: "right", fontFamily: NUM, fontVariantNumeric: "tabular-nums", color: C.green, fontWeight: 600, fontSize: 15 }} className="lb-hide-sm">{u.in_time}</span>
-              <span style={{ textAlign: "right", fontFamily: NUM, fontVariantNumeric: "tabular-nums", color: u.slow > 0 ? C.red : C.t3, fontWeight: u.slow > 0 ? 600 : 400, fontSize: 15 }} className="lb-hide-sm">{u.slow}</span>
-            </div>
-          ))}
+          {board.map((u, i) => {
+            const k = u.by_kind || {};
+            const adj = (k.adjustment || 0) + (k.reversal || 0);
+            const cell = (v, color) => <span style={{ textAlign: "right", fontFamily: NUM, fontVariantNumeric: "tabular-nums", fontSize: 14, color: v ? color : C.t3 }} className="lb-hide-sm">{v ? fmtPts(v) : "–"}</span>;
+            return (
+              <button key={u.email} type="button" className="lb-row lb-grid" onClick={() => setStaff(u)}
+                style={{ width: "100%", textAlign: "left", display: "grid", gridTemplateColumns: GRID, alignItems: "center", padding: "14px 0", borderTop: `1px solid ${C.hair}`, borderRadius: 8, background: "transparent", cursor: "pointer" }}>
+                <span style={{ fontFamily: NUM, fontVariantNumeric: "tabular-nums", fontSize: 15, color: C.t3, fontWeight: 300 }}>{String(i + 1).padStart(2, "0")}</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
+                  <span style={{ width: 38, height: 38, borderRadius: "50%", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, fontFamily: NUM, color: C.t2, background: "rgb(var(--n-ink-3) / .13)", border: `1px solid ${C.border}` }}>{nameOf(u).slice(0, 2).toUpperCase()}</span>
+                  <span style={{ minWidth: 0 }}>
+                    <span title={u.email} style={{ display: "block", color: C.t1, fontWeight: 500, fontSize: 15, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{nameOf(u)}</span>
+                    <span style={{ display: "block", fontSize: 11.5, color: C.t3 }}>{u.count} รายการ{u.zero ? ` · ${u.zero} รายการ 0 แต้ม` : ""}</span>
+                  </span>
+                </div>
+                {cell(k.reply_offhours, C.purple)}
+                {cell(k.reply_office, C.t1)}
+                {cell((k.tv_grant || 0) + (k.tv_renew || 0), C.green)}
+                {cell(adj, adj < 0 ? C.red : C.gold)}
+                <span style={{ textAlign: "right", fontFamily: NUM, fontVariantNumeric: "tabular-nums", fontWeight: 800, fontSize: 19, color: C.t1 }}>{fmtPts(u.points)}</span>
+              </button>
+            );
+          })}
         </div>
       )}
 
+      {view === "disputes" && period && <div style={{ padding: `20px ${PAD} 12px` }}><DisputesPanel period={period} isOwner={!!res?.is_owner} onChanged={() => load()} /></div>}
+      {view === "rules" && res && <div style={{ padding: `20px ${PAD} 12px` }}><RulesPanel rules={res.rules} isOwner={!!res.is_owner} onChanged={() => load()} /></div>}
+      {view === "owner" && res?.is_owner && <div style={{ padding: `20px ${PAD} 12px` }}><OwnerTools overview={res} onChanged={() => load()} /></div>}
+
       <div style={{ padding: `10px ${PAD} 32px` }}>
         <p style={{ fontSize: 12, color: C.t3, display: "flex", alignItems: "center", gap: 8, margin: 0, lineHeight: 1.6 }}>
-          <span style={{ color: C.gold }}>◆</span> ยิ่งตอบดึก / วันหยุด / ตอบไว = ยิ่งได้แต้มมาก · ทันเวลา = แต้มเต็ม, ช้ากว่า = ครึ่งเดียว · นับเฉพาะการตอบนอกเวลาทำการ
+          <span style={{ color: C.gold }}>◆</span> แต้มทุกรายการบันทึกตอนทำงานจริง แก้/ลบไม่ได้ · คนตอบนับจากบัญชีที่ล็อกอิน · เห็นแต้มไม่ถูกต้องกด "โต้แย้ง" ได้ภายใน {res?.rules?.dispute_days ?? 3} วันหลังสิ้นเดือน
         </p>
       </div>
+
+      <StaffEventsDialog open={!!staff} period={period} staff={staff} isOwner={!!res?.is_owner}
+        onClose={() => setStaff(null)} onOpenChat={(id) => goToChat({ id })} onChanged={() => load()} />
     </div>
   );
 }

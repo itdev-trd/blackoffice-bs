@@ -12,6 +12,7 @@ import { getLineConfig, lineApi } from "../_shared/line.ts";
 import { readJsonBody } from "../_shared/security.ts";
 import { MAX_TRANSCRIPT_ITEMS } from "../_shared/transcript-cap.ts";
 import { getOpenAIKey, openAIErrorText } from "../_shared/openai.ts";
+import { awardReplyPoints } from "../_shared/points.ts";
 
 const GRAPH_VERSION = "v22.0"; // v19 หมดอายุแล้ว (sunset ต้นปี 2026)
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_VERSION}`;
@@ -212,17 +213,27 @@ function waitingStartAt(transcript: any[]): string | null {
   }
   return start;
 }
-// บันทึกสถิติการตอบ (fire-and-forget — พังก็ไม่กระทบการส่ง)
-async function recordReplyStat(admin: any, row: any, by: string, transcript: any[], nowIso: string) {
+// บันทึกสถิติการตอบ + แต้มโบนัส (fire-and-forget — พังก็ไม่กระทบการส่ง)
+// round_key รูปแบบเดียวกับ rebuild-reply-stats (id|เวลาเริ่มรอบ) — เดิมไม่ใส่คีย์ แถวเลยซ้ำกับที่ cron สร้าง
+// แต้มคิดจากสมุด point_events เท่านั้น (reply_stats เป็นสถิติอย่างเดียว)
+async function recordReplyStat(admin: any, row: any, by: string, transcript: any[], nowIso: string, opts: { points?: boolean; via?: string } = {}) {
   try {
     const msgAt = waitingStartAt(transcript);
     if (!msgAt) return; // ไม่ใช่การตอบรอบรอ (เช่นพิมพ์ตามหลายข้อความ) — ไม่นับซ้ำ
-    await admin.from("reply_stats").insert({
+    const msgMs = new Date(msgAt).getTime();
+    await admin.from("reply_stats").upsert({
+      round_key: `${row.id}|${msgMs}`,
       email: by || null, page_id: row.page_id ?? null, page_name: row.page_name ?? null,
       conversation_id: row.id, customer_name: row.customer_name ?? null,
       msg_at: msgAt, replied_at: nowIso,
-      response_ms: Math.max(0, new Date(nowIso).getTime() - new Date(msgAt).getTime()),
-    });
+      response_ms: Math.max(0, new Date(nowIso).getTime() - msgMs),
+    }, { onConflict: "round_key", ignoreDuplicates: true });
+    if (opts.points && by) {
+      await awardReplyPoints(admin, {
+        staffEmail: by, conversationId: row.id, pageId: row.page_id ?? null, pageName: row.page_name ?? null,
+        customerName: row.customer_name ?? null, source: row.source ?? null, msgAt, replyAt: nowIso, via: opts.via ?? null,
+      });
+    }
   } catch (_e) { /* เงียบไว้ */ }
 }
 
@@ -324,6 +335,8 @@ Deno.serve(async (req) => {
     const action = String(body?.action || "");
     const auth = await authorizeRequest(req, { tab: ["inbox", "chat", "feed"] });
     if (!auth.ok) return json({ ok: false, error: auth.error }, auth.status);
+    // คนตอบ = บัญชีที่ล็อกอินจริง (จาก token) ห้ามเชื่อ body.by ที่หน้าเว็บส่งมา — ใช้คิดแต้มโบนัส
+    const actor = auth.permission?.email || "";
 
     // ---------- ดึง "ข้อความตอบกลับที่บันทึกไว้" (Saved Replies) ของเพจ ----------
     if (action === "saved_replies") {
@@ -590,12 +603,12 @@ Deno.serve(async (req) => {
       // ต่อ transcript ฝั่งเพจ + ปลดธง "ยังไม่ได้ตอบ"
       const nowIso = new Date().toISOString();
       // สถิติการตอบ: บันทึกก่อน append (transcript ตอนนี้คือสภาพ "กำลังรอ")
-      const statTask = recordReplyStat(admin, row, String(body?.by || ""), transcript, nowIso);
+      const via = row.source === "line" ? "line" : isInstagramComment ? "instagram_comment_public" : isComment ? (commentReplyMode === "public" ? "comment_public" : "private_reply") : row.source === "instagram" ? "instagram" : "messenger";
+      const statTask = recordReplyStat(admin, row, actor, transcript, nowIso, { points: true, via });
       const statRuntime = (globalThis as any).EdgeRuntime;
       if (statRuntime?.waitUntil) statRuntime.waitUntil(statTask);
-      const via = row.source === "line" ? "line" : isInstagramComment ? "instagram_comment_public" : isComment ? (commentReplyMode === "public" ? "comment_public" : "private_reply") : row.source === "instagram" ? "instagram" : "messenger";
       const replyItem = {
-        w: "p", t: replyText, at: nowIso, by: String(body?.by || ""), mid: send?.message_id || null, via,
+        w: "p", t: replyText, at: nowIso, by: actor, mid: send?.message_id || null, via,
         ...(replyToText ? { reply_to_text: replyToText.slice(0, 10_000) } : {}),
         ...(replyToMid ? { reply_to_mid: replyToMid } : {}),
         ...(replyToImg ? { reply_to_img: replyToImg } : {}),
@@ -604,7 +617,7 @@ Deno.serve(async (req) => {
         ...(replyText !== textTh ? { th: textTh } : {}),
       };
       const newTranscript = [...transcript, replyItem];
-      const updSend: Record<string, unknown> = { transcript: newTranscript, awaiting_reply: false, unread: false, read_at: nowIso, cust_lang: lang, last_reply_text: String(replyText || "").slice(0, 300), last_reply_by: String(body?.by || ""), last_reply_at: nowIso, last_message_at: nowIso, updated_at: nowIso };
+      const updSend: Record<string, unknown> = { transcript: newTranscript, awaiting_reply: false, unread: false, read_at: nowIso, cust_lang: lang, last_reply_text: String(replyText || "").slice(0, 300), last_reply_by: actor, last_reply_at: nowIso, last_message_at: nowIso, updated_at: nowIso };
       let conversationId = id;
       let mergedIntoExisting = false;
 
@@ -629,7 +642,7 @@ Deno.serve(async (req) => {
             transcript: mergedTranscript,
             last_user_text: row.last_user_text || null,
             last_reply_text: replyText,
-            last_reply_by: String(body?.by || ""),
+            last_reply_by: actor,
             last_reply_at: nowIso,
             last_message_at: nowIso,
             awaiting_reply: false, unread: false, updated_at: nowIso,
@@ -654,7 +667,7 @@ Deno.serve(async (req) => {
           p_id: id,
           p_items: [replyItem],
           p_reply_text: String(replyText || "").slice(0, 300),
-          p_reply_by: String(body?.by || ""),
+          p_reply_by: actor,
           p_at: nowIso,
           p_lang: lang || null,
         });
@@ -683,7 +696,7 @@ Deno.serve(async (req) => {
         const saveCandidate = admin.from("knowledge_qa").upsert({
           source_key: sourceKey, page_id: row.page_id, source: row.source || "messenger",
           source_chat_id: conversationId, question: knowledgeQuestion, answer: knowledgeAnswer,
-          language: lang || row.cust_lang || null, status: "pending", created_by: String(body?.by || "") || null,
+          language: lang || row.cust_lang || null, status: "pending", created_by: actor || null,
           updated_at: nowIso,
         }, { onConflict: "source_key", ignoreDuplicates: true });
         if (statRuntime?.waitUntil) statRuntime.waitUntil(saveCandidate); else await saveCandidate;
@@ -752,13 +765,15 @@ Deno.serve(async (req) => {
       }
       const nowIso = new Date().toISOString();
       const label = type === "image" ? "[รูปภาพ]" : type === "video" ? "[วิดีโอ]" : type === "audio" ? "[เสียง]" : `[ไฟล์: ${filename || "attachment"}]`;
-      const statTask = recordReplyStat(admin, row, String(body?.by || ""), transcript, nowIso); // สถิติการตอบ (ก่อน append)
+      // ส่งรูป/ไฟล์ก็นับเป็นคำตอบของรอบนั้น (ได้แต้มรอบละครั้งอยู่แล้ว ส่งรัว ๆ ก็ไม่ได้เพิ่ม)
+      // ถ้าไม่นับ คนที่ตอบด้วยรูปก่อนแล้วค่อยพิมพ์จะเสียแต้มทั้งรอบ เพราะรูปปิดรอบไปแล้ว
+      const statTask = recordReplyStat(admin, row, actor, transcript, nowIso, { points: true, via: "attachment" }); // ก่อน append
       const statRuntime = (globalThis as any).EdgeRuntime;
       if (statRuntime?.waitUntil) statRuntime.waitUntil(statTask); else await statTask;
-      const item: Record<string, unknown> = { w: "p", t: label, at: nowIso, by: String(body?.by || ""), mid: send?.message_id || null, via: row.source === "line" ? "line" : row.source === "instagram" ? "instagram" : "messenger" };
+      const item: Record<string, unknown> = { w: "p", t: label, at: nowIso, by: actor, mid: send?.message_id || null, via: row.source === "line" ? "line" : row.source === "instagram" ? "instagram" : "messenger" };
       if (type === "image" || type === "video") item.img = url;   // เก็บ URL ไว้แสดงรูปในแชท
       const newTr = [...transcript, item];
-      await admin.from("chat_customers").update({ transcript: newTr, awaiting_reply: false, unread: false, read_at: nowIso, last_reply_text: label, last_reply_by: String(body?.by || ""), last_reply_at: nowIso, last_message_at: nowIso, updated_at: nowIso }).eq("id", id);
+      await admin.from("chat_customers").update({ transcript: newTr, awaiting_reply: false, unread: false, read_at: nowIso, last_reply_text: label, last_reply_by: actor, last_reply_at: nowIso, last_message_at: nowIso, updated_at: nowIso }).eq("id", id);
       await clearRelatedUnread(admin, row, nowIso, true);
       await syncPushState(id);
       return json({ ok: true, type, img: (type === "image" || type === "video") ? url : null, message_id: send?.message_id || null });

@@ -423,6 +423,8 @@ html:not(.dark) .chat-bubble-me * { color: #FFFFFF; }
 .ds-dialog-header { border-bottom: 1px solid var(--line); }
 .ds-dialog-footer { border-top: 1px solid var(--line); background: var(--ground); }
 .ds-dialog-body { padding: 20px; }
+/* กล่องรายการแต้ม/แก้กติกา — เนื้อหาเป็นตาราง กว้าง 480 แคบเกินอ่าน */
+.ds-dialog.points-dialog { width: min(100%, 780px); }
 .ds-tabs { display: flex; gap: 4px; overflow-x: auto; border-bottom: 1px solid var(--line); scrollbar-width: none; }
 .ds-tabs::-webkit-scrollbar { display: none; }
 .ds-tab { display: inline-flex; align-items: center; gap: 7px; min-height: 42px; flex: 0 0 auto; padding: 0 12px; border-bottom: 2px solid transparent; color: var(--ink-3); font-size: 13px; font-weight: 600; transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease), background-color var(--dur) var(--ease); }
