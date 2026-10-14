@@ -126,7 +126,8 @@ Deno.serve(async (req) => {
     if (dataFilter === "none") rows = rows.filter((row) => !row.phone && !row.trade_id && !row.username);
     if (source === "ad") rows = rows.filter((row) => row.source === "ad" || row.entry_ad_id);
     if (source === "organic") rows = rows.filter((row) => row.source === "organic");
-    if (source === "unknown") rows = rows.filter((row) => !row.entry_ad_id && !["ad", "organic"].includes(row.source));
+    if (source === "instagram") rows = rows.filter((row) => !row.entry_ad_id && row.source === "instagram");
+    if (source === "unknown") rows = rows.filter((row) => !row.entry_ad_id && !["ad", "organic", "instagram"].includes(row.source));
     if (search) {
       const fields = ["customer_name", "phone", "trade_id", "username", "email", "psid", "last_user_text", "page_name", "entry_ad_id"];
       rows = rows.filter((row) => fields.some((field) => String(row[field] ?? "").toLocaleLowerCase("th-TH").includes(search)));

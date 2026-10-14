@@ -913,7 +913,7 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
 // ---------------------------------------------------------------
 // ฐานข้อมูลลูกค้า — ตารางข้อมูลที่ซิงก์มา (ค้นหา + filter + เรียงลำดับ + export)
 // ---------------------------------------------------------------
-const SOURCE_LABELS = { ad: "โฆษณา", organic: "ออร์แกนิก", unknown: "ไม่ทราบ" };
+const SOURCE_LABELS = { ad: "โฆษณา", organic: "ออร์แกนิก", instagram: "Instagram", unknown: "ไม่ทราบ" };
 
 const THAI_MONTHS = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
 // "YYYY-MM-DD" -> "d/m/yyyy" ให้ตรงรูปแบบวันที่อื่นในชีต (sheetDate ในคอมโพเนนต์ใช้แบบเดียวกัน)
@@ -1262,7 +1262,8 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
     if (dataFilter === "none") query = query.is("phone", null).is("trade_id", null).is("username", null);
     if (sourceFilter === "ad") query = query.or("source.eq.ad,entry_ad_id.not.is.null");
     else if (sourceFilter === "organic") query = query.eq("source", "organic");
-    else if (sourceFilter === "unknown") query = query.is("entry_ad_id", null).or("source.is.null,source.not.in.(ad,organic)");
+    else if (sourceFilter === "instagram") query = query.is("entry_ad_id", null).eq("source", "instagram");
+    else if (sourceFilter === "unknown") query = query.is("entry_ad_id", null).or("source.is.null,source.not.in.(ad,organic,instagram)");
     if (selectedDateFilter === "custom") {
       if (selectedDateFrom) query = query.gte("first_customer_message_at", new Date(selectedDateFrom + "T00:00:00+07:00").toISOString());
       if (selectedDateTo) {
@@ -1395,7 +1396,8 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
   }
 
   const pages = pageOpts;
-  const srcOf = (r) => (r.source === "ad" || r.entry_ad_id ? "ad" : r.source === "organic" ? "organic" : "unknown");
+  // IG ที่มาจากแอด (มี entry_ad_id) นับเป็นโฆษณา เหมือน Messenger · ที่เหลือแยกเป็น Instagram ไม่ปนกับ "ไม่ทราบ"
+  const srcOf = (r) => (r.source === "ad" || r.entry_ad_id ? "ad" : r.source === "organic" ? "organic" : r.source === "instagram" ? "instagram" : "unknown");
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const curPage = Math.min(page, totalPages);
   const pageRows = rows || [];   // แถวของหน้าปัจจุบัน (กรอง/เรียง/แบ่งหน้าที่ DB แล้ว)
@@ -1656,6 +1658,7 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
                 <option value="all">ที่มา: ทั้งหมด</option>
                 <option value="ad">โฆษณา</option>
                 <option value="organic">ออร์แกนิก</option>
+                <option value="instagram">Instagram</option>
                 <option value="unknown">ไม่ทราบ</option>
               </select>
               {(q || stageFilter !== "all" || dataFilter !== "all" || sourceFilter !== "all") && (
@@ -1948,7 +1951,7 @@ function CustomerDetailModal({ row, onClose, onSaved }) {
   const [pushResult, setPushResult] = useState(null);   // ผลส่งสถานะไป Meta (ทดสอบ)
   const fmt = (t) => { try { return new Date(t).toLocaleString("th-TH", { dateStyle: "medium", timeStyle: "short" }); } catch { return t || "-"; } };
   const transcript = Array.isArray(row.transcript) ? row.transcript : [];
-  const srcLabel = (row.source === "ad" ? "โฆษณา" : row.source === "organic" ? "ออร์แกนิก" : "ไม่ทราบ") + (row.entry_ad_id ? ` #${row.entry_ad_id}` : "");
+  const srcLabel = (row.source === "ad" ? "โฆษณา" : row.source === "organic" ? "ออร์แกนิก" : row.source === "instagram" ? "Instagram" : "ไม่ทราบ") + (row.entry_ad_id ? ` #${row.entry_ad_id}` : "");
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
   async function save() {

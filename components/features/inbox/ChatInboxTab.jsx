@@ -174,9 +174,18 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   // ข้อความที่ Meta ปฏิเสธ — เก็บฉบับที่แปลแล้วไว้ให้ก็อปไปวางในกล่องข้อความเพจ
   // (ระหว่างที่ยังไม่ได้ Advanced Access ทางนี้คือทางเดียวที่ส่งถึงลูกค้าจริงได้)
   const [failedText, setFailedText] = useState("");
-  const [typingBy, setTypingBy] = useState({});
+  // ล็อคแชท: ใครเริ่มพิมพ์ก่อนได้สิทธิ์ตอบห้องนั้น คนอื่นดูได้อย่างเดียว (กันแอดมินตอบซ้ำกัน)
+  //   peers = เครื่องอื่นที่กำลังถือร่างคำตอบในห้องนี้ { [client]: { who, since, at } }
+  //   claimSince = เวลาที่เครื่องเราเริ่มมีร่างคำตอบ (null = ไม่ได้จอง) — since น้อยสุดคือคนถือล็อค
+  //   ขอตอบแทน = จองด้วย since ติดลบ (-เวลาที่กด) จึงชนะทุกคนที่จองตามปกติ และคนกดทีหลังชนะคนกดก่อน
+  // ส่งสัญญาณทุก 2 วิระหว่างมีร่าง · ไม่มีสัญญาณเกิน 6 วิ (ปิดแท็บ/เน็ตหลุด) = ปล่อยล็อคเอง
+  const [peers, setPeers] = useState({});
+  const [claimSince, setClaimSince] = useState(null);
+  const claimSinceRef = useRef(null);
+  const lastBeatRef = useRef(0);
+  const replyRef = useRef("");
   const typingChanRef = useRef(null);      // ช่องของห้องที่เปิดอยู่
-  const typingSentAtRef = useRef(0);       // กันส่งถี่เกิน (ทุก 2 วิ ระหว่างพิมพ์)
+  const replyInputRef = useRef(null);      // ช่องพิมพ์คำตอบ — โฟกัสให้หลังกด "ขอตอบแทน"
   // แยกกันด้วย "เครื่องที่เปิด" ไม่ใช่อีเมล — ทีมนี้ใช้บัญชีร่วมกันหลายเครื่องได้
   // ถ้ากรองด้วยอีเมล คนสองเครื่องที่ล็อกอินบัญชีเดียวกันจะไม่เห็นกันเลย
   const typingClientRef = useRef(Math.random().toString(36).slice(2));
@@ -1032,7 +1041,8 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   // ช่อง "กำลังพิมพ์" ของห้องที่เปิดอยู่ — เข้าห้องไหนก็ฟังแค่ห้องนั้น
   // ต่ออายุ 6 วินาที: ถ้าไม่มีสัญญาณใหม่ถือว่าหยุดพิมพ์แล้ว (กันค้างเมื่อคนปิดแท็บไปเลย)
   useEffect(() => {
-    setTypingBy({});
+    setPeers({});
+    setClaimSince(null); claimSinceRef.current = null; lastBeatRef.current = 0;
     typingChanRef.current = null;
     const id = selected?.id;
     if (!active || !id) return;
@@ -1040,35 +1050,90 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
       .on("broadcast", { event: "typing" }, ({ payload }) => {
         const who = String(payload?.by || "").trim();
         const from = String(payload?.client || "");
-        if (!who || from === typingClientRef.current) return;   // ข้ามเฉพาะเครื่องเราเอง
-        setTypingBy((cur) => ({ ...cur, [who]: payload?.stop ? 0 : Date.now() }));
+        if (!who || !from || from === typingClientRef.current) return;   // ข้ามเฉพาะเครื่องเราเอง
+        setPeers((cur) => {
+          if (payload?.stop) { if (!cur[from]) return cur; const next = { ...cur }; delete next[from]; return next; }
+          // เครื่องเวอร์ชันเก่าไม่ส่ง since มา — ใช้เวลาที่เห็นครั้งแรกแทน
+          const since = Number.isFinite(Number(payload?.since)) ? Number(payload.since) : (cur[from]?.since ?? Date.now());
+          return { ...cur, [from]: { who, since, at: Date.now() } };
+        });
       })
       .subscribe();
     typingChanRef.current = chan;
     const sweep = setInterval(() => {
-      setTypingBy((cur) => {
+      setPeers((cur) => {
         const next = {};
         let changed = false;
-        for (const [who, at] of Object.entries(cur)) {
-          if (at > 0 && Date.now() - at < 6000) next[who] = at; else changed = true;
+        for (const [k, v] of Object.entries(cur)) {
+          if (Date.now() - v.at < 6000) next[k] = v; else changed = true;
         }
         return changed ? next : cur;
       });
     }, 1500);
-    return () => { clearInterval(sweep); supabase.removeChannel(chan); typingChanRef.current = null; };
+    // ปิดแท็บ/รีเฟรช = ปล่อยล็อคทันที ไม่ต้องรอหมดเวลา 6 วิ
+    const onUnload = () => { if (claimSinceRef.current != null) chan.send({ type: "broadcast", event: "typing", payload: { by: myEmail, client: typingClientRef.current, stop: true } }); };
+    window.addEventListener("pagehide", onUnload);
+    return () => {
+      window.removeEventListener("pagehide", onUnload);
+      onUnload();   // เปลี่ยนห้อง = ปล่อยล็อคห้องเดิม
+      clearInterval(sweep); supabase.removeChannel(chan); typingChanRef.current = null;
+    };
   }, [active, selected?.id, myEmail]);
 
+  // คนถือล็อค = since น้อยสุด (เสมอกันตัดสินด้วยรหัสเครื่อง ทุกเครื่องได้ผลเดียวกัน)
+  const lockHolder = (() => {
+    const all = Object.entries(peers).map(([client, v]) => ({ client, ...v }));
+    if (claimSince != null && myEmail) all.push({ client: typingClientRef.current, who: myEmail, since: claimSince });
+    all.sort((a, b) => a.since - b.since || (a.client < b.client ? -1 : 1));
+    return all[0] || null;
+  })();
+  const lockedBy = lockHolder && lockHolder.client !== typingClientRef.current ? lockHolder : null;
+  const typingBy = Object.fromEntries(Object.values(peers).map((v) => [v.who, v.at]));
+
+  // มีร่างคำตอบ = จองห้อง · ลบร่างหมด/ส่งแล้ว = ปล่อย
+  useEffect(() => {
+    replyRef.current = reply;
+    const has = !!reply.trim();
+    if (has && claimSinceRef.current == null) { claimSinceRef.current = Date.now(); setClaimSince(claimSinceRef.current); }
+    if (!has && claimSinceRef.current != null && claimSinceRef.current > 0) releaseClaim();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reply]);
+
+  function releaseClaim() {
+    claimSinceRef.current = null; lastBeatRef.current = 0; setClaimSince(null);
+    typingChanRef.current?.send({ type: "broadcast", event: "typing", payload: { by: myEmail, client: typingClientRef.current, stop: true } });
+  }
+
+  // ส่งสัญญาณทุก 2 วิระหว่างจองอยู่
+  useEffect(() => {
+    if (claimSince == null || !selected?.id || !myEmail) return;
+    const beat = () => {
+      const now = Date.now();
+      // แท็บถูกพักไว้ (เบราว์เซอร์หน่วงตัวจับเวลา) จนเครื่องอื่นถือว่าเราปล่อยแล้ว — ต่อคิวใหม่ ไม่แย่งคืน
+      if (lastBeatRef.current && now - lastBeatRef.current > 5000 && claimSince > 0) {
+        lastBeatRef.current = now; claimSinceRef.current = now; setClaimSince(now); return;
+      }
+      // กดขอตอบแทนแล้วไม่พิมพ์อะไรใน 15 วิ = คืนล็อค
+      if (claimSince < 0 && !replyRef.current.trim() && now + claimSince > 15000) { releaseClaim(); return; }
+      lastBeatRef.current = now;
+      typingChanRef.current?.send({ type: "broadcast", event: "typing", payload: { by: myEmail, client: typingClientRef.current, since: claimSince } });
+    };
+    beat();
+    const iv = setInterval(beat, 2000);
+    return () => clearInterval(iv);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [claimSince, selected?.id, myEmail]);
+
+  function takeOverLock() {
+    const since = -Date.now();
+    claimSinceRef.current = since; lastBeatRef.current = 0; setClaimSince(since);
+    setTimeout(() => replyInputRef.current?.focus(), 50);
+  }
+
   // บอกเพื่อนร่วมทีมว่าเรากำลังพิมพ์ — ส่งอย่างมากทุก 2 วินาที
+  // สัญญาณ "กำลังพิมพ์" ส่งจากตัวจับเวลาของล็อคแชทด้านบนแล้ว — ตรงนี้เหลือแค่ปล่อยล็อคตอนลบร่าง/ส่ง
   const notifyTyping = (stop = false) => {
-    const chan = typingChanRef.current;
-    if (!chan || !myEmail) return;
-    // ตอนหยุดพิมพ์ต้องส่งทันที ไม่ติดคูลดาวน์ ไม่งั้นป้ายค้างอยู่อีก 6 วิ
-    if (!stop && Date.now() - typingSentAtRef.current < 2000) return;
-    typingSentAtRef.current = stop ? 0 : Date.now();
-    chan.send({
-      type: "broadcast", event: "typing",
-      payload: { by: myEmail, client: typingClientRef.current, ...(stop ? { stop: true } : {}) },
-    });
+    if (stop && claimSinceRef.current != null) releaseClaim();
   };
 
   // เมื่อสลับไปแท็บอื่น: หยุด subscription/poll ทั้งหมด (การแจ้งเตือนตอนปิดแอปยังทำงานผ่าน push/cron ฝั่ง server — ไม่กระทบ)
@@ -1490,6 +1555,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
 
   async function prepareSendPreview() {
     if (!selected || sending) return;
+    if (lockedBy) { setSendMsg(`🔒 ${lockedBy.who.split("@")[0]} กำลังตอบแชทนี้อยู่ — ส่งไม่ได้จนกว่าจะตอบเสร็จ (หรือกด "ขอตอบแทน")`); return; }
     const hasText = reply.trim().length > 0;
     if (!hasText && pendingFiles.length === 0) return;
     if (isCommentChat(selected) && pendingFiles.length) {
@@ -1515,6 +1581,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
 
   async function sendReply(approved = sendPreview) {
     if (!selected || sending) return;
+    if (lockedBy) { setSendMsg(`🔒 ${lockedBy.who.split("@")[0]} กำลังตอบแชทนี้อยู่ — ส่งไม่ได้จนกว่าจะตอบเสร็จ (หรือกด "ขอตอบแทน")`); return; }
     const hasText = reply.trim().length > 0;
     if (!hasText && pendingFiles.length === 0) return;
     if (isCommentChat(selected) && pendingFiles.length) {
@@ -3258,10 +3325,20 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                     ))}
                   </div>
                 )}
+                {lockedBy && (
+                  <div className="mb-2 flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-300">
+                    <span className="min-w-0 flex-1">
+                      🔒 <b>{lockedBy.who.split("@")[0]}</b> กำลังตอบแชทนี้อยู่ — ดูได้อย่างเดียว กันตอบซ้ำกัน
+                      {reply.trim() && <span className="block text-[11px] opacity-80">ร่างของคุณยังอยู่ จะพิมพ์ต่อ/ส่งได้เมื่อเขาตอบเสร็จ</span>}
+                    </span>
+                    <button type="button" onClick={() => { if (confirm(`ขอตอบแทน ${lockedBy.who.split("@")[0]}?\nใช้ตอนเขาพิมพ์ค้างไว้แล้วไม่อยู่ — ถ้าเขายังตอบอยู่จะได้ข้อความซ้ำกัน`)) takeOverLock(); }}
+                      className="shrink-0 rounded-md border border-amber-500/50 px-2 py-1 text-[11px] font-semibold hover:bg-amber-500/20">ขอตอบแทน</button>
+                  </div>
+                )}
                 <div className="relative">
-                  <div className="flex items-end gap-2 rounded-lg border border-night-border bg-night-surface2 overflow-hidden pr-1.5 py-1.5">
-                    <textarea value={reply} onChange={(e) => { setReply(e.target.value); setSendPreview(null); notifyTyping(!e.target.value.trim()); }} onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) prepareSendPreview(); }} rows={2} placeholder="พิมพ์คำตอบเป็นไทย..." className="flex-1 bg-transparent border-0 px-3 py-1 text-sm leading-relaxed resize-none focus:outline-none" />
-                    <button onClick={prepareSendPreview} disabled={sending || (!reply.trim() && pendingFiles.length === 0)} className="bg-night-accent text-white rounded-md px-3.5 py-2 text-sm font-semibold disabled:opacity-50 flex items-center gap-1.5 shrink-0 self-end">
+                  <div className={`flex items-end gap-2 rounded-lg border border-night-border bg-night-surface2 overflow-hidden pr-1.5 py-1.5 ${lockedBy ? "opacity-60" : ""}`}>
+                    <textarea ref={replyInputRef} readOnly={!!lockedBy} value={reply} onChange={(e) => { if (lockedBy) return; setReply(e.target.value); setSendPreview(null); notifyTyping(!e.target.value.trim()); }} onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) prepareSendPreview(); }} rows={2} placeholder={lockedBy ? `🔒 ${lockedBy.who.split("@")[0]} กำลังตอบแชทนี้ — ดูได้อย่างเดียว` : "พิมพ์คำตอบเป็นไทย..."} className="flex-1 bg-transparent border-0 px-3 py-1 text-sm leading-relaxed resize-none focus:outline-none" />
+                    <button onClick={prepareSendPreview} disabled={sending || !!lockedBy || (!reply.trim() && pendingFiles.length === 0)} className="bg-night-accent text-white rounded-md px-3.5 py-2 text-sm font-semibold disabled:opacity-50 flex items-center gap-1.5 shrink-0 self-end">
                       {sending ? <Loader2 className="animate-spin" size={15} /> : (!reply.trim() && pendingFiles.length > 0) ? <ArrowUpCircle size={15} /> : <Send size={15} />} {(!reply.trim() && pendingFiles.length > 0) ? "ส่งรูป" : "ส่ง"}
                     </button>
                   </div>

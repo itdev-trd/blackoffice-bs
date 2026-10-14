@@ -15,7 +15,11 @@ const WEBHOOK_HEALTH_MS = 15 * 60 * 1000;
 const MAX_TRANSCRIPT_TEXT = 10_000;
 const ONE_BY_ONE_MAX = 5;                     // จำนวนห้องสูงสุดที่ไล่เก็บทีละใบ (คุมจำนวนคำขอ Meta ต่อรอบ)
 const HEAVY_RETRY_MS = 24 * 60 * 60 * 1000;   // เว้นวรรคก่อนกลับไปลองขอเป็นชุดอีกครั้ง
-const BACKFILL_MAX_PAGES = 20;                // backfill: ไล่ paging.next สูงสุดกี่หน้า (หน้าละ ~25 ห้อง) ต่อการเรียกหนึ่งครั้ง
+const BACKFILL_MAX_PAGES = 60;                // backfill: ไล่ paging.next สูงสุดกี่หน้า (หน้าละ ~25 ห้อง) ต่อการเรียกหนึ่งครั้ง
+const BACKFILL_MSG_PAGES = 20;                // backfill: ไล่ข้อความย้อนหลังในห้องเดียวสูงสุดกี่หน้า (หน้าละ 30)
+const BACKFILL_BUDGET_MS = 110_000;           // เผื่อเวลาก่อน edge function ถูกตัด (~150 วิ) — เกินนี้คืน next_after ให้เรียกต่อ
+// แชท = BeSight เท่านั้น — token ตอบแชทเห็นเพจธุรกิจอื่นด้วย ห้ามดึง IG ของเพจพวกนั้นเข้ามา (CLAUDE.md)
+const CHAT_PAGE_IDS = ["438134449376109"];
 const transcriptText = (value: unknown) => String(value || "").slice(0, MAX_TRANSCRIPT_TEXT);
 const corsHeaders = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type" };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "content-type": "application/json" } });
@@ -39,6 +43,12 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     // backfill=true: ดึงย้อนหลังทุกห้อง (ไล่ paging) — ใช้ครั้งเดียวหลังแอปได้ Advanced Access ของ instagram_manage_messages
     const backfill = body?.backfill === true;
+    // since (ISO) = ดึงย้อนถึงวันไหน — หยุดไล่หน้าเมื่อเจอห้องที่เคลื่อนไหวล่าสุดก่อนวันนั้น · after = cursor จากรอบก่อน (เรียกต่อ)
+    const sinceMs = backfill ? timeMs(body?.since) : 0;
+    const afterCursor = backfill ? String(body?.after || "") : "";
+    const startedAt = Date.now();
+    const overBudget = () => backfill && Date.now() - startedAt > BACKFILL_BUDGET_MS;
+    let nextAfter = "";
     const requested = [...new Set((Array.isArray(body?.page_ids) ? body.page_ids : []).map(String).filter(Boolean))];
     // สิทธิ์ตอบแชทไม่ผูกกับเพจ — ใครเข้าหน้าตอบแชทได้ ก็ตอบได้ทุกเพจและทุก LINE OA
 
@@ -48,7 +58,7 @@ Deno.serve(async (req) => {
     const token = await getMetaToken();
     if (!token) return json({ ok: false, error: "ยังไม่ได้ตั้งค่า Meta access token" });
     const pagesData = await getChatPages(GRAPH_BASE);
-    let pages = (pagesData?.data ?? []).filter((p: any) => p.access_token && p.instagram_business_account?.id);
+    let pages = (pagesData?.data ?? []).filter((p: any) => p.access_token && p.instagram_business_account?.id && CHAT_PAGE_IDS.includes(String(p.id)));
     if (requested.length) pages = pages.filter((p: any) => requested.includes(String(p.id)));
     if (!pages.length) return json({ ok: true, upserted: 0, skipped: "no_instagram_pages" });
 
@@ -88,7 +98,8 @@ Deno.serve(async (req) => {
       const heavyBlockedAt = timeMs(heavyBlocked[pageId]);
       const skipHeavy = !backfill && heavyBlockedAt > 0 && Date.now() - heavyBlockedAt < HEAVY_RETRY_MS;
       for (const attempt of (skipHeavy ? [] : attempts)) {
-        const response = await fetch(`${GRAPH_BASE}/${pageId}/conversations?platform=instagram&fields=${encodeURIComponent(attempt.fields)}&limit=${attempt.limit}&access_token=${page.access_token}`);
+        const response = await fetch(`${GRAPH_BASE}/${pageId}/conversations?platform=instagram&fields=${encodeURIComponent(attempt.fields)}&limit=${attempt.limit}`
+          + (afterCursor ? `&after=${encodeURIComponent(afterCursor)}` : "") + `&access_token=${page.access_token}`);
         await recordMetaUsage(admin, response, "instagram_recent_fallback");
         result = await response.json().catch(() => ({}));
         // code 1 = ขอข้อมูลหนักเกิน · code -2/subcode 2534084 = query timeout เพราะสิทธิ์ instagram_manage_messages
@@ -98,14 +109,35 @@ Deno.serve(async (req) => {
       }
       // backfill: ขอเป็นชุดได้ (= มี Advanced Access แล้ว) → ไล่หน้าถัดไปจนครบ/ถึงเพดาน
       if (backfill && !result?.error && Array.isArray(result?.data)) {
-        let next = result?.paging?.next || "";
+        // ห้องเรียงจากเคลื่อนไหวล่าสุด → เจอห้องที่เก่ากว่า since = ห้องถัดไปก็เก่ากว่าหมด หยุดได้
+        const reachedSince = (rows: any[]) => sinceMs > 0 && rows.some((c: any) => timeMs(c?.updated_time) && timeMs(c.updated_time) < sinceMs);
+        let next = reachedSince(result.data) ? "" : (result?.paging?.next || "");
+        let cursor = result?.paging?.cursors?.after || "";
         for (let i = 0; next && i < BACKFILL_MAX_PAGES; i++) {
+          if (overBudget()) { nextAfter = cursor; break; }
           const res = await fetch(next);
           await recordMetaUsage(admin, res, "instagram_backfill");
           const more = await res.json().catch(() => ({}));
           if (more?.error || !Array.isArray(more?.data) || !more.data.length) break;
           result.data.push(...more.data);
-          next = more?.paging?.next || "";
+          cursor = more?.paging?.cursors?.after || "";
+          next = reachedSince(more.data) ? "" : (more?.paging?.next || "");
+        }
+        if (sinceMs > 0) result.data = result.data.filter((c: any) => !timeMs(c?.updated_time) || timeMs(c.updated_time) >= sinceMs);
+        // ข้อความในห้อง: คำขอแรกได้แค่ 30 ล่าสุด — ไล่หน้าถัดไปจนถึง since ให้ได้ประวัติครบ
+        for (const conv of result.data) {
+          let mNext = conv?.messages?.paging?.next || "";
+          for (let i = 0; mNext && i < BACKFILL_MSG_PAGES; i++) {
+            if (overBudget()) break;
+            const msgs = conv.messages.data as any[];
+            if (sinceMs > 0 && msgs.length && timeMs(msgs[msgs.length - 1]?.created_time) < sinceMs) break;
+            const res = await fetch(mNext);
+            await recordMetaUsage(admin, res, "instagram_backfill");
+            const more = await res.json().catch(() => ({}));
+            if (more?.error || !Array.isArray(more?.data) || !more.data.length) break;
+            msgs.push(...more.data);
+            mNext = more?.paging?.next || "";
+          }
         }
       }
       // ---- ทางถอย: เดินทีละห้อง ----
@@ -169,7 +201,7 @@ Deno.serve(async (req) => {
         if (!psid) continue;
         const existing: any = existingByPsid.get(psid);
         const messages = (conv?.messages?.data ?? []) as any[];
-        const transcript = messages.filter((m: any) => m.message || m.sticker || m.attachments?.data?.length).slice(0, 60).map((m: any) => {
+        const fresh = messages.filter((m: any) => m.message || m.sticker || m.attachments?.data?.length).slice(0, backfill ? 1000 : 60).map((m: any) => {
           const isPage = [pageId, igId].includes(String(m?.from?.id || ""));
           const att = m?.attachments?.data?.[0];
           const label = att || m.sticker ? mediaLabel(att, m.sticker) : "[สื่อ]";
@@ -180,6 +212,13 @@ Deno.serve(async (req) => {
           if (m.id) item.mid = m.id;
           return item;
         }).reverse();
+        // รวมกับประวัติเดิม ไม่เขียนทับ — Meta คืนแค่ข้อความล่าสุดชุดหนึ่ง ถ้าทับตรง ๆ ห้องที่คุยยาวจะเสียข้อความเก่า
+        // ข้อความเดียวกัน = mid ตรงกัน หรือ (ไม่มี mid เช่นข้อความที่แอปส่งเอง) ฝั่งเดียวกัน+ข้อความเดียวกัน+เวลาห่างไม่เกิน 2 นาที
+        const freshMids = new Set(fresh.map((m: any) => m.mid).filter(Boolean));
+        const sameAsFresh = (m: any) => (m?.mid && freshMids.has(m.mid)) || fresh.some((f: any) =>
+          f.w === m?.w && String(f.t || "").trim() === String(m?.t || "").trim() && Math.abs(timeMs(f.at) - timeMs(m?.at)) <= 120_000);
+        const kept = (Array.isArray(existing?.transcript) ? existing.transcript : []).filter((m: any) => !sameAsFresh(m));
+        const transcript = [...kept, ...fresh].sort((a: any, b: any) => timeMs(a?.at) - timeMs(b?.at));
         if (!transcript.length) continue;
         const lastAt = conv.updated_time || transcript[transcript.length - 1]?.at || checkedAt;
         const lastUser = [...transcript].reverse().find((m: any) => m.w === "u");
@@ -194,7 +233,7 @@ Deno.serve(async (req) => {
         const common = {
           source: "instagram", page_id: pageId, page_name: page.name || page.instagram_business_account?.username || null,
           psid, customer_name: customer?.name || customer?.username || existing?.customer_name || "Instagram user",
-          transcript, message_count: conv.message_count ?? transcript.length,
+          transcript, message_count: Math.max(Number(conv.message_count) || 0, transcript.length),
           user_message_count: transcript.filter((m: any) => m.w === "u").length,
           last_user_text: lastUser?.t || null, last_reply_text: lastPage?.t || null, last_reply_at: lastPage?.at || null,
           last_message_at: lastAt, awaiting_reply: awaitingReply, unread,
@@ -216,7 +255,7 @@ Deno.serve(async (req) => {
       }
     }
     await admin.from("settings").upsert({ key: STATE_KEY, value: { last_by_page: lastByPage, heavy_blocked: heavyBlocked }, updated_at: new Date().toISOString() });
-    return json({ ok: errors.length === 0, upserted, checked_pages: pages.length, errors, limited: limitedNow() });
+    return json({ ok: errors.length === 0, upserted, checked_pages: pages.length, errors, limited: limitedNow(), ...(backfill ? { next_after: nextAfter || null } : {}) });
   } catch (error) {
     return json({ ok: false, error: String(error instanceof Error ? error.message : error) }, 200);
   }
