@@ -26,7 +26,8 @@ import { beToCe, bangkokDate } from "@/lib/utils/date";
 import { hasFullData } from "@/lib/constants/roles";
 import { COUNTRIES, normalizeCountry } from "@/lib/constants/countries";
 import { logActivity } from "@/lib/utils/activity";
-import { isChatPage } from "@/lib/constants/chat-pages";
+import { isChatPage, BESIGHT_PAGE_ID } from "@/lib/constants/chat-pages";
+const IG_OPTION = "besight:instagram";   // ค่าในตัวเลือกเพจของรีพอร์ต — ไม่ใช่ page_id จริง
 import { lsGet, lsSet } from "@/lib/utils/storage";
 import { readFunctionErrorMessage } from "@/lib/utils/errors";
 import { getCustomerDateRange } from "@/lib/customer-date-filter";
@@ -1601,9 +1602,18 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
         <div className="rounded-card border border-[var(--line)] bg-[var(--ground)] p-3 space-y-2">
           <div className="text-xs font-medium text-[var(--ink-2)]">เลือกเพจและช่วงเวลา แล้วกด “ดึงรายงาน”</div>
           <div className="flex flex-wrap gap-2">
-          <select value={pageFilter} onChange={(e) => setPageFilter(e.target.value)} className={selCls} title="เพจ">
+          {/* IG ใช้ page_id เดียวกับเพจ BeSight — ตัวเลือก "(Instagram)" = เพจ BeSight + ที่มา Instagram
+              (เดิมต้องไปหาในตัวกรอง "ที่มา" ด้านล่าง ซึ่งโผล่หลังดึงรายงานแล้วเท่านั้น คนเลยหา IG ไม่เจอ) */}
+          <select value={pageFilter === BESIGHT_PAGE_ID && sourceFilter === "instagram" ? IG_OPTION : pageFilter}
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === IG_OPTION) { setPageFilter(BESIGHT_PAGE_ID); setSourceFilter("instagram"); return; }
+              setPageFilter(v);
+              if (sourceFilter === "instagram") setSourceFilter("all");
+            }} className={selCls} title="เพจ">
             <option value="">— เลือกเพจ —</option>
-            {pages.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            {pages.map((p) => <option key={p.id} value={p.id}>{p.id === BESIGHT_PAGE_ID ? `${p.name} (Messenger + Instagram)` : p.name}</option>)}
+            {pages.some((p) => p.id === BESIGHT_PAGE_ID) && <option value={IG_OPTION}>BeSight (Instagram)</option>}
           </select>
           <select value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} className={selCls} title="ช่วงวันที่">
             <option value="">— เลือกช่วงเวลา —</option>

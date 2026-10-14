@@ -20,6 +20,7 @@ import {
   Send,
   Instagram,
   MoreVertical,
+  Lock,
 } from "lucide-react";
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from "@/lib/supabase/client";
 import { lsGet, lsSet } from "@/lib/utils/storage";
@@ -92,6 +93,8 @@ const LIST_PAGE = 200;
 const LIST_COLS = "id, customer_name, last_user_text, last_reply_text, last_reply_by, last_reply_at, last_message_at, page_id, page_name, country, cust_lang, source, entry_ad_id, entry_ad_name, comment_ad_name, comment_ad_ids, comment_ad_names, comment_is_ad, comment_promoted_to_inbox, stage, stage_manual, psid, profile_pic, awaiting_reply, unread, cust_read_at, blocked_at, synced_at, updated_at, tags, not_interested_at, purge_confirmed_at, purge_at";
 
 const CHAT_OPEN_COLS = "id, page_id, page_name, psid, customer_name, source, stage, stage_manual, classified_by, needs_ai, needs_verify, manual_data, manual_data_by, manual_data_at, trade_id, username, phone, email, address, awaiting_reply, unread, read_at, cust_read_at, cust_lang, country, broker, profile_pic, transcript, account_opened_at, entry_ad_id, entry_ad_name, last_user_text, last_reply_text, last_reply_by, last_reply_at, last_message_at, comment_ad_name, comment_ad_ids, comment_ad_names, comment_is_ad, comment_promoted_to_inbox, comment_permalink, blocked_at, synced_at, updated_at, notes, tags, ai_summary, ai_summary_at, not_interested_at, purge_at";
+
+const TAKEOVER_WAIT_S = 30;   // ล็อคแชท: คนถือล็อคมีเวลากี่วินาทีให้ตอบคำขอตอบแทน ก่อนยกให้อัตโนมัติ
 
 export default function ChatInboxTab({ allowedPages = null, alertAllowed = true, alertMin = 3, alertPages = [], alertSound = true, alertNew = true, gotoChat = null, onGotoDone, active = true }) {
   const isInstagramComment = (row) => String(row?.id || "").startsWith("igc_");
@@ -184,6 +187,12 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   const claimSinceRef = useRef(null);
   const lastBeatRef = useRef(0);
   const replyRef = useRef("");
+  // ขอตอบแทน = ต้องให้คนถือล็อคกดยอมรับก่อน (ไม่ตอบใน TAKEOVER_WAIT_S วิ = ถือว่าไม่อยู่หน้าจอ ยกให้อัตโนมัติ)
+  const [incomingReq, setIncomingReq] = useState(null);   // ฝั่งคนถือล็อค: { from, who, at }
+  const [pendingReq, setPendingReq] = useState(null);     // ฝั่งคนขอ: { to, who, at }
+  const [reqNotice, setReqNotice] = useState("");         // ผลคำขอ (ถูกปฏิเสธ/ไม่มีคนตอบ)
+  const pendingReqRef = useRef(null);
+  const [nowTick, setNowTick] = useState(0);              // นับถอยหลังในป๊อปอัป
   const typingChanRef = useRef(null);      // ช่องของห้องที่เปิดอยู่
   const replyInputRef = useRef(null);      // ช่องพิมพ์คำตอบ — โฟกัสให้หลังกด "ขอตอบแทน"
   // แยกกันด้วย "เครื่องที่เปิด" ไม่ใช่อีเมล — ทีมนี้ใช้บัญชีร่วมกันหลายเครื่องได้
@@ -524,7 +533,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     return () => mq.removeEventListener("change", sync);
   }, []);
   // จอที่มีแผงขวาแล้ว บังคับกลับโหมดตอบเสมอ
-  const activeCompose = hasSidePanel ? "reply" : composeMode;
+  const activeComposeRaw = hasSidePanel ? "reply" : composeMode;
   // โน้ต/แท็ก/สรุปบทสนทนา — เก็บ draft ของโน้ตแยกจาก selected เพราะพิมพ์แล้วค่อย save ตอน blur
   const [notesDraft, setNotesDraft] = useState("");
   const [notesSaving, setNotesSaving] = useState(false);
@@ -1058,8 +1067,21 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
           return { ...cur, [from]: { who, since, at: Date.now() } };
         });
       })
+      .on("broadcast", { event: "lock" }, ({ payload }) => {
+        if (String(payload?.to || "") !== typingClientRef.current) return;   // คำขอ/คำตอบที่ส่งถึงเครื่องเราเท่านั้น
+        const from = String(payload?.from || "");
+        const who = String(payload?.who || "").trim();
+        if (payload?.type === "request") setIncomingReq({ from, who, at: Date.now() });
+        else if (payload?.type === "cancel") setIncomingReq((cur) => (cur?.from === from ? null : cur));
+        else if (pendingReqRef.current?.to === from) {
+          pendingReqRef.current = null; setPendingReq(null);
+          if (payload?.type === "accept") { setReqNotice(""); takeOverLock(); }
+          else if (payload?.type === "reject") setReqNotice(`${who.split("@")[0] || "อีกฝ่าย"} ยังตอบอยู่ — ปฏิเสธคำขอ`);
+        }
+      })
       .subscribe();
     typingChanRef.current = chan;
+    setIncomingReq(null); pendingReqRef.current = null; setPendingReq(null); setReqNotice("");
     const sweep = setInterval(() => {
       setPeers((cur) => {
         const next = {};
@@ -1088,6 +1110,8 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     return all[0] || null;
   })();
   const lockedBy = lockHolder && lockHolder.client !== typingClientRef.current ? lockHolder : null;
+  // ถูกล็อค = ปิดทุกโหมดของห้องนี้ (ตอบแชท/เช็คไอดีเทรด/ข้อมูลลูกค้า) — ไม่ render เนื้อหาเลย ไม่ใช่แค่บังไว้
+  const activeCompose = lockedBy ? "reply" : activeComposeRaw;
   const typingBy = Object.fromEntries(Object.values(peers).map((v) => [v.who, v.at]));
 
   // มีร่างคำตอบ = จองห้อง · ลบร่างหมด/ส่งแล้ว = ปล่อย
@@ -1129,6 +1153,42 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     claimSinceRef.current = since; lastBeatRef.current = 0; setClaimSince(since);
     setTimeout(() => replyInputRef.current?.focus(), 50);
   }
+  const sendLockMsg = (payload) => typingChanRef.current?.send({ type: "broadcast", event: "lock", payload: { from: typingClientRef.current, who: myEmail, ...payload } });
+  function requestTakeover() {
+    if (!lockedBy) return;
+    const req = { to: lockedBy.client, who: lockedBy.who, at: Date.now() };
+    pendingReqRef.current = req; setPendingReq(req); setReqNotice("");
+    sendLockMsg({ type: "request", to: lockedBy.client });
+  }
+  function cancelTakeover() {
+    if (pendingReqRef.current) sendLockMsg({ type: "cancel", to: pendingReqRef.current.to });
+    pendingReqRef.current = null; setPendingReq(null);
+  }
+  // ฝั่งคนถือล็อค: ยอมรับ = ปล่อยห้องให้ (ร่างของเรายังอยู่ แต่จะกลายเป็นดูอย่างเดียว) · ปฏิเสธ = ถือต่อ
+  function answerTakeover(accept) {
+    const req = incomingReq;
+    setIncomingReq(null);
+    if (!req) return;
+    sendLockMsg({ type: accept ? "accept" : "reject", to: req.from });
+    if (accept && claimSinceRef.current != null) releaseClaim();
+  }
+  // นับถอยหลัง + ครบเวลา: ฝั่งถือล็อค = ยกให้อัตโนมัติ · ฝั่งขอ = เลิกรอ (อีกฝ่ายอาจเป็นเวอร์ชันเก่าที่ไม่รู้จักคำขอ)
+  useEffect(() => {
+    if (!incomingReq && !pendingReq) return;
+    const iv = setInterval(() => {
+      setNowTick(Date.now());
+      if (incomingReq && Date.now() - incomingReq.at > TAKEOVER_WAIT_S * 1000) answerTakeover(true);
+      if (pendingReqRef.current && Date.now() - pendingReqRef.current.at > (TAKEOVER_WAIT_S + 8) * 1000) {
+        pendingReqRef.current = null; setPendingReq(null); setReqNotice("ไม่มีการตอบรับ — ลองใหม่อีกครั้ง");
+      }
+    }, 500);
+    return () => clearInterval(iv);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [incomingReq, pendingReq]);
+  // คนถือล็อคไปแล้ว (ส่งเสร็จ/ปิดแท็บ) ระหว่างรอ = ไม่ต้องรอต่อ
+  useEffect(() => { if (!lockedBy && pendingReqRef.current) { pendingReqRef.current = null; setPendingReq(null); } }, [lockedBy]);
+  // ไม่ได้ถือล็อคแล้ว = ป๊อปอัปคำขอไม่มีความหมาย
+  useEffect(() => { if (claimSince == null && incomingReq) setIncomingReq(null); }, [claimSince, incomingReq]);
 
   // บอกเพื่อนร่วมทีมว่าเรากำลังพิมพ์ — ส่งอย่างมากทุก 2 วินาที
   // สัญญาณ "กำลังพิมพ์" ส่งจากตัวจับเวลาของล็อคแชทด้านบนแล้ว — ตรงนี้เหลือแค่ปล่อยล็อคตอนลบร่าง/ส่ง
@@ -2049,6 +2109,32 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   //   /v2/bot/chat/tags, /v2/bot/tag/list, /v2/bot/chat/{userId}/tag, /v2/bot/user/{userId}/tags
   //   ตอบ 404 ทุกตัว ขณะที่ /v2/bot/profile/{userId} ตอบ 200 = ไม่ใช่เรื่องสิทธิ์ แต่ไม่มี API
   //   แท็กใน LINE OA Manager อยู่แค่ในหน้าจอของ LINE เอง ดึงหรือส่งจากภายนอกไม่ได้
+  // การ์ดบอกว่าห้องนี้ถูกล็อค — ใช้ทั้งบนกล่องพิมพ์และแผงขวา
+  // เรียกเป็นฟังก์ชัน ไม่ใช่ <Component/> — ประกาศใน render แล้วใช้เป็น component จะ remount ทุกครั้งที่สัญญาณเข้า (ทุก 2 วิ) ทำให้ animation เล่นซ้ำจนกะพริบ
+  const renderLockCard = (compact = false) => {
+    if (!lockedBy) return null;
+    const name = lockedBy.who.split("@")[0];
+    const left = pendingReq ? Math.max(0, TAKEOVER_WAIT_S - Math.floor(((nowTick || Date.now()) - pendingReq.at) / 1000)) : 0;
+    return (
+      <div className={`chat-lock-card ${compact ? "is-compact" : ""}`}>
+        <span className="chat-lock-icon"><Lock size={18} /></span>
+        <div className="min-w-0 flex-1">
+          <div className="chat-lock-title">
+            <b>{name}</b> กำลังตอบแชทนี้อยู่
+            <span className="chat-lock-dots" aria-hidden="true"><i /><i /><i /></span>
+          </div>
+          <div className="chat-lock-sub">
+            {pendingReq ? `ส่งคำขอแล้ว รอ ${name} กดยอมรับ… (${left} วิ)`
+              : reqNotice || `ตอบแชท เช็คไอดี และข้อมูลลูกค้าถูกล็อคไว้ กันแอดมินทำซ้ำกัน${reply.trim() ? " · ร่างของคุณเก็บไว้ให้แล้ว" : ""}`}
+          </div>
+        </div>
+        {pendingReq
+          ? <button type="button" className="chat-lock-btn is-ghost" onClick={cancelTakeover}>ยกเลิกคำขอ</button>
+          : <button type="button" className="chat-lock-btn" onClick={requestTakeover}>ขอตอบแทน</button>}
+      </div>
+    );
+  };
+
   const ConversationInsights = () => !selected ? null : (() => {
   const isLine = selected.source === "line";
   const isComment = selected.source === "comment" || String(selected.id).startsWith("fbc_");
@@ -3146,7 +3232,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                 ))}<div ref={bottomRef} /></>}
               </div>
               {/* ใครกำลังพิมพ์อยู่ในห้องนี้ — กันสองคนตอบทับกัน */}
-              {Object.keys(typingBy).length > 0 && (
+              {Object.keys(typingBy).length > 0 && !lockedBy && (
                 <div className="flex items-center gap-2 border-t border-night-border-subtle px-4 py-1.5 text-[11px] text-night-accent">
                   <span className="flex gap-0.5">
                     <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-night-accent [animation-delay:0ms]" />
@@ -3185,8 +3271,30 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
               {/* ระยะกันแถบโฮมย้ายไปคุมใน nova.css แทน inline style — เพราะตอนคีย์บอร์ดเปิดต้องตัดระยะนี้ทิ้ง
                   (คีย์บอร์ดบังแถบโฮมอยู่แล้ว) ซึ่ง inline style เขียนทับด้วย CSS ไม่ได้ */}
               <div className="chat-composer p-3 border-t border-night-border relative shrink-0">
-                {/* สลับโหมด — งานที่ทำบ่อยที่สุดสามอย่างอยู่ที่เดียว ไม่ต้องเลื่อนไปแผงขวา
-                    ซึ่งบนจอแคบถูกซ่อนอยู่แล้ว ทำให้เช็คไอดี/กรอกข้อมูลไม่ได้เลย */}
+                {lockedBy && (
+                  <div className="chat-lock-veil" role="status" aria-live="polite">
+                    {renderLockCard()}
+                  </div>
+                )}
+                {incomingReq && (
+                  <div className="chat-lock-ask" role="alertdialog" aria-label="คำขอตอบแชทแทน">
+                    <div className="chat-lock-ask-card">
+                      <div className="chat-lock-ask-ring">
+                        <svg viewBox="0 0 36 36" aria-hidden="true"><circle cx="18" cy="18" r="16" />
+                          <circle cx="18" cy="18" r="16" className="is-bar" style={{ strokeDashoffset: `${Math.min(100, (((nowTick || Date.now()) - incomingReq.at) / (TAKEOVER_WAIT_S * 10)))}` }} /></svg>
+                        <span>{Math.max(0, TAKEOVER_WAIT_S - Math.floor(((nowTick || Date.now()) - incomingReq.at) / 1000))}</span>
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="chat-lock-ask-title"><b>{incomingReq.who.split("@")[0] || "แอดมินอีกคน"}</b> ขอตอบแชทนี้แทน</div>
+                        <div className="chat-lock-ask-sub">ยอมรับ = ปล่อยห้องให้ ร่างของคุณยังเก็บไว้ · ไม่กดอะไร {TAKEOVER_WAIT_S} วิ = ยกให้อัตโนมัติ</div>
+                      </div>
+                      <div className="flex shrink-0 gap-2">
+                        <button type="button" className="chat-lock-ask-no" onClick={() => answerTakeover(false)}>ฉันยังตอบอยู่</button>
+                        <button type="button" className="chat-lock-ask-yes" onClick={() => answerTakeover(true)}>ยอมรับ</button>
+                      </div>
+                    </div>
+                  </div>
+                )}
                 {!hasSidePanel && (
                 <div className="mb-2 flex items-center gap-1 rounded-xl bg-night-surface2 p-1">
                   {[
@@ -3325,18 +3433,8 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                     ))}
                   </div>
                 )}
-                {lockedBy && (
-                  <div className="mb-2 flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-300">
-                    <span className="min-w-0 flex-1">
-                      🔒 <b>{lockedBy.who.split("@")[0]}</b> กำลังตอบแชทนี้อยู่ — ดูได้อย่างเดียว กันตอบซ้ำกัน
-                      {reply.trim() && <span className="block text-[11px] opacity-80">ร่างของคุณยังอยู่ จะพิมพ์ต่อ/ส่งได้เมื่อเขาตอบเสร็จ</span>}
-                    </span>
-                    <button type="button" onClick={() => { if (confirm(`ขอตอบแทน ${lockedBy.who.split("@")[0]}?\nใช้ตอนเขาพิมพ์ค้างไว้แล้วไม่อยู่ — ถ้าเขายังตอบอยู่จะได้ข้อความซ้ำกัน`)) takeOverLock(); }}
-                      className="shrink-0 rounded-md border border-amber-500/50 px-2 py-1 text-[11px] font-semibold hover:bg-amber-500/20">ขอตอบแทน</button>
-                  </div>
-                )}
                 <div className="relative">
-                  <div className={`flex items-end gap-2 rounded-lg border border-night-border bg-night-surface2 overflow-hidden pr-1.5 py-1.5 ${lockedBy ? "opacity-60" : ""}`}>
+                  <div className={`flex items-end gap-2 rounded-lg border border-night-border bg-night-surface2 overflow-hidden pr-1.5 py-1.5`}>
                     <textarea ref={replyInputRef} readOnly={!!lockedBy} value={reply} onChange={(e) => { if (lockedBy) return; setReply(e.target.value); setSendPreview(null); notifyTyping(!e.target.value.trim()); }} onKeyDown={(e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) prepareSendPreview(); }} rows={2} placeholder={lockedBy ? `🔒 ${lockedBy.who.split("@")[0]} กำลังตอบแชทนี้ — ดูได้อย่างเดียว` : "พิมพ์คำตอบเป็นไทย..."} className="flex-1 bg-transparent border-0 px-3 py-1 text-sm leading-relaxed resize-none focus:outline-none" />
                     <button onClick={prepareSendPreview} disabled={sending || !!lockedBy || (!reply.trim() && pendingFiles.length === 0)} className="bg-night-accent text-white rounded-md px-3.5 py-2 text-sm font-semibold disabled:opacity-50 flex items-center gap-1.5 shrink-0 self-end">
                       {sending ? <Loader2 className="animate-spin" size={15} /> : (!reply.trim() && pendingFiles.length > 0) ? <ArrowUpCircle size={15} /> : <Send size={15} />} {(!reply.trim() && pendingFiles.length > 0) ? "ส่งรูป" : "ส่ง"}
@@ -3475,6 +3573,9 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
               {!adLoading && adSources.length === 0 && <div className="text-[11px] text-night-ink-2">{srcLabel(selected)}</div>}
               {adSources.map(renderAd)}
             </div>
+            {lockedBy ? (
+              <div className="chat-lock-panel">{renderLockCard(true)}</div>
+            ) : <>
             <CustomerDataForm darkMode addressDraft={addressDraft} row={selected} onSaved={(v) => { setSelected((s) => (s ? { ...s, ...v } : s)); setList((l) => (l || []).map((x) => (x.id === selected.id ? { ...x, ...v } : x))); }} />
             {isBeSightPage(selected) && <TradeIdChecker darkMode />}
             <ConversationInsights />
@@ -3483,6 +3584,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
               className={`w-full rounded-lg px-3 py-2 text-sm font-medium flex items-center justify-center gap-1.5 disabled:opacity-50 ${selected.blocked_at ? "border border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/15" : "border border-rose-500/40 text-rose-400 hover:bg-rose-500/15"}`}>
               {blocking ? <Loader2 className="animate-spin" size={14} /> : <AlertTriangle size={14} />} {selected.blocked_at ? "ปลดบล็อก" : "บล็อก (สแปม)"}
             </button>
+            </>}
           </div>
         )}
       </div>
