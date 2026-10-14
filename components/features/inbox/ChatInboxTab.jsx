@@ -187,6 +187,10 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   const claimSinceRef = useRef(null);
   const lastBeatRef = useRef(0);
   const replyRef = useRef("");
+  // ตอนกดข้อความบันทึก จดเวลาข้อความฝั่งเพจล่าสุดที่เครื่องเรา "เห็น" ไว้ (0 = ยังไม่ได้กด)
+  // ก่อนส่งเทียบกับประวัติจริงในฐานข้อมูล — มีข้อความฝั่งเพจใหม่กว่านั้น = มีคนตอบไปแล้ว กันส่งข้อความบันทึกซ้ำ
+  // เทียบกับเวลาข้อความ ไม่ใช่นาฬิกาเครื่อง (นาฬิกาแต่ละเครื่องไม่ตรงกัน) และไม่กรองด้วยอีเมล (ทีมใช้บัญชีร่วมกันหลายเครื่อง)
+  const savedPickAtRef = useRef(0);
   // ขอตอบแทน = ต้องให้คนถือล็อคกดยอมรับก่อน (ไม่ตอบใน TAKEOVER_WAIT_S วิ = ถือว่าไม่อยู่หน้าจอ ยกให้อัตโนมัติ)
   const [incomingReq, setIncomingReq] = useState(null);   // ฝั่งคนถือล็อค: { from, who, at }
   const [pendingReq, setPendingReq] = useState(null);     // ฝั่งคนขอ: { to, who, at }
@@ -1115,13 +1119,26 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   const typingBy = Object.fromEntries(Object.values(peers).map((v) => [v.who, v.at]));
 
   // มีร่างคำตอบ = จองห้อง · ลบร่างหมด/ส่งแล้ว = ปล่อย
+  // ร่าง = ข้อความ หรือ ไฟล์/รูปที่แนบรอส่ง — ข้อความบันทึกบางอันมีแต่รูป ถ้านับแค่ข้อความ สองคนจะส่งรูปชุดเดียวกันซ้ำได้
   useEffect(() => {
     replyRef.current = reply;
-    const has = !!reply.trim();
+    const has = !!reply.trim() || pendingFiles.length > 0;
     if (has && claimSinceRef.current == null) { claimSinceRef.current = Date.now(); setClaimSince(claimSinceRef.current); }
+    if (!has) savedPickAtRef.current = 0;
     if (!has && claimSinceRef.current != null && claimSinceRef.current > 0) releaseClaim();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reply]);
+  }, [reply, pendingFiles.length]);
+
+  // ล็อคกันได้แค่ตอนพิมพ์พร้อมกัน — ถ้าอีกคนส่งเร็วแล้วปล่อยล็อคไปแล้ว ร่างข้อความบันทึกที่ค้างอยู่ของเราจะส่งซ้ำได้
+  // จึงอ่านประวัติล่าสุดของห้องนี้ (แถวเดียว) ก่อนส่ง: มีคนอื่นตอบหลังเวลาที่เรากดข้อความบันทึก = ไม่ให้ส่ง
+  async function savedReplyConflict() {
+    const seenUpTo = savedPickAtRef.current;
+    if (!seenUpTo || !selected?.id) return null;
+    const { data } = await supabase.from("chat_customers").select("transcript").eq("id", selected.id).maybeSingle();
+    const hit = [...(Array.isArray(data?.transcript) ? data.transcript : [])].reverse().find((m) =>
+      m?.w === "p" && !m.auto_reply && new Date(m.at || 0).getTime() > seenUpTo);
+    return hit ? { who: String(hit.by || "").split("@")[0] || "แอดมินอีกคน (ตอบจากเพจ)", at: hit.at } : null;
+  }
 
   function releaseClaim() {
     claimSinceRef.current = null; lastBeatRef.current = 0; setClaimSince(null);
@@ -1615,12 +1632,16 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
 
   async function prepareSendPreview() {
     if (!selected || sending) return;
-    if (lockedBy) { setSendMsg(`🔒 ${lockedBy.who.split("@")[0]} กำลังตอบแชทนี้อยู่ — ส่งไม่ได้จนกว่าจะตอบเสร็จ (หรือกด "ขอตอบแทน")`); return; }
+    if (lockedBy) { setSendMsg(`🔒 ${lockedBy.who.split("@")[0]} กดตอบห้องนี้ก่อน — ต้องให้ ${lockedBy.who.split("@")[0]} คุยเสร็จก่อนถึงจะส่งได้ (หรือกด "ขอตอบแทน")`); return; }
     const hasText = reply.trim().length > 0;
     if (!hasText && pendingFiles.length === 0) return;
     if (isCommentChat(selected) && pendingFiles.length) {
       setSendMsg("การตอบใต้คอมเมนต์รองรับข้อความ/อิโมจิเท่านั้น กรุณาลบไฟล์แนบก่อนส่ง");
       return;
+    }
+    if (savedPickAtRef.current) {
+      const c = await savedReplyConflict();
+      if (c) { setSendPreview(null); setSendMsg(`🔒 ${c.who} ตอบห้องนี้ไปแล้วเมื่อ ${fmtMsgTime(c.at)} หลังจากคุณกดข้อความบันทึก — ต้องให้ ${c.who} คุยเสร็จก่อน ถ้ายังต้องส่ง ให้ลบร่างแล้วเลือกข้อความใหม่`); return; }
     }
     // ส่งรูป/ไฟล์ที่ไม่มีข้อความประกอบ → ส่งเลย ไม่ต้องเปิดกล่องตัวอย่าง (ไม่มีคำแปลให้รีวิว)
     if (!hasText && pendingFiles.length > 0) {
@@ -1641,7 +1662,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
 
   async function sendReply(approved = sendPreview) {
     if (!selected || sending) return;
-    if (lockedBy) { setSendMsg(`🔒 ${lockedBy.who.split("@")[0]} กำลังตอบแชทนี้อยู่ — ส่งไม่ได้จนกว่าจะตอบเสร็จ (หรือกด "ขอตอบแทน")`); return; }
+    if (lockedBy) { setSendMsg(`🔒 ${lockedBy.who.split("@")[0]} กดตอบห้องนี้ก่อน — ต้องให้ ${lockedBy.who.split("@")[0]} คุยเสร็จก่อนถึงจะส่งได้ (หรือกด "ขอตอบแทน")`); return; }
     const hasText = reply.trim().length > 0;
     if (!hasText && pendingFiles.length === 0) return;
     if (isCommentChat(selected) && pendingFiles.length) {
@@ -1649,6 +1670,10 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
       return;
     }
     if (!approved) { await prepareSendPreview(); return; }
+    if (savedPickAtRef.current) {
+      const c = await savedReplyConflict();
+      if (c) { setSendPreview(null); setSendMsg(`🔒 ${c.who} ตอบห้องนี้ไปแล้วเมื่อ ${fmtMsgTime(c.at)} หลังจากคุณกดข้อความบันทึก — ต้องให้ ${c.who} คุยเสร็จก่อน ถ้ายังต้องส่ง ให้ลบร่างแล้วเลือกข้อความใหม่`); return; }
+    }
     setSending(true); setSendMsg("");
     // ปิดกล่องอนุมัติทันทีหลังผู้ใช้ยืนยัน เพื่อไม่ให้ดูเหมือนกล่องค้างระหว่างส่งไฟล์/ข้อความ
     setSendPreview(null);
@@ -2125,7 +2150,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
           </div>
           <div className="chat-lock-sub">
             {pendingReq ? `ส่งคำขอแล้ว รอ ${name} กดยอมรับ… (${left} วิ)`
-              : reqNotice || `ตอบแชท เช็คไอดี และข้อมูลลูกค้าถูกล็อคไว้ กันแอดมินทำซ้ำกัน${reply.trim() ? " · ร่างของคุณเก็บไว้ให้แล้ว" : ""}`}
+              : reqNotice || `ต้องให้ ${name} คุยเสร็จก่อน ถึงจะตอบ/ส่งข้อความบันทึกได้ กันแอดมินตอบซ้ำกัน${(reply.trim() || pendingFiles.length) ? " · ร่างของคุณเก็บไว้ให้แล้ว" : ""}`}
           </div>
         </div>
         {pendingReq
@@ -3370,7 +3395,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                     {savedReplies.length === 0 ? (
                       <div className="px-3 py-3 text-xs text-night-ink-2">{savedErr ? `ดึงไม่ได้: ${savedErr}` : "ยังไม่มีข้อความบันทึกไว้สำหรับช่องทางนี้ — เพิ่มได้ที่ ตั้งค่า › ข้อความบันทึกไว้"}</div>
                     ) : savedReplies.map((s) => (
-                      <button key={s.id} onClick={() => { if (s.message) setReply((r) => (r ? r + "\n" + s.message : s.message)); if (s.images.length) setPendingFiles((p) => [...p, ...s.images.map((u, i) => ({ url: u, name: `saved-image-${i + 1}`, type: "image", preview: u }))]); setSavedOpen(false); }} className="w-full text-left px-3 py-2 hover:bg-night-surface2 flex gap-2">
+                      <button key={s.id} onClick={() => { if (lockedBy) { setSavedOpen(false); setSendMsg(`🔒 ต้องให้ ${lockedBy.who.split("@")[0]} คุยเสร็จก่อน`); return; } if (!savedPickAtRef.current) savedPickAtRef.current = Math.max(1, ...(selected?.transcript || []).filter((m) => m?.w === "p" && !m.pending && !m._tmp).map((m) => new Date(m.at || 0).getTime() || 0)); if (s.message) setReply((r) => (r ? r + "\n" + s.message : s.message)); if (s.images.length) setPendingFiles((p) => [...p, ...s.images.map((u, i) => ({ url: u, name: `saved-image-${i + 1}`, type: "image", preview: u }))]); setSavedOpen(false); }} className="w-full text-left px-3 py-2 hover:bg-night-surface2 flex gap-2">
                         {s.images.length > 0 && (
                           <span className="relative shrink-0">
                             <img src={s.images[0]} alt="" className="w-9 h-9 rounded object-cover border border-night-border" />
