@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import dynamic from "next/dynamic";
-import { MessageSquare, Users, Tv, Gauge, ScanSearch, Megaphone } from "lucide-react";
+import { MessageSquare, Users, Tv, Gauge, ScanSearch, Megaphone, BarChart3 } from "lucide-react";
 import Spinner from "@/components/shared/Spinner";
 import { SectionTitle } from "@/components/ui";
 import { useDashboard } from "@/components/dashboard/DashboardContext";
@@ -15,12 +15,14 @@ const TvMembersTab = dynamic(() => import("@/components/features/tv-members/TvMe
 const BesightMembersTab = dynamic(() => import("@/components/features/tv-members/BesightMembersTab"), { ssr: false, loading: loadingPanel });
 const DetectedDataReview = dynamic(() => import("@/components/features/customerdb/DetectedDataReview"), { ssr: false, loading: loadingPanel });
 const SavedRepliesPanel = dynamic(() => import("@/components/features/settings/SettingsTab").then((module) => module.SavedRepliesPanel), { ssr: false, loading: loadingPanel });
+const LotCheckTab = dynamic(() => import("@/components/features/lot-check/LotCheckTab"), { ssr: false, loading: loadingPanel });
 const LineBroadcastPanel = dynamic(() => import("@/components/features/customer-ops/LineBroadcastPanel"), { ssr: false, loading: loadingPanel });
 
 const MODES = [
   ["customers", "ลูกค้า", Users],
   ["tv", "TradingView", Tv],
   ["indicator", "สมาชิก Indicator", Gauge],
+  ["lotcheck", "ตรวจ Lot", BarChart3],
   ["detected", "ตรวจข้อมูลที่พบ", ScanSearch],
   ["replies", "ตอบกลับอัตโนมัติ", MessageSquare],
   ["broadcast", "Broadcast LINE", Megaphone],
@@ -38,8 +40,10 @@ export default function CustomerOperationsTab({ allowedPages = null, onOpenChat 
   // Broadcast LINE = ส่งออกหาลูกค้าจำนวนมาก ให้เฉพาะบทบาทที่มีอำนาจกับข้อมูลเต็มที่
   // (เดิมเช็ค role === "admin" ตรง ๆ ซึ่งพอเพิ่มบทบาท owner แล้วเจ้าของระบบจะมองไม่เห็นเมนูนี้)
   const canBroadcast = hasFullData(perm?.role);
-  const modes = MODES.filter(([key]) => (key !== "tv" && key !== "indicator" || canTv) && (key !== "broadcast" || canBroadcast));
-  const activeMode = (mode === "tv" || mode === "indicator") && !canTv ? "customers" : mode;
+  // ตรวจ Lot ใช้ edge function tradingview + ตาราง tv_lot_* (สิทธิ์แท็บ tv_members) เหมือนหน้าสมาชิก Indicator
+  const TV_MODES = ["tv", "indicator", "lotcheck"];
+  const modes = MODES.filter(([key]) => (!TV_MODES.includes(key) || canTv) && (key !== "broadcast" || canBroadcast));
+  const activeMode = TV_MODES.includes(mode) && !canTv ? "customers" : mode;
   return (
     <div className="mx-auto w-full max-w-[1600px] space-y-4">
       {/* เดิมเป็นพาเนลดำ (bg-slate-950) พร้อมป้ายสีทอง — เป็นก้อนมืดก้อนเดียวในแอปที่เหลือสว่างทั้งหมด
@@ -74,6 +78,7 @@ export default function CustomerOperationsTab({ allowedPages = null, onOpenChat 
       {activeMode === "customers" && <CustomerDatabaseTab onOpenChat={onOpenChat} />}
       {activeMode === "tv" && <TvMembersTab active embedded onOpenChat={onOpenChat} />}
       {activeMode === "indicator" && <BesightMembersTab active={activeMode === "indicator"} />}
+      {activeMode === "lotcheck" && <LotCheckTab />}
       {activeMode === "detected" && <DetectedDataReview onOpenChat={onOpenChat} />}
       {activeMode === "replies" && <SavedRepliesPanel allowedPages={allowedPages} />}
       {activeMode === "broadcast" && <LineBroadcastPanel />}

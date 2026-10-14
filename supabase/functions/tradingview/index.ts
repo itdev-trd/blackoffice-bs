@@ -1037,7 +1037,8 @@ Deno.serve(async (req) => {
           // ให้สิทธิ์/ต่ออายุสำเร็จแล้วเช็กกับ TradingView ทันที ไม่ต้องรอ cron รอบเที่ยงคืน
           const verification = await verifyTvAccessRow(db, savedRow, cookie);
           // แต้มโบนัส: เฉพาะเมื่อ TradingView ยืนยันว่ามีสิทธิ์จริงแล้ว (ให้ไม่ติด = ไม่ได้แต้ม)
-          if (verification.ok && verification.found && grantEmail) {
+          // no_points = ต่ออายุอัตโนมัติจากการตรวจ Lot (lot_check) — ระบบต่อให้เอง ไม่ใช่งานของแอดมินที่กดตรวจ
+          if (verification.ok && verification.found && grantEmail && body?.no_points !== true) {
             await awardTvPoints(db, {
               staffEmail: grantEmail, tvAccessId: Number(savedRow.id), username: realUser, pineId: pine_id,
               existing: existing ? { expiration: existing.expiration ?? null } : null, newExpiration: expForPine, at: nowIso,
@@ -1290,6 +1291,177 @@ Deno.serve(async (req) => {
       if (upserts.length) await db.from("tv_lot_usage").upsert(upserts, { onConflict: "trade_id,period_start,period_end" });
 
       return json({ ok: true, trade_id: tradeId, months: rows, fetched_at: fetchedAt });
+    }
+
+    // ---- ตรวจ Lot + ต่อ Indicator อัตโนมัติ (ย้ายจาก besight-dashboard-main) ----
+    // สมาชิก = username TradingView ที่ผูกกับ trade_id นี้ · ยอด lot = ผลรวมทุก trade_id ของสมาชิกคนนั้น
+    // ช่วงที่ตรวจ: cycle = รอบเดือนของสมาชิก (lotCycleOf เดียวกับหน้าสมาชิก) · entitlement = ทั้งช่วงสิทธิ์
+    //             month = เดือนปฏิทินนี้ · custom = เลือกเอง
+    // ต่ออัตโนมัติได้เฉพาะ cycle (ช่วงอื่นดูอย่างเดียว กัน lot ชุดเดียวต่ออายุซ้ำผ่านช่วงที่ทับกัน)
+    // ต่อ = +1 เดือน นับจากวันหมดอายุเดิมถ้ายังไม่หมด ไม่งั้นนับจากวันนี้ · tv_lot_renewals UNIQUE กันต่อซ้ำในรอบเดียวกัน
+    if (action === "lot_check") {
+      const tradeId = String(body?.trade_id || "").replace(/\D/g, "");
+      if (!tradeId) return json({ ok: false, error: "ใส่ Trade ID ก่อน" });
+      const period = ["cycle", "entitlement", "month", "custom"].includes(String(body?.period)) ? String(body.period) : "cycle";
+      const dryRun = body?.dry_run === true || period !== "cycle";
+      const autoRenew = body?.auto_renew !== false;
+      const today = thDay(new Date());
+
+      const { data: linked } = await db.from("tv_access").select("username").eq("trade_id", tradeId);
+      const usernames = [...new Set((linked || []).map((r: any) => String(r.username || "")).filter(Boolean))];
+      const { data: rowsRaw } = usernames.length
+        ? await db.from("tv_access").select("id, username, display_name, pine_id, brand_id, trade_id, expiration, status, granted_at, created_at, lot_quota_override").in("username", usernames)
+        : { data: [] as any[] };
+      const rows = (rowsRaw || []) as any[];
+      const live = rows.filter((r) => r.status !== "revoked");
+      const spanRows = live.length ? live : rows;
+
+      // ---- ช่วงวันที่ ----
+      let start = "", end = "";
+      const grantDay = spanRows.map((r) => thDay(r.granted_at || r.created_at)).filter(Boolean).sort()[0] || thMonthStart();
+      const lifetime = spanRows.some((r) => !r.expiration);
+      const expiryDay = lifetime ? null : (spanRows.map((r) => thDay(r.expiration)).filter(Boolean).sort().pop() || null);
+      if (period === "custom") {
+        start = String(body?.date_from || ""); end = String(body?.date_to || "");
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return json({ ok: false, error: "เลือกช่วงวันที่ให้ครบ" });
+        if (end < start) return json({ ok: false, error: "วันสิ้นสุดต้องไม่ก่อนวันเริ่มต้น" });
+      } else if (period === "month" || !spanRows.length) {
+        start = thMonthStart(); end = thMonthEnd();
+      } else if (period === "entitlement") {
+        start = grantDay; end = expiryDay || today;
+      } else {
+        ({ start, end } = lotCycleOf(grantDay, expiryDay, today));
+      }
+
+      // ---- ยอด lot ทุกบัญชีของสมาชิก (บัญชีไหนดึงไม่ได้ = ล้มทั้งการตรวจ ไม่รวมยอดครึ่ง ๆ) ----
+      const tradeIds = [...new Set([tradeId, ...rows.map((r) => String(r.trade_id || "").replace(/\D/g, "")).filter(Boolean)])];
+      let byAccount: Array<{ trade_id: string; lots: number; excluded_lots: number; campaign_name: string | null }>;
+      try {
+        byAccount = await Promise.all(tradeIds.map(async (tid) => {
+          const hit = (await fetchBrokerLots(start, end, tid)).get(tid);
+          return { trade_id: tid, lots: hit?.lots ?? 0, excluded_lots: hit?.excluded_lots ?? 0, campaign_name: hit?.campaign_name ?? null };
+        }));
+      } catch (e) {
+        return json({ ok: false, error: `ดึงยอด Lot จาก broker ไม่สำเร็จ: ${String(e instanceof Error ? e.message : e)}` });
+      }
+      const fetchedAt = new Date().toISOString();
+      await db.from("tv_lot_usage").upsert(byAccount.map((a) => ({
+        trade_id: a.trade_id, period_start: start, period_end: end, lots: a.lots, excluded_lots: a.excluded_lots, campaign_name: a.campaign_name, fetched_at: fetchedAt,
+      })), { onConflict: "trade_id,period_start,period_end" });
+      const round4 = (n: number) => Math.round(n * 10000) / 10000;
+      const totalLots = round4(byAccount.reduce((s, a) => s + a.lots, 0));
+      const excludedLots = round4(byAccount.reduce((s, a) => s + a.excluded_lots, 0));
+
+      // ---- เกณฑ์: โควตาเฉพาะราย > โควตาของแบรนด์ (หลายแบรนด์ = ใช้ค่าที่สูงสุด) ----
+      const override = rows.map((r) => Number(r.lot_quota_override)).find((n) => Number.isFinite(n) && n > 0) ?? null;
+      let brandQuota: number | null = null;
+      const brandIds = [...new Set(rows.map((r) => r.brand_id).filter(Boolean))];
+      if (brandIds.length) {
+        const { data: brands } = await db.from("tv_brands").select("lot_quota_per_month").in("id", brandIds);
+        const qs = (brands || []).map((b: any) => Number(b.lot_quota_per_month)).filter((n) => Number.isFinite(n) && n > 0);
+        if (qs.length) brandQuota = Math.max(...qs);
+      }
+      const quota = override ?? brandQuota;
+      const qualified: boolean | null = rows.length > 0 && quota ? totalLots >= quota : null;
+
+      // ---- ต่ออายุอัตโนมัติ ----
+      const targets = live.filter((r) => r.expiration);   // ตลอดชีพไม่ต้องต่อ · ถูกถอนสิทธิ์ไม่ต่อให้
+      let skipped: string | null = null;
+      if (!rows.length) skipped = "ไม่พบ Trade ID นี้ในสมาชิก Indicator";
+      else if (period !== "cycle") skipped = "ต่ออัตโนมัติได้เฉพาะ \"รอบเดือนของสมาชิก\" — ช่วงนี้ดูได้อย่างเดียว";
+      else if (dryRun) skipped = "Dry-run — ดูผลอย่างเดียว ไม่บันทึก ไม่ต่ออายุ";
+      else if (!autoRenew) skipped = "ปิดการต่อ Indicator อัตโนมัติไว้สำหรับการตรวจครั้งนี้";
+      else if (!isAdmin) skipped = "ต่อ Indicator อัตโนมัติได้เฉพาะแอดมิน";
+      else if (usernames.length > 1) skipped = `Trade ID นี้ผูกกับหลาย user TradingView (${usernames.join(", ")}) — ต่ออายุเองในหน้าสมาชิก Indicator`;
+      else if (!quota) skipped = "ยังไม่ได้ตั้งเกณฑ์ Lot ของแบรนด์/สมาชิก";
+      else if (!qualified) skipped = `มี ${totalLots.toFixed(2)} จาก ${quota} lot ที่ต้องได้ (รวมทุกบัญชี)`;
+      else if (!targets.length) skipped = "ไม่มีอินดิเคเตอร์ที่ต้องต่ออายุ (เป็นแบบตลอดชีพ หรือถูกถอนสิทธิ์)";
+
+      let checkId: number | null = null;
+      if (!dryRun) {
+        const { data: ins } = await db.from("tv_lot_checks").insert({
+          trade_id: tradeId, username: usernames[0] || null, period, date_from: start, date_to: end, trade_ids: tradeIds,
+          total_lots: totalLots, excluded_lots: excludedLots, quota, qualified, auto_renew: autoRenew && !skipped, skipped,
+          checked_by: auth.permission?.email ?? null,
+        }).select("id").single();
+        checkId = ins?.id ?? null;
+      }
+
+      const renewals: any[] = [];
+      if (!dryRun && !skipped) {
+        const nowMs = Date.now();
+        for (const r of targets) {
+          // จองก่อนต่อ — ชน UNIQUE = รอบนี้ต่อไปแล้ว (กันกดตรวจซ้ำแล้วต่อเพิ่มอีกเดือน)
+          const { data: claim, error: claimErr } = await db.from("tv_lot_renewals").insert({
+            lot_check_id: checkId, username: r.username, pine_id: r.pine_id, period_start: start, period_end: end,
+            qualified_lots: totalLots, quota, old_expiration: r.expiration, created_by: auth.permission?.email ?? null,
+          }).select("id").single();
+          if (claimErr || !claim) { renewals.push({ pine_id: r.pine_id, ok: false, already: true, error: "ต่อไปแล้วในรอบนี้" }); continue; }
+          const oldMs = new Date(r.expiration).getTime();
+          const baseDay = thDay(Number.isFinite(oldMs) && oldMs > nowMs ? r.expiration : new Date());
+          const newExpiration = new Date(`${addMonthsDay(baseDay, 1)}T23:59:59+07:00`).toISOString();
+          let res: any = null;
+          try {
+            // เรียก action grant ของฟังก์ชันนี้เอง (ด้วยสิทธิ์ของแอดมินที่กด) — ต่อบน TradingView + ตรวจซ้ำ + บันทึกเหมือนกดต่อเอง
+            const resp = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/tradingview`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: authHeader, ...(req.headers.get("apikey") ? { apikey: req.headers.get("apikey")! } : {}) },
+              body: JSON.stringify({ action: "grant", renew: true, member_type: "renew", username: r.username, pine_ids: [r.pine_id], lifetime: false, expiration: newExpiration, trade_id: r.trade_id || tradeId, no_points: true }),
+            });
+            res = await resp.json().catch(() => null);
+          } catch (e) { res = { ok: false, error: String(e instanceof Error ? e.message : e) }; }
+          const one = res?.results?.find((x: any) => x.pine_id === r.pine_id);
+          if (res?.ok && one?.ok !== false) {
+            await db.from("tv_lot_renewals").update({ status: "done", new_expiration: newExpiration }).eq("id", claim.id);
+            renewals.push({ pine_id: r.pine_id, ok: true, old_expiration: r.expiration, new_expiration: newExpiration });
+          } else {
+            // ต่อไม่สำเร็จ = ปล่อยการจอง ให้ตรวจใหม่แล้วลองต่อได้อีก
+            const err = one?.error || res?.error || "ต่ออายุไม่สำเร็จ";
+            await db.from("tv_lot_renewals").delete().eq("id", claim.id);
+            renewals.push({ pine_id: r.pine_id, ok: false, error: err });
+          }
+        }
+        const done = renewals.filter((x) => x.ok).length;
+        if (!done) skipped = renewals.every((x) => x.already) ? "ต่ออายุไปแล้วในรอบนี้" : "ต่ออายุไม่สำเร็จ";
+        if (checkId) await db.from("tv_lot_checks").update({ renewed: done, skipped: done ? null : skipped }).eq("id", checkId);
+      }
+
+      const { data: scripts } = await db.from("tv_scripts").select("pine_id, name");
+      const nameOf = new Map((scripts || []).map((x: any) => [x.pine_id, x.name]));
+      return json({
+        ok: true, trade_id: tradeId, period, date_from: start, date_to: end, dry_run: dryRun,
+        member: usernames.length ? { usernames, display_name: rows.find((r) => r.display_name)?.display_name || null } : null,
+        indicators: rows.map((r) => ({ pine_id: r.pine_id, name: nameOf.get(r.pine_id) || r.pine_id, status: r.status, expiration: r.expiration })),
+        by_account: byAccount, total_lots: totalLots, excluded_lots: excludedLots,
+        quota, quota_source: override ? "override" : brandQuota ? "brand" : null, qualified,
+        renewed: renewals.filter((x) => x.ok).length,
+        renewals: renewals.map((x) => ({ ...x, name: nameOf.get(x.pine_id) || x.pine_id })),
+        skipped, check_id: checkId,
+      });
+    }
+
+    // ---- ภาพรวม Lot ทั้งระบบ (ทุกบัญชีใต้ IB) แยก Campaign / Country / Symbol นอก List ----
+    if (action === "lot_overview") {
+      const start = String(body?.date_from || ""), end = String(body?.date_to || "");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return json({ ok: false, error: "เลือกช่วงวันที่ให้ครบ" });
+      if (end < start) return json({ ok: false, error: "วันสิ้นสุดต้องไม่ก่อนวันเริ่มต้น" });
+      const params = { date_from: start, date_to: end };
+      try {
+        const [camp, country, symbol] = await Promise.all([
+          brokerLotRows("check-lot-campaign", params),
+          brokerLotRows("check-lot-country", params),
+          brokerLotRows("check-lot-symbol-not-in-list", params),
+        ]);
+        const byLots = (a: any, b: any) => b.lots - a.lots;
+        return json({
+          ok: true, date_from: start, date_to: end,
+          campaigns: camp.map((r: any) => ({ campaign_name: String(r?.campaignName || ""), lots: brokerLotsOf(r?.lots) })).sort(byLots),
+          countries: country.map((r: any) => ({ country: String(r?.country || ""), lots: brokerLotsOf(r?.lots) })).sort(byLots),
+          symbols: symbol.map((r: any) => ({ campaign_name: String(r?.campaignName || ""), login_id: brokerLoginOf(r), instrument: String(r?.instrument || ""), lots: brokerLotsOf(r?.lots) })).sort(byLots),
+        });
+      } catch (e) {
+        return json({ ok: false, error: `ดึงภาพรวม Lot ไม่สำเร็จ: ${String(e instanceof Error ? e.message : e)}` });
+      }
     }
 
     return json({ ok: false, error: `ไม่รู้จัก action "${action}"` });
