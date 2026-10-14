@@ -33,6 +33,7 @@ import Spinner from "@/components/shared/Spinner";
 import MetaLabels from "@/components/features/inbox/MetaLabels";
 import { SearchInput, FilterPill } from "@/components/ui";
 import { CHAT_STAGES } from "@/lib/constants/settings";
+import { isChatPage, CHAT_PAGE_IDS } from "@/lib/constants/chat-pages";
 import { pushLeadStageToMeta, pushStageLabelToMeta } from "@/lib/utils/lead-stage";
 
 // ตัวเลือกอิโมจิชุดเต็มมีข้อมูลจำนวนมาก — โหลดเฉพาะตอนเปิดใช้ ไม่ถ่วงหน้าแชท/PWA ตอนเริ่มต้น
@@ -729,7 +730,8 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
       // รวมทุกเพจ แต่ยังเคารพสิทธิ์เพจที่ผู้ใช้ได้รับ (บวกแชท LINE ที่ไม่ผูกกับเพจ)
       query = scopeToAllowedPages(query, allowedPages);
     }
-    return query;
+    // แชท = BeSight เท่านั้น — ฐานข้อมูลมีแชทเพจอื่นหลุดเข้ามาบ้าง (เช่น Jr 1Shot) ไม่ให้โผล่ในลิสต์
+    return query.in("page_id", CHAT_PAGE_IDS);
   }
 
   async function loadList({ refreshAfterCurrent = false, lean = false } = {}) {
@@ -1254,7 +1256,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   useEffect(() => {
     (async () => {
       const { data } = await supabase.from("page_lead_config").select("page_id, page_name, picture_url").order("page_name");
-      const opts = (data || []).map((p) => ({ id: p.page_id, name: p.page_name || p.page_id })).filter((o) => !allowedPages || allowedPages.includes(o.id));
+      const opts = (data || []).map((p) => ({ id: p.page_id, name: p.page_name || p.page_id })).filter((o) => isChatPage(o.id) && (!allowedPages || allowedPages.includes(o.id)));
       setPageOptions(opts);
       // โลโก้เพจที่เก็บไว้ใน DB (Supabase Storage) — โชว์ได้ทันที ไม่ต้องยิง Meta
       const seed = {};
@@ -1272,7 +1274,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
       if (!s?.value && myKey !== "inbox_page_filter") ({ data: s } = await supabase.from("settings").select("value").eq("key", "inbox_page_filter").maybeSingle());
       if (s?.value) {
         // กรองตัวเลือกที่จำไว้ให้เหลือเฉพาะเพจที่คนนี้มีสิทธิ์ (กันตัวเลข/ตัวกรองเกินสิทธิ์ เช่นค้าง 5 เพจทั้งที่เห็นได้ 3)
-        const ok = (id) => !allowedPages || allowedPages.includes(id);
+        const ok = (id) => isChatPage(id) && (!allowedPages || allowedPages.includes(id));   // เพจอื่นที่เคยติ๊กไว้ตัดทิ้ง (แชท = BeSight เท่านั้น)
         const multi = (Array.isArray(s.value.multi) ? s.value.multi : []).filter(ok);
         const single = s.value.single && ok(s.value.single) ? s.value.single : null;
         setPageSel({ mode: s.value.mode === "single" ? "single" : "multi", single, multi });

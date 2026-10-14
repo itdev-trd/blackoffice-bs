@@ -26,6 +26,7 @@ import { beToCe, bangkokDate } from "@/lib/utils/date";
 import { hasFullData } from "@/lib/constants/roles";
 import { COUNTRIES, normalizeCountry } from "@/lib/constants/countries";
 import { logActivity } from "@/lib/utils/activity";
+import { isChatPage } from "@/lib/constants/chat-pages";
 import { lsGet, lsSet } from "@/lib/utils/storage";
 import { readFunctionErrorMessage } from "@/lib/utils/errors";
 import { getCustomerDateRange } from "@/lib/customer-date-filter";
@@ -284,6 +285,7 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
   const [tvEditTradeId, setTvEditTradeId] = useState("");
   const [tvUpdateBusy, setTvUpdateBusy] = useState(false);
   const [tvUpdateMsg, setTvUpdateMsg] = useState(null);   // {ok, text}
+  const [revokingId, setRevokingId] = useState(null);   // id ของ tv_access ที่กำลังถอน
   // ให้ AI อ่านบทสนทนาแล้วเสนอว่าเลข/ข้อความไหนคืออะไร — เสนอเท่านั้น ไม่เติมลงช่องเองจนแอดมินกดรับ
   // regex แยกไม่ออกว่าเลขไหนคือเลขบัญชี เบอร์โทร หรือยอดเงิน แต่ AI อ่านบริบทได้
   const [aiBusy, setAiBusy] = useState(false);
@@ -365,6 +367,11 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
     q = tradeId ? q.eq("trade_id", tradeId) : q.ilike("username", username);
     const { data } = await q;
     const indicators = data || [];
+    if (indicators.length) {
+      const { data: sn } = await supabase.from("tv_scripts").select("pine_id, name").in("pine_id", [...new Set(indicators.map((i) => i.pine_id))]);
+      const names = Object.fromEntries((sn || []).map((x) => [x.pine_id, x.name]));
+      for (const i of indicators) i.script_name = names[i.pine_id] || i.pine_id;
+    }
     if (!indicators.length) { setLinkedTv(null); setTvEditUsername(""); setTvEditTradeId(""); return; }
     // เอาชื่อ/ไอดีเทรดจากแถวแรกมาโชว์ — ทุกแถวของคนเดียวกันควรตรงกันเสมอ (อัปเดตพร้อมกันทุกครั้ง)
     setLinkedTv({ indicators, username: indicators[0].username, trade_id: indicators[0].trade_id });
@@ -372,6 +379,22 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
     setTvEditTradeId(indicators[0].trade_id || "");
   }
   useEffect(() => { loadLinkedTv(); setTvUpdateMsg(null); /* eslint-disable-next-line */ }, [tvOn, row?.id, row?.trade_id, row?.username]);
+
+  // ถอนสิทธิ์อินดิเคเตอร์ทีละตัว — ไว้แก้ตอนกดให้สิทธิ์ผิดตัว/ผิดคน
+  // ถอนบน TradingView แล้วตรวจซ้ำ (edge function) · ถอนภายในช่วงที่กติกากำหนด แต้มที่ได้จากการให้สิทธิ์จะถูกหักคืนเอง
+  async function revokeIndicator(ind) {
+    if (revokingId) return;
+    if (!confirm(`ถอนสิทธิ์ "${ind.script_name}" ของ ${ind.username}?\n\nลูกค้าจะใช้อินดิเคเตอร์นี้ไม่ได้ทันที · ถ้าถอนภายในไม่กี่วันหลังให้สิทธิ์ แต้มที่ได้จะถูกหักคืน`)) return;
+    setRevokingId(ind.id); setTvUpdateMsg(null);
+    const { data, error } = await supabase.functions.invoke("tradingview", { body: { action: "revoke", username: ind.username, pine_id: ind.pine_id } });
+    setRevokingId(null);
+    if (error || !data?.ok) { setTvUpdateMsg({ ok: false, text: "ถอนสิทธิ์ไม่สำเร็จ: " + (data?.error || (await readFunctionErrorMessage(error)) || "ลองใหม่") }); return; }
+    logActivity("tv_revoke_from_chat", { id: row.id, username: ind.username, pine_id: ind.pine_id });
+    setTvUpdateMsg(data.found
+      ? { ok: false, text: `สั่งถอนแล้ว แต่ TradingView ยังพบสิทธิ์ "${ind.script_name}" อยู่ — ลองกดอีกครั้งในอีกสักครู่` }
+      : { ok: true, text: `✓ ถอนสิทธิ์ "${ind.script_name}" ของ ${ind.username} แล้ว` });
+    loadLinkedTv();
+  }
 
   // ลูกค้าเปลี่ยนชื่อ TradingView หรือเปลี่ยนบัญชีเทรด — แก้ของเดิมทุกอินดิเคเตอร์พร้อมกัน
   // (เปลี่ยนชื่อ = ถอนสิทธิ์ชื่อเก่าบน TradingView แล้วให้สิทธิ์ชื่อใหม่ในสคริปต์เดิม วันหมดอายุเท่าเดิม
@@ -753,7 +776,31 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
       {tvOn && linkedTv && (
         <div className="rounded-lg border border-amber-300 bg-amber-50/40 p-2.5 space-y-2">
           <div className="text-[11px] font-semibold text-amber-800 flex items-center gap-1">
-            <RefreshCw size={12} /> เปลี่ยนชื่อ TV / บัญชีเทรด (มีสิทธิ์อยู่แล้ว {linkedTv.indicators.length} อินดิเคเตอร์)
+            <Tv size={12} /> สิทธิ์อินดิเคเตอร์ที่มีอยู่ ({linkedTv.indicators.length})
+          </div>
+          <div className="rounded-lg border border-amber-200 bg-[var(--surface)] divide-y divide-[var(--line)]">
+            {linkedTv.indicators.map((ind) => {
+              const revoked = ind.status === "revoked";
+              return (
+                <div key={ind.id} className="flex items-center gap-2 px-2 py-1.5 text-[11.5px]">
+                  <div className="min-w-0 flex-1">
+                    <div className={`truncate font-medium ${revoked ? "text-[var(--ink-3)] line-through" : "text-[var(--ink)]"}`}>{ind.script_name}</div>
+                    <div className="text-[10.5px] text-[var(--ink-3)]">
+                      {revoked ? "ถอนสิทธิ์แล้ว" : ind.expiration ? `หมดอายุ ${new Date(ind.expiration).toLocaleDateString("th-TH")}` : "ตลอดชีพ"}
+                    </div>
+                  </div>
+                  {!revoked && (
+                    <button type="button" onClick={() => revokeIndicator(ind)} disabled={!!revokingId}
+                      className="shrink-0 inline-flex items-center gap-1 rounded-md border border-rose-300 px-2 py-1 text-[11px] font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50">
+                      {revokingId === ind.id ? <Loader2 size={12} className="animate-spin" /> : <X size={12} />} ถอนสิทธิ์
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <div className="text-[11px] font-semibold text-amber-800 flex items-center gap-1 pt-1">
+            <RefreshCw size={12} /> เปลี่ยนชื่อ TV / บัญชีเทรด
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div className="min-w-0">
@@ -1166,7 +1213,7 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
         const id = String(p.page_id || "");
         if (id && !seen.has(id)) seen.set(id, `${p.page_name || id} (LINE OA)`);
       }
-      setPageOpts([...seen].map(([id, name]) => ({ id, name })));
+      setPageOpts([...seen].filter(([id]) => isChatPage(id)).map(([id, name]) => ({ id, name })));   // แชท = BeSight เท่านั้น
     })();
   }, []);
 
