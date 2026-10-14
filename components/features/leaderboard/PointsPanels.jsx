@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 import { readFunctionErrorMessage } from "@/lib/utils/errors";
 import { Button, Dialog, Field, Input, Textarea, Select, Badge, EmptyState } from "@/components/ui";
-import { MessageSquare, Flag, Undo2, Loader2, CheckCircle2, XCircle, ShieldCheck, History, Database, Lock } from "lucide-react";
+import { MessageSquare, Flag, Undo2, Loader2, CheckCircle2, XCircle, ShieldCheck, History, Database, Lock, Clock, Zap, Pencil, Moon, CalendarDays, Briefcase, LineChart } from "lucide-react";
 
 export const KIND_LABEL = {
   reply_offhours: "ตอบนอกเวลา",
@@ -304,102 +304,320 @@ function ResolveDialog({ state, onClose, onDone }) {
 }
 
 // กติกาปัจจุบัน + ประวัติเวอร์ชัน — ทุกคนเห็น owner แก้ได้ (สร้างเวอร์ชันใหม่ ไม่ทับของเดิม)
+const RULE_DAYS = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"];
+
+function RuleCard({ icon: Icon, title, sub, children }) {
+  return (
+    <div className="ds-card p-4 flex flex-col">
+      <div className="mb-3 flex items-start gap-2.5">
+        <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-control" style={{ background: "var(--brand-soft)", color: "var(--brand)" }}><Icon size={16} /></span>
+        <div className="min-w-0">
+          <div className="font-semibold leading-tight" style={{ color: "var(--ink)" }}>{title}</div>
+          {sub && <div className="mt-0.5 text-xs" style={{ color: "var(--ink-3)" }}>{sub}</div>}
+        </div>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+// ตารางแต้มนอกเวลา — เรียงตามเวลาในวัน แถบสีบอกว่าช่วงไหนแต้มสูง
+function OffTableView({ rows, breakSlot, max }) {
+  const sorted = [...rows].sort((a, b) => a[0] - b[0]);
+  return (
+    <div className="text-[12.5px] tabular-nums">
+      <div className="grid grid-cols-[1fr_64px_56px] gap-2 px-2 pb-1.5 text-2xs font-medium uppercase tracking-wide" style={{ color: "var(--ink-3)" }}>
+        <span>ช่วงเวลา</span><span className="text-right">ตอบทัน</span><span className="text-right">ตอบช้า</span>
+      </div>
+      {sorted.map((r) => (
+        <div key={r.join()} className="grid grid-cols-[1fr_64px_56px] items-center gap-2 rounded-control px-2 py-2" style={{ borderTop: "1px solid var(--line)" }}>
+          <div className="flex min-w-0 items-center gap-2">
+            <span style={{ color: "var(--ink)" }}>{slotLabel(r)}</span>
+            {breakSlot && r[0] === breakSlot[0] && r[1] === breakSlot[1] && <Badge tone="slate">พักเที่ยง</Badge>}
+          </div>
+          <div className="flex items-center justify-end gap-2">
+            <span className="hidden h-1.5 w-8 overflow-hidden rounded-full sm:block" style={{ background: "var(--line)" }}>
+              <span className="block h-full rounded-full" style={{ width: `${Math.min(100, (r[2] / max) * 100)}%`, background: "var(--brand)" }} />
+            </span>
+            <b className="text-[14px]" style={{ color: "var(--ink)" }}>{r[2]}</b>
+          </div>
+          <span className="text-right" style={{ color: "var(--ink-3)" }}>{r[3]}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Stat({ value, label, unit = "แต้ม" }) {
+  return (
+    <div className="rounded-control px-3 py-2.5" style={{ background: "var(--ground)" }}>
+      <div className="text-xs" style={{ color: "var(--ink-3)" }}>{label}</div>
+      <div className="mt-0.5 tabular-nums"><b className="text-xl" style={{ color: "var(--ink)" }}>{value}</b> <span className="text-xs" style={{ color: "var(--ink-3)" }}>{unit}</span></div>
+    </div>
+  );
+}
+
 export function RulesPanel({ rules, isOwner, onChanged }) {
   const [history, setHistory] = useState(null);
   const [editing, setEditing] = useState(false);
   useEffect(() => { callPoints({ action: "rules_history" }).then((d) => setHistory(d.versions)).catch(() => setHistory([])); }, [rules?.version]);
   if (!rules) return null;
-  const row = (r) => `${String(r[0]).padStart(2, "0")}:00–${String(r[1]).padStart(2, "0")}:00`;
   const oh = rules.office_hours || {};
-  const dayNames = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"];
+  const toH = (t) => (t ? Number(String(t).split(":")[0]) : null);
+  const breakSlot = oh.break_start && oh.break_end ? [toH(oh.break_start), toH(oh.break_end)] : null;
+  const max = Math.max(1, ...rules.off_table.workday.map((r) => r[2]), ...rules.off_table.holiday.map((r) => r[2]));
+  const cap = (n) => (n ? `${n} ครั้ง` : "ไม่จำกัด");
   return (
     <div className="space-y-4 text-[13px]" style={{ color: "var(--ink-2)" }}>
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="ds-card flex flex-wrap items-center gap-x-5 gap-y-2 p-4">
         <Badge tone="brand">กติกาเวอร์ชัน {rules.version}</Badge>
-        <span className="text-xs" style={{ color: "var(--ink-3)" }}>เวลาทำการ {oh.days?.map((d) => dayNames[d]).join(" ")} {oh.open}–{oh.close} (พัก {oh.break_start || "-"}–{oh.break_end || "-"}) · ทันเวลา = ตอบภายใน {rules.slow_min} นาที</span>
-        {isOwner && <Button size="sm" variant="secondary" className="ml-auto" onClick={() => setEditing(true)}>แก้กติกา</Button>}
+        <span className="flex items-center gap-1.5"><Clock size={14} style={{ color: "var(--ink-3)" }} />
+          เวลาทำการ <b style={{ color: "var(--ink)" }}>{oh.days?.map((d) => RULE_DAYS[d]).join(" ")} {oh.open}–{oh.close}</b>
+          {breakSlot && <span style={{ color: "var(--ink-3)" }}>(พัก {oh.break_start}–{oh.break_end})</span>}
+        </span>
+        <span className="flex items-center gap-1.5"><Zap size={14} style={{ color: "var(--ink-3)" }} />
+          ตอบทัน = ตอบภายใน <b style={{ color: "var(--ink)" }}>{rules.slow_min} นาที</b>
+        </span>
+        {isOwner && <Button size="sm" variant="secondary" icon={Pencil} className="ml-auto" onClick={() => setEditing(true)}>แก้กติกา</Button>}
       </div>
-      <div className="grid gap-3 md:grid-cols-2">
-        {[["workday", "นอกเวลา · วันทำงาน"], ["holiday", "วันหยุด / เสาร์-อาทิตย์ / วันหยุดพิเศษ"]].map(([k, title]) => (
-          <div key={k} className="ds-card p-3">
-            <div className="mb-2 font-semibold" style={{ color: "var(--ink)" }}>{title}</div>
-            <table className="w-full text-xs tabular-nums">
-              <thead><tr style={{ color: "var(--ink-3)" }}><th className="text-left font-medium py-1">ช่วงเวลา</th><th className="text-right font-medium">ทันเวลา</th><th className="text-right font-medium">ช้า</th></tr></thead>
-              <tbody>{rules.off_table[k].map((r) => <tr key={r.join()} style={{ borderTop: "1px solid var(--line)" }}><td className="py-1.5">{row(r)}</td><td className="text-right font-semibold" style={{ color: "var(--ink)" }}>{r[2]}</td><td className="text-right">{r[3]}</td></tr>)}</tbody>
-            </table>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <RuleCard icon={Moon} title="นอกเวลาทำการ · วันทำงาน" sub="แต้มต่อการตอบ 1 รอบ">
+          <OffTableView rows={rules.off_table.workday} breakSlot={breakSlot} max={max} />
+        </RuleCard>
+        <RuleCard icon={CalendarDays} title="วันหยุด" sub="เสาร์-อาทิตย์ และวันหยุดในปฏิทิน">
+          <OffTableView rows={rules.off_table.holiday} max={max} />
+        </RuleCard>
+        <RuleCard icon={Briefcase} title="ในเวลาทำการ" sub="ช่วงที่ไม่อยู่ในตารางนอกเวลา">
+          <div className="grid grid-cols-2 gap-2">
+            <Stat label="ตอบทัน" value={rules.office[0]} />
+            <Stat label="ตอบช้า" value={rules.office[1]} />
           </div>
-        ))}
-        <div className="ds-card p-3">
-          <div className="mb-2 font-semibold" style={{ color: "var(--ink)" }}>ในเวลาทำการ</div>
-          ทันเวลา <b style={{ color: "var(--ink)" }}>{rules.office[0]}</b> · ช้า <b style={{ color: "var(--ink)" }}>{rules.office[1]}</b> แต้ม
-          <div className="mt-2 text-xs" style={{ color: "var(--ink-3)" }}>
-            เพดานต่อห้องแชทต่อวัน: ในเวลา {rules.caps.office_per_conv_day || "ไม่จำกัด"} · นอกเวลา {rules.caps.off_per_conv_day || "ไม่จำกัด"}
+          <div className="mt-3 text-xs" style={{ color: "var(--ink-3)" }}>
+            เพดานต่อห้องแชทต่อวัน · ในเวลา <b style={{ color: "var(--ink-2)" }}>{cap(rules.caps.office_per_conv_day)}</b> · นอกเวลา <b style={{ color: "var(--ink-2)" }}>{cap(rules.caps.off_per_conv_day)}</b>
           </div>
-        </div>
-        <div className="ds-card p-3">
-          <div className="mb-2 font-semibold" style={{ color: "var(--ink)" }}>TradingView</div>
-          ให้สิทธิ์ใหม่ <b style={{ color: "var(--ink)" }}>{rules.tv.grant}</b> · ต่ออายุ <b style={{ color: "var(--ink)" }}>{rules.tv.renew}</b> แต้ม ต่อสคริปต์
-          <div className="mt-2 text-xs" style={{ color: "var(--ink-3)" }}>ถอนสิทธิ์ภายใน {rules.tv.revoke_void_days} วัน = หักแต้มคืน · ยื่นโต้แย้งได้ {rules.dispute_days} วันหลังสิ้นเดือน</div>
-        </div>
+        </RuleCard>
+        <RuleCard icon={LineChart} title="TradingView" sub="แต้มต่อ 1 สคริปต์">
+          <div className="grid grid-cols-2 gap-2">
+            <Stat label="ให้สิทธิ์ใหม่" value={rules.tv.grant} />
+            <Stat label="ต่ออายุ" value={rules.tv.renew} />
+          </div>
+          <div className="mt-3 text-xs" style={{ color: "var(--ink-3)" }}>
+            ถอนสิทธิ์ภายใน <b style={{ color: "var(--ink-2)" }}>{rules.tv.revoke_void_days} วัน</b> = หักแต้มคืน · ยื่นโต้แย้งได้ <b style={{ color: "var(--ink-2)" }}>{rules.dispute_days} วัน</b>หลังสิ้นเดือน
+          </div>
+        </RuleCard>
       </div>
-      <div>
-        <div className="mb-1 flex items-center gap-1.5 font-semibold" style={{ color: "var(--ink)" }}><History size={14} /> ประวัติการเปลี่ยนกติกา</div>
-        {(history || []).map((v) => (
-          <div key={v.version} className="py-1.5 text-xs" style={{ borderTop: "1px solid var(--line)" }}>
-            <b>v{v.version}</b> · {fmtDT(v.created_at)} · {v.created_by} — {v.note}
-          </div>
-        ))}
+
+      <div className="ds-card p-4">
+        <div className="mb-3 flex items-center gap-1.5 font-semibold" style={{ color: "var(--ink)" }}><History size={15} /> ประวัติการเปลี่ยนกติกา</div>
+        {!history && <Loader2 size={16} className="animate-spin" style={{ color: "var(--ink-3)" }} />}
+        <ol className="space-y-0">
+          {(history || []).map((v, i) => (
+            <li key={v.version} className="relative flex gap-3 pb-3 last:pb-0">
+              {i < history.length - 1 && <span className="absolute left-[15px] top-7 bottom-0 w-px" style={{ background: "var(--line)" }} />}
+              <span className="grid h-[30px] w-[30px] shrink-0 place-items-center rounded-full text-2xs font-semibold"
+                style={i === 0 ? { background: "var(--brand-soft)", color: "var(--brand)" } : { background: "var(--ground)", color: "var(--ink-3)", border: "1px solid var(--line)" }}>v{v.version}</span>
+              <div className="min-w-0 pt-1">
+                <div className="text-xs" style={{ color: "var(--ink-3)" }}>{fmtDT(v.created_at)} · {v.created_by}{i === 0 && <span style={{ color: "var(--brand)" }}> · ใช้อยู่</span>}</div>
+                <div className="mt-0.5 text-[12.5px]" style={{ color: "var(--ink-2)" }}>{v.note}</div>
+              </div>
+            </li>
+          ))}
+        </ol>
       </div>
       <RulesEditor open={editing} rules={rules} onClose={() => setEditing(false)} onDone={() => { setEditing(false); onChanged?.(); }} />
     </div>
   );
 }
 
+// ฟอร์มแก้กติกา — เขียนให้คนที่ไม่ได้ตั้งกติกาเองอ่านแล้วแก้ถูก: ทุกช่องมีหน่วย มีค่าเดิมให้เทียบ และสรุปสิ่งที่จะเปลี่ยนก่อนบันทึก
+const HOURS = Array.from({ length: 25 }, (_, h) => h);
+const hh = (h) => `${String(h).padStart(2, "0")}:00`;
+const slotLabel = (r) => `${hh(r[0])}–${hh(r[1])}`;
+
+function RuleSection({ n, title, hint, children }) {
+  return (
+    <section className="ds-card p-3.5 space-y-2.5">
+      <div>
+        <div className="font-semibold" style={{ color: "var(--ink)" }}><span style={{ color: "var(--ink-3)" }}>{n}.</span> {title}</div>
+        {hint && <div className="mt-0.5 text-xs" style={{ color: "var(--ink-3)" }}>{hint}</div>}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+// ช่องตัวเลขพร้อมหน่วย + ค่าเดิม (โชว์เมื่อถูกแก้)
+function NumField({ label, value, before, onChange, unit, step = "0.25", help }) {
+  const changed = before !== undefined && Number(value) !== Number(before);
+  return (
+    <label className="block">
+      {label && <span className="text-[12.5px] font-medium" style={{ color: "var(--ink-2)" }}>{label}</span>}
+      <div className={`${label ? "mt-1" : ""} flex items-center gap-1.5`}>
+        <Input type="number" step={step} min="0" value={value} onChange={(e) => onChange(e.target.value === "" ? "" : Number(e.target.value))}
+          className="!py-1.5 tabular-nums" style={changed ? { borderColor: "var(--warn)", background: "var(--ground)" } : undefined} />
+        {unit && <span className="shrink-0 text-xs" style={{ color: "var(--ink-3)" }}>{unit}</span>}
+      </div>
+      {changed ? <span className="mt-0.5 block text-2xs" style={{ color: "var(--warn)" }}>เดิม {before}{unit ? ` ${unit}` : ""}</span>
+        : help && <span className="mt-0.5 block text-2xs" style={{ color: "var(--ink-3)" }}>{help}</span>}
+    </label>
+  );
+}
+
+function HourSelect({ value, onChange, min = 0 }) {
+  return (
+    <Select value={value} onChange={(e) => onChange(Number(e.target.value))} className="!py-1.5 tabular-nums">
+      {HOURS.filter((h) => h >= min).map((h) => <option key={h} value={h}>{hh(h)}</option>)}
+    </Select>
+  );
+}
+
+function OffTableEditor({ rows, before, slowMin, onChange }) {
+  const setCell = (i, j, v) => onChange(rows.map((r, k) => (k === i ? r.map((x, m) => (m === j ? v : x)) : r)));
+  const remove = (i) => onChange(rows.filter((_, k) => k !== i));
+  const add = () => onChange([...rows, [0, 1, 0, 0]]);
+  return (
+    <div className="space-y-1.5">
+      <div className="hidden sm:grid grid-cols-[1fr_1fr_1fr_1fr_28px] gap-2 px-0.5 text-2xs font-medium" style={{ color: "var(--ink-3)" }}>
+        <span>ตั้งแต่</span><span>ถึง</span><span>ตอบทัน (≤ {slowMin} นาที)</span><span>ตอบช้า</span><span />
+      </div>
+      {rows.map((r, i) => {
+        const old = before?.find((b) => b[0] === r[0] && b[1] === r[1]);
+        const bad = !(r[0] < r[1]);
+        return (
+          <div key={i}>
+            <div className="grid grid-cols-2 sm:grid-cols-[1fr_1fr_1fr_1fr_28px] gap-2 items-start">
+              <HourSelect value={r[0]} onChange={(v) => setCell(i, 0, v)} />
+              <HourSelect value={r[1]} onChange={(v) => setCell(i, 1, v)} min={1} />
+              <NumField value={r[2]} before={old ? old[2] : undefined} onChange={(v) => setCell(i, 2, v)} unit="แต้ม" />
+              <NumField value={r[3]} before={old ? old[3] : undefined} onChange={(v) => setCell(i, 3, v)} unit="แต้ม" />
+              <button type="button" onClick={() => remove(i)} title="ลบช่วงนี้" className="mt-1.5 h-7 w-7 rounded-control text-sm hover:bg-black/5" style={{ color: "var(--ink-3)" }}>×</button>
+            </div>
+            {bad && <div className="mt-0.5 text-2xs" style={{ color: "var(--bad)" }}>เวลา "ถึง" ต้องหลัง "ตั้งแต่" (ช่วงข้ามเที่ยงคืนให้แยกเป็น 2 แถว เช่น 20:00–24:00 และ 00:00–05:00)</div>}
+          </div>
+        );
+      })}
+      <button type="button" onClick={add} className="text-xs font-medium" style={{ color: "var(--brand)" }}>+ เพิ่มช่วงเวลา</button>
+    </div>
+  );
+}
+
+// รายการสิ่งที่เปลี่ยน (อ่านเป็นภาษาคน) — ใช้ทั้งสรุปก่อนบันทึก และกันกดบันทึกทั้งที่ไม่ได้แก้อะไร
+function diffRules(a, b) {
+  const out = [];
+  const num = (label, x, y, unit = "แต้ม") => { if (Number(x) !== Number(y)) out.push(`${label}: ${x} → ${y} ${unit}`); };
+  for (const [k, name] of [["workday", "นอกเวลา วันทำงาน"], ["holiday", "วันหยุด"]]) {
+    const A = a.off_table[k], B = b.off_table[k];
+    for (const r of B) {
+      const o = A.find((x) => x[0] === r[0] && x[1] === r[1]);
+      if (!o) out.push(`${name}: เพิ่มช่วง ${slotLabel(r)} (ทัน ${r[2]} / ช้า ${r[3]} แต้ม)`);
+      else { num(`${name} ${slotLabel(r)} ตอบทัน`, o[2], r[2]); num(`${name} ${slotLabel(r)} ตอบช้า`, o[3], r[3]); }
+    }
+    for (const o of A) if (!B.find((x) => x[0] === o[0] && x[1] === o[1])) out.push(`${name}: เอาช่วง ${slotLabel(o)} ออก`);
+  }
+  num("ในเวลาทำการ ตอบทัน", a.office[0], b.office[0]);
+  num("ในเวลาทำการ ตอบช้า", a.office[1], b.office[1]);
+  num("เพดานในเวลา", a.caps.office_per_conv_day, b.caps.office_per_conv_day, "ครั้ง/ห้อง/วัน");
+  num("เพดานนอกเวลา", a.caps.off_per_conv_day, b.caps.off_per_conv_day, "ครั้ง/ห้อง/วัน");
+  num("TV ให้สิทธิ์ใหม่", a.tv.grant, b.tv.grant);
+  num("TV ต่ออายุ", a.tv.renew, b.tv.renew);
+  num("ถอนสิทธิ์ TV ภายใน", a.tv.revoke_void_days, b.tv.revoke_void_days, "วัน");
+  num("ยื่นโต้แย้งได้", a.dispute_days, b.dispute_days, "วันหลังสิ้นเดือน");
+  return out;
+}
+
 function RulesEditor({ open, rules, onClose, onDone }) {
+  const [orig, setOrig] = useState(null);
   const [draft, setDraft] = useState(null);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  // โหลดค่าตั้งต้นแค่ตอนเปิดกล่อง — หน้ากระดานรีเฟรชทุก 60 วิ ได้ object rules ใหม่ทุกครั้ง
+  // ถ้าผูกกับ rules ด้วย ฟอร์มจะถูกรีเซ็ตทับสิ่งที่กำลังแก้
   useEffect(() => {
     if (!open) return;
-    setDraft(JSON.parse(JSON.stringify({ off_table: rules.off_table, office: rules.office, tv: rules.tv, caps: rules.caps, dispute_days: rules.dispute_days })));
+    const base = JSON.parse(JSON.stringify({ off_table: rules.off_table, office: rules.office, tv: rules.tv, caps: rules.caps, dispute_days: rules.dispute_days }));
+    setOrig(base); setDraft(JSON.parse(JSON.stringify(base)));
     setNote(""); setErr("");
-  }, [open, rules]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+  const changes = useMemo(() => (orig && draft ? diffRules(orig, draft) : []), [orig, draft]);
   if (!draft) return null;
   const set = (fn) => setDraft((d) => { const c = JSON.parse(JSON.stringify(d)); fn(c); return c; });
-  const numIn = (value, onChange, step = "0.25") => <Input type="number" step={step} min="0" value={value} onChange={(e) => onChange(Number(e.target.value))} className="!py-1.5" />;
+  const slowMin = rules.slow_min ?? rules.office_hours?.slow_min ?? 5;
+  const oh = rules.office_hours || {};
+  const dayNames = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"];
+  const hasEmpty = JSON.stringify(draft).includes('""');
+  const hasBadRow = ["workday", "holiday"].some((k) => draft.off_table[k].some((r) => !(r[0] < r[1])));
   const submit = async () => {
     setBusy(true); setErr("");
     try { await callPoints({ action: "rules_set", rules: draft, note }); onDone?.(); }
     catch (e) { setErr(e.message); }
     setBusy(false);
   };
+  const blocked = changes.length === 0 ? "ยังไม่ได้แก้อะไร" : hasEmpty ? "มีช่องที่ยังว่าง" : hasBadRow ? "มีช่วงเวลาที่ไม่ถูกต้อง" : note.trim().length < 3 ? "กรอกเหตุผลที่เปลี่ยนก่อน" : "";
   return (
-    <Dialog open={open} onClose={onClose} className="points-dialog" title="แก้กติกาแต้ม (สร้างเวอร์ชันใหม่)"
-      description="มีผลกับแต้มที่เกิดหลังจากบันทึกเท่านั้น แต้มที่ได้ไปแล้วไม่เปลี่ยน — ทุกคนเห็นประวัติการแก้"
-      footer={<><Button variant="ghost" onClick={onClose}>ยกเลิก</Button><Button variant="primary" loading={busy} onClick={submit}>บันทึกเป็นเวอร์ชันใหม่</Button></>}>
-      <div className="space-y-4 text-[12.5px]">
-        {["workday", "holiday"].map((k) => (
-          <div key={k}>
-            <div className="mb-1 font-semibold">{k === "workday" ? "นอกเวลา · วันทำงาน" : "วันหยุด"} <span className="font-normal" style={{ color: "var(--ink-3)" }}>[ชม.เริ่ม, ชม.จบ, แต้มทัน, แต้มช้า]</span></div>
-            {draft.off_table[k].map((r, i) => (
-              <div key={i} className="mb-1 grid grid-cols-4 gap-1.5">
-                {r.map((v, j) => <div key={j}>{numIn(v, (n) => set((c) => { c.off_table[k][i][j] = n; }), j < 2 ? "1" : "0.25")}</div>)}
-              </div>
-            ))}
-          </div>
-        ))}
-        <div className="grid grid-cols-2 gap-2">
-          <Field label="ในเวลา · ทันเวลา">{numIn(draft.office[0], (n) => set((c) => { c.office[0] = n; }))}</Field>
-          <Field label="ในเวลา · ช้า">{numIn(draft.office[1], (n) => set((c) => { c.office[1] = n; }))}</Field>
-          <Field label="TV ให้สิทธิ์ใหม่">{numIn(draft.tv.grant, (n) => set((c) => { c.tv.grant = n; }))}</Field>
-          <Field label="TV ต่ออายุ">{numIn(draft.tv.renew, (n) => set((c) => { c.tv.renew = n; }))}</Field>
-          <Field label="ถอนสิทธิ์ภายในกี่วัน = หักแต้มคืน">{numIn(draft.tv.revoke_void_days, (n) => set((c) => { c.tv.revoke_void_days = n; }), "1")}</Field>
-          <Field label="ยื่นโต้แย้งได้กี่วันหลังสิ้นเดือน">{numIn(draft.dispute_days, (n) => set((c) => { c.dispute_days = n; }), "1")}</Field>
-          <Field label="เพดานในเวลา (ครั้ง/ห้อง/วัน · 0 = ไม่จำกัด)">{numIn(draft.caps.office_per_conv_day, (n) => set((c) => { c.caps.office_per_conv_day = n; }), "1")}</Field>
-          <Field label="เพดานนอกเวลา (ครั้ง/ห้อง/วัน · 0 = ไม่จำกัด)">{numIn(draft.caps.off_per_conv_day, (n) => set((c) => { c.caps.off_per_conv_day = n; }), "1")}</Field>
+    <Dialog open={open} onClose={onClose} className="points-dialog" title="แก้กติกาแต้ม"
+      description="บันทึกแล้วจะเป็นกติกาเวอร์ชันใหม่ มีผลกับแต้มที่เกิดหลังจากนี้เท่านั้น แต้มที่ได้ไปแล้วไม่เปลี่ยน — ทุกคนเห็นประวัติการแก้"
+      footer={<>
+        <span className="text-xs" style={{ color: "var(--ink-3)" }}>{blocked}</span>
+        <div className="flex gap-2">
+          <Button variant="ghost" onClick={onClose}>ยกเลิก</Button>
+          <Button variant="primary" loading={busy} disabled={!!blocked} onClick={submit}>บันทึกเป็นเวอร์ชันใหม่</Button>
         </div>
-        <Field label="เหตุผลที่เปลี่ยน (ทุกคนเห็น)"><Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="เช่น เพิ่มแต้มในเวลาเป็น 1 ตั้งแต่ 1 พ.ย." /></Field>
+      </>}>
+      <div className="space-y-3 text-[12.5px]" style={{ color: "var(--ink-2)" }}>
+        <div className="rounded-control p-3 text-xs leading-relaxed" style={{ background: "var(--ground)" }}>
+          <b style={{ color: "var(--ink)" }}>แต้มตอบแชทคิดยังไง</b> — ลูกค้าทักมา 1 รอบ คนที่ตอบได้แต้มตามช่วงเวลา ·
+          <b> ตอบทัน</b> = ตอบภายใน {slowMin} นาที, เกินนั้น = <b>ตอบช้า</b> ·
+          เวลาทำการคือ {oh.days?.map((d) => dayNames[d]).join(" ") || "-"} {oh.open || "-"}–{oh.close || "-"} นอกนั้นนับเป็น "นอกเวลา" ·
+          ถ้าลูกค้าทักกับตอนตอบอยู่คนละช่วง ระบบใช้ช่วงที่ได้แต้มน้อยกว่า ·
+          ช่องที่แก้แล้วจะขึ้นกรอบสีส้มพร้อมค่าเดิม
+        </div>
+
+        <RuleSection n={1} title="ตอบแชทนอกเวลาทำการ — วันทำงาน" hint={`ช่วงเวลาของวันทำงานที่อยู่นอก ${oh.open || "เวลาเปิด"}–${oh.close || "เวลาปิด"} รวมช่วงพักเที่ยง · ช่วงที่ไม่ได้ใส่ไว้จะนับเป็น "ในเวลาทำการ"`}>
+          <OffTableEditor rows={draft.off_table.workday} before={orig.off_table.workday} slowMin={slowMin} onChange={(rows) => set((c) => { c.off_table.workday = rows; })} />
+        </RuleSection>
+
+        <RuleSection n={2} title="ตอบแชทวันหยุด — เสาร์-อาทิตย์ / วันหยุดในปฏิทิน" hint="ทั้งวันนับเป็นนอกเวลา ควรใส่ให้ครบ 00:00–24:00">
+          <OffTableEditor rows={draft.off_table.holiday} before={orig.off_table.holiday} slowMin={slowMin} onChange={(rows) => set((c) => { c.off_table.holiday = rows; })} />
+        </RuleSection>
+
+        <RuleSection n={3} title="ตอบแชทในเวลาทำการ" hint="ใช้กับทุกช่วงของวันทำงานที่ไม่อยู่ในตารางข้อ 1">
+          <div className="grid gap-2 sm:grid-cols-2">
+            <NumField label={`ตอบทัน (≤ ${slowMin} นาที)`} value={draft.office[0]} before={orig.office[0]} onChange={(n) => set((c) => { c.office[0] = n; })} unit="แต้ม" />
+            <NumField label="ตอบช้า" value={draft.office[1]} before={orig.office[1]} onChange={(n) => set((c) => { c.office[1] = n; })} unit="แต้ม" />
+          </div>
+        </RuleSection>
+
+        <RuleSection n={4} title="เพดานแต้มต่อห้องแชท" hint="ห้องแชทเดียวกันในวันเดียวกัน ได้แต้มสูงสุดกี่ครั้ง — กันการตอบทีละคำเพื่อปั่นแต้ม · ใส่ 0 = ไม่จำกัด">
+          <div className="grid gap-2 sm:grid-cols-2">
+            <NumField label="ในเวลาทำการ" value={draft.caps.office_per_conv_day} before={orig.caps.office_per_conv_day} onChange={(n) => set((c) => { c.caps.office_per_conv_day = n; })} unit="ครั้ง/ห้อง/วัน" step="1" help="0 = ไม่จำกัด" />
+            <NumField label="นอกเวลา / วันหยุด" value={draft.caps.off_per_conv_day} before={orig.caps.off_per_conv_day} onChange={(n) => set((c) => { c.caps.off_per_conv_day = n; })} unit="ครั้ง/ห้อง/วัน" step="1" help="0 = ไม่จำกัด" />
+          </div>
+        </RuleSection>
+
+        <RuleSection n={5} title="TradingView" hint="แต้มต่อ 1 สคริปต์ที่ให้สิทธิ์ลูกค้า">
+          <div className="grid gap-2 sm:grid-cols-3">
+            <NumField label="ให้สิทธิ์ครั้งแรก" value={draft.tv.grant} before={orig.tv.grant} onChange={(n) => set((c) => { c.tv.grant = n; })} unit="แต้ม" />
+            <NumField label="ต่ออายุ" value={draft.tv.renew} before={orig.tv.renew} onChange={(n) => set((c) => { c.tv.renew = n; })} unit="แต้ม" />
+            <NumField label="ถ้าถอนสิทธิ์ภายใน" value={draft.tv.revoke_void_days} before={orig.tv.revoke_void_days} onChange={(n) => set((c) => { c.tv.revoke_void_days = n; })} unit="วัน" step="1" help="จะหักแต้มที่ให้ไปคืน" />
+          </div>
+        </RuleSection>
+
+        <RuleSection n={6} title="การโต้แย้งแต้ม">
+          <div className="sm:w-1/2">
+            <NumField label="ยื่นโต้แย้งได้ถึง" value={draft.dispute_days} before={orig.dispute_days} onChange={(n) => set((c) => { c.dispute_days = n; })} unit="วันหลังสิ้นเดือน" step="1" />
+          </div>
+        </RuleSection>
+
+        <section className="ds-card p-3.5 space-y-2.5">
+          <div className="font-semibold" style={{ color: "var(--ink)" }}>สรุปสิ่งที่จะเปลี่ยน</div>
+          {changes.length === 0
+            ? <div className="text-xs" style={{ color: "var(--ink-3)" }}>ยังไม่ได้แก้อะไร</div>
+            : <ul className="list-disc pl-5 text-xs space-y-0.5">{changes.map((c) => <li key={c}>{c}</li>)}</ul>}
+          <Field label="เหตุผลที่เปลี่ยน (ทุกคนเห็น · จำเป็น)"><Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="เช่น เพิ่มแต้มในเวลาเป็น 1 ตั้งแต่ 1 พ.ย." /></Field>
+        </section>
         {err && <div className="text-xs" style={{ color: "var(--bad)" }}>{err}</div>}
       </div>
     </Dialog>
