@@ -634,7 +634,9 @@ html:not(.dark) .chat-bubble-me * { color: #FFFFFF; }
 @media (min-width: 1024px) and (max-width: 1200px) {
   .chat-inbox-list { width: 280px !important; }
   .chat-customer-panel { width: 280px !important; padding: .75rem !important; }
-  .chat-customer-form .grid { grid-template-columns: minmax(0, 1fr); }
+  /* เฉพาะ grid ช่องกรอกหลัก (ลูกตรงของฟอร์ม) — ปุ่ม XM/Exness ยังวางคู่กันได้
+     ห้ามใส่ col-span-2 ใน grid นี้: เทมเพลตเหลือคอลัมน์เดียว ช่อง span 2 จะสร้างคอลัมน์แฝงที่กินความกว้างหมด จนช่องจริงเหลือ 0px */
+  .chat-customer-form > .grid { grid-template-columns: minmax(0, 1fr); }
   .chat-conversation-panel .chat-compose-guide { flex-wrap: wrap; }
   .chat-conversation-panel .chat-language-control { margin-left: 0; }
   .chat-conversation-panel .chat-language-control select { width: 220px; }

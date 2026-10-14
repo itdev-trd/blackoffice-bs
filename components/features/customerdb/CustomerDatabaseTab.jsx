@@ -749,7 +749,11 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
         {inp("username", "User TradingView", "username TV")}
         {inp("phone", "เบอร์โทร", "เบอร์โทร")}
         {inp("email", "อีเมล", "อีเมล")}
-        <div className="min-w-0 col-span-2">
+      </div>
+      {/* ช่องเต็มแถวแยกออกจาก grid — ถ้าอยู่ใน grid เดียวกันแบบ col-span-2 ข้อความยาวใต้ปุ่ม broker
+          ทำให้เบราว์เซอร์ยกความกว้างให้คอลัมน์ขวาทั้งหมด คอลัมน์ซ้าย (ไอดีเทรด/เบอร์โทร) เหลือ 0px ในแผงขวาที่แคบ */}
+      <div className="space-y-2">
+        <div className="min-w-0">
           <label className="text-[11px] text-[var(--ink-3)]">ประเทศของลูกค้า</label>
           <select value={f.country} onChange={(e) => setF((st) => ({ ...st, country: e.target.value }))}
             className="mt-0.5 w-full rounded-lg border border-[var(--line-strong)] px-2 py-1.5 text-sm bg-[var(--surface)]">
@@ -759,7 +763,7 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
             {f.country && !COUNTRIES.includes(f.country) && <option value={f.country}>{f.country}</option>}
           </select>
         </div>
-        <div className="min-w-0 col-span-2">
+        <div className="min-w-0">
           {/* ป้ายกำกับ broker ที่แอดมินเลือกเอง (XM หลัก / Exness รอง) — ไม่ได้เช็คจริงกับฝั่ง broker
               ระบบเช็คไอดีเทรดตอนนี้ผูกกับ XM เท่านั้น ป้ายนี้ไว้ช่วยคัดกรอง/บันทึกไว้ก่อน */}
           <label className="text-[11px] text-[var(--ink-3)]">Broker</label>
