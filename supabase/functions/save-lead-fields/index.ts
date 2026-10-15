@@ -72,6 +72,7 @@ Deno.serve(async (req) => {
         : null;
       const { error } = await admin.from("chat_customers").update({ address, updated_at: nowIso }).eq("id", id);
       if (error) throw error;
+      if (row?.page_id) await admin.from("customer_report_cache").delete().eq("page_id", row.page_id);
       return json({ ok: true, id, address });
     }
 
@@ -100,6 +101,9 @@ Deno.serve(async (req) => {
     };
     const { error } = await admin.from("chat_customers").update(patch).eq("id", id);
     if (error) throw error;
+    // รีพอร์ตลูกค้าทักแชทเป็น snapshot ที่แคชไว้ — ล้างของเพจนี้ ข้อมูลที่เพิ่งกรอกจากหน้าแชทจะขึ้นในรีพอร์ตทันที
+    // (เดิมไม่ล้าง: กรอกข้อมูลลูกค้า IG ในแชทแล้ว แต่รีพอร์ตยังโชว์ "—" จนกว่าจะมีคนกดรีเฟรช)
+    if (row?.page_id) await admin.from("customer_report_cache").delete().eq("page_id", row.page_id);
 
     return json({ ok: true, id, trade_id, username, phone, email, ...(hasCountry ? { country } : {}), ...(hasBroker ? { broker } : {}), manual_data_by: by, manual_data_at: nowIso });
   } catch (err) {

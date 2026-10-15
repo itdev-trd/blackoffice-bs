@@ -510,8 +510,58 @@ Deno.serve(async (req) => {
       return json({ ok: true, brand_id: brand.id });
     }
 
+    // ---- cron ทุกคืน: ต่อ Indicator อัตโนมัติเมื่อ Lot ถึงเกณฑ์ (service/cron หรือแอดมินกดรันเอง) ----
+    // รันก่อนงาน expire (05:00 ไทย) — ตรวจเฉพาะใบที่ "ใกล้หมด/เพิ่งหมด" (หมดภายใน 24 ชม. ข้างหน้า หรือเลยมาไม่เกิน 3 วัน)
+    // แล้วเรียก lot_check ทีละสมาชิก (รอบเดือนของสมาชิก) — ผ่านเกณฑ์ = ต่อ +1 เดือนนับจากวันหมดอายุเดิม (รอบไม่เลื่อน)
+    // กันต่อซ้ำด้วย tv_lot_renewals เหมือนกดตรวจเอง · ทำทีละคน มีงบเวลา ไม่ทันรอบนี้ = คืนพรุ่งนี้ยังอยู่ในช่วง 3 วัน
+    if (action === "lot_renew_cron") {
+      if (!isService) { const a = await authorizeRequest(req, { admin: true }); if (!a.ok) return json({ ok: false, error: a.error }, a.status); }
+      const startedAt = Date.now();
+      const nowMs = Date.now();
+      const { data: due } = await db.from("tv_access")
+        .select("username, pine_id, trade_id, expiration, status")
+        .neq("status", "revoked").not("expiration", "is", null)
+        .gte("expiration", new Date(nowMs - 3 * 86400000).toISOString())
+        .lte("expiration", new Date(nowMs + 24 * 3600000).toISOString())
+        .limit(1000);
+      const byUser = new Map<string, { pines: string[]; tradeId: string }>();
+      for (const r of due || []) {
+        const u = String(r.username || ""); if (!u) continue;
+        const cur = byUser.get(u) ?? { pines: [], tradeId: "" };
+        cur.pines.push(String(r.pine_id));
+        if (!cur.tradeId && r.trade_id) cur.tradeId = String(r.trade_id).replace(/\D/g, "");
+        byUser.set(u, cur);
+      }
+      const svcKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+      const outcomes: any[] = [];
+      let renewed = 0, qualified = 0, failed = 0, deferred = 0;
+      for (const [username, m] of byUser) {
+        if (Date.now() - startedAt > 110_000) { deferred++; continue; }   // เผื่อเวลาก่อนฟังก์ชันถูกตัด
+        if (!m.tradeId) { outcomes.push({ username, skipped: "ไม่มี Trade ID" }); continue; }
+        try {
+          const resp = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/tradingview`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${svcKey}` },
+            // dry_run: แอดมินทดลองรันดูว่าคืนนี้ใครจะได้ต่อ โดยไม่บันทึก/ไม่ต่อจริง
+            body: JSON.stringify({ action: "lot_check", trade_id: m.tradeId, username, period: "cycle", auto_renew: true, pine_ids: m.pines, keep_anchor: true, dry_run: body?.dry_run === true }),
+          });
+          const d = await resp.json().catch(() => null);
+          if (!d?.ok) { failed++; outcomes.push({ username, error: d?.error || `HTTP ${resp.status}` }); continue; }
+          if (d.qualified) qualified++;
+          renewed += Number(d.renewed) || 0;
+          outcomes.push({ username, lots: d.total_lots, quota: d.quota, qualified: d.qualified, renewed: d.renewed, skipped: d.skipped });
+        } catch (e) {
+          failed++; outcomes.push({ username, error: String(e instanceof Error ? e.message : e) });
+        }
+      }
+      const summary = { at: new Date().toISOString(), members: byUser.size, qualified, renewed, failed, deferred };
+      if (body?.dry_run !== true) await db.from("settings").upsert({ key: "lot_renew_cron_last", value: { ...summary, outcomes: outcomes.slice(0, 200) }, updated_at: summary.at });
+      return json({ ok: true, ...summary, outcomes });
+    }
+
     // ---- ต่อจากนี้ต้องมีสิทธิ์แท็บ tv_members ----
-    const auth = await authorizeRequest(req, { tab: "tv_members" });
+    // cron ต่ออายุตาม Lot (lot_renew_cron) เรียก lot_check → grant ด้วย service role — เปิดให้เฉพาะ 2 action นี้
+    const auth = await authorizeRequest(req, { tab: "tv_members", allowService: isService && (action === "lot_check" || action === "grant") });
     if (!auth.ok) return json({ ok: false, error: auth.error }, auth.status);
     // เดิมเช็ค role === "admin" ตรง ๆ — บทบาท owner/ads ต้องได้สิทธิ์เดียวกัน
     const isAdmin = !!auth.permission && hasFullData(auth.permission);
@@ -1307,8 +1357,17 @@ Deno.serve(async (req) => {
       const autoRenew = body?.auto_renew !== false;
       const today = thDay(new Date());
 
-      const { data: linked } = await db.from("tv_access").select("username").eq("trade_id", tradeId);
-      const usernames = [...new Set((linked || []).map((r: any) => String(r.username || "")).filter(Boolean))];
+      // cron ส่ง username มาตรง ๆ (สมาชิกคนนั้นแน่นอน) · หน้าเว็บหาเองจาก trade_id
+      const fromCron = auth.isService === true;
+      const pineFilter = Array.isArray(body?.pine_ids) ? new Set(body.pine_ids.map(String)) : null;
+      const keepAnchor = body?.keep_anchor === true;
+      const actor = fromCron ? "cron" : (auth.permission?.email ?? null);
+      let usernames: string[];
+      if (body?.username) usernames = [String(body.username)];
+      else {
+        const { data: linked } = await db.from("tv_access").select("username").eq("trade_id", tradeId);
+        usernames = [...new Set((linked || []).map((r: any) => String(r.username || "")).filter(Boolean))];
+      }
       const { data: rowsRaw } = usernames.length
         ? await db.from("tv_access").select("id, username, display_name, pine_id, brand_id, trade_id, expiration, status, granted_at, created_at, lot_quota_override").in("username", usernames)
         : { data: [] as any[] };
@@ -1365,13 +1424,14 @@ Deno.serve(async (req) => {
       const qualified: boolean | null = rows.length > 0 && quota ? totalLots >= quota : null;
 
       // ---- ต่ออายุอัตโนมัติ ----
-      const targets = live.filter((r) => r.expiration);   // ตลอดชีพไม่ต้องต่อ · ถูกถอนสิทธิ์ไม่ต่อให้
+      // ตลอดชีพไม่ต้องต่อ · ถูกถอนสิทธิ์ไม่ต่อให้ · cron ส่ง pine_ids มา = ต่อเฉพาะใบที่ใกล้หมด
+      const targets = live.filter((r) => r.expiration && (!pineFilter || pineFilter.has(String(r.pine_id))));
       let skipped: string | null = null;
       if (!rows.length) skipped = "ไม่พบ Trade ID นี้ในสมาชิก Indicator";
       else if (period !== "cycle") skipped = "ต่ออัตโนมัติได้เฉพาะ \"รอบเดือนของสมาชิก\" — ช่วงนี้ดูได้อย่างเดียว";
       else if (dryRun) skipped = "Dry-run — ดูผลอย่างเดียว ไม่บันทึก ไม่ต่ออายุ";
       else if (!autoRenew) skipped = "ปิดการต่อ Indicator อัตโนมัติไว้สำหรับการตรวจครั้งนี้";
-      else if (!isAdmin) skipped = "ต่อ Indicator อัตโนมัติได้เฉพาะแอดมิน";
+      else if (!isAdmin && !fromCron) skipped = "ต่อ Indicator อัตโนมัติได้เฉพาะแอดมิน";
       else if (usernames.length > 1) skipped = `Trade ID นี้ผูกกับหลาย user TradingView (${usernames.join(", ")}) — ต่ออายุเองในหน้าสมาชิก Indicator`;
       else if (!quota) skipped = "ยังไม่ได้ตั้งเกณฑ์ Lot ของแบรนด์/สมาชิก";
       else if (!qualified) skipped = `มี ${totalLots.toFixed(2)} จาก ${quota} lot ที่ต้องได้ (รวมทุกบัญชี)`;
@@ -1382,7 +1442,7 @@ Deno.serve(async (req) => {
         const { data: ins } = await db.from("tv_lot_checks").insert({
           trade_id: tradeId, username: usernames[0] || null, period, date_from: start, date_to: end, trade_ids: tradeIds,
           total_lots: totalLots, excluded_lots: excludedLots, quota, qualified, auto_renew: autoRenew && !skipped, skipped,
-          checked_by: auth.permission?.email ?? null,
+          checked_by: actor,
         }).select("id").single();
         checkId = ins?.id ?? null;
       }
@@ -1394,11 +1454,12 @@ Deno.serve(async (req) => {
           // จองก่อนต่อ — ชน UNIQUE = รอบนี้ต่อไปแล้ว (กันกดตรวจซ้ำแล้วต่อเพิ่มอีกเดือน)
           const { data: claim, error: claimErr } = await db.from("tv_lot_renewals").insert({
             lot_check_id: checkId, username: r.username, pine_id: r.pine_id, period_start: start, period_end: end,
-            qualified_lots: totalLots, quota, old_expiration: r.expiration, created_by: auth.permission?.email ?? null,
+            qualified_lots: totalLots, quota, old_expiration: r.expiration, created_by: actor,
           }).select("id").single();
           if (claimErr || !claim) { renewals.push({ pine_id: r.pine_id, ok: false, already: true, error: "ต่อไปแล้วในรอบนี้" }); continue; }
           const oldMs = new Date(r.expiration).getTime();
-          const baseDay = thDay(Number.isFinite(oldMs) && oldMs > nowMs ? r.expiration : new Date());
+          // keep_anchor (cron): นับต่อจากวันหมดอายุเดิมแม้เพิ่งเลยมา (ไม่เกิน 3 วัน) — รอบเดือนของสมาชิกจะไม่เลื่อน
+          const baseDay = thDay(Number.isFinite(oldMs) && (oldMs > nowMs || (keepAnchor && nowMs - oldMs <= 3 * 86400000)) ? r.expiration : new Date());
           const newExpiration = new Date(`${addMonthsDay(baseDay, 1)}T23:59:59+07:00`).toISOString();
           let res: any = null;
           try {

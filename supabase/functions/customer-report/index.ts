@@ -91,8 +91,11 @@ Deno.serve(async (req) => {
     let servedFromCache = false;
     if (!force) {
       const { data } = await admin.from("customer_report_cache").select("rows,total,refreshed_at,refreshed_by").eq("cache_key", key).maybeSingle();
-      snapshot = data;
-      servedFromCache = !!data;
+      // แคชเก่ากว่า 5 นาที = สร้างใหม่เอง — ลูกค้าที่เพิ่งทักเข้ามา/ข้อมูลที่เพิ่งแก้จะขึ้นโดยไม่ต้องรอใครกดรีเฟรช
+      // (สร้างใหม่เบา: เลือกเฉพาะคอลัมน์เล็ก ไม่แตะ transcript และรีพอร์ตถูกดึงเฉพาะตอนมีคนกด "ดึงรายงาน")
+      const fresh = data && Date.now() - new Date(data.refreshed_at).getTime() < 5 * 60 * 1000;
+      snapshot = fresh ? data : null;
+      servedFromCache = !!fresh;
     }
     if (!snapshot) {
       const range = presetRange(dateFilter, dateFrom, dateTo);
