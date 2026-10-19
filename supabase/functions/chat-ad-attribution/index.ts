@@ -11,7 +11,7 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { authorizeRequest } from "../_shared/permissions.ts";
-import { getMetaToken, getMetaTokenForNode } from "../_shared/meta.ts";
+import { getMetaToken, getAllMetaTokens, getMetaMessagingToken, getAdLibraryContext } from "../_shared/meta.ts";
 import { getMetaPages } from "../_shared/meta-pages.ts";
 import { loadChatPageRules, canSeeChatPage } from "../_shared/chat-pages.ts";
 
@@ -60,6 +60,31 @@ Deno.serve(async (req) => {
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     if (!canSeeChatPage(await loadChatPageRules(admin), pageId, auth.permission?.email ?? null)) return json({ ok: false, error: "ไม่มีสิทธิ์ดูแชทเพจนี้" }, 403);
 
+    // ---- ดีบัก: ดูข้อมูลดิบของแอดตัวเดียว (หาว่าข้อความทักทายเก็บอยู่ช่องไหน) ----
+    if (body?.debug_ad) {
+      const adId = String(body.debug_ad).replace(/\D/g, "");
+      const tried: Record<string, unknown> = {};
+      const toks: { label: string; token: string }[] = [];
+      for (const t of await getAllMetaTokens()) toks.push({ label: t.label, token: t.token });
+      toks.push({ label: "token ตอบแชท", token: await getMetaMessagingToken().catch(() => "") });
+      for (const t of toks) {
+        if (!t.token) continue;
+        const r = await fetch(`${GRAPH}/${adId}?fields=name,created_time,updated_time,adset{name,destination_type,promoted_object},creative{id,name,object_type,object_story_spec,asset_feed_spec,effective_object_story_id,body,title,object_story_id}&access_token=${t.token}`).then((x) => x.json());
+        if (!r?.error) {
+          // ชิ้นงานโดยตรง + ปุ่มของโพสต์ (แอดโปรโมตโพสต์เดิมไม่มี object_story_spec)
+          const cr = r.creative?.id ? await fetch(`${GRAPH}/${r.creative.id}?fields=object_story_spec,asset_feed_spec,call_to_action_type,template_url_spec,platform_customizations,degrees_of_freedom_spec&access_token=${t.token}`).then((x) => x.json()) : null;
+          const postId = r.creative?.effective_object_story_id;
+          const mainT = await getMetaToken();
+          const ppd = await getMetaPages(GRAPH, mainT, { mustIncludePageId: pageId });
+          const pTok = (ppd?.data ?? []).find((p: any) => String(p.id) === pageId)?.access_token;
+          const post = postId && pTok ? await fetch(`${GRAPH}/${postId}?fields=call_to_action,message&access_token=${pTok}`).then((x) => x.json()) : null;
+          return json({ ok: true, via: t.label, ad: r, creative_node: cr, post });
+        }
+        tried[t.label] = r.error?.message;
+      }
+      return json({ ok: false, tried });
+    }
+
     // ---- 1) รายการแอดของเพจ จากชื่อป้าย ad_id.X ----
     const mainTok = await getMetaToken();
     const pd = await getMetaPages(GRAPH, mainTok, { mustIncludePageId: pageId });
@@ -75,14 +100,25 @@ Deno.serve(async (req) => {
     }
 
     // ---- 2) ข้อความทักทายของแต่ละแอด ----
-    const ads: Array<{ id: string; name: string; campaign: string | null; created: string; texts: string[]; error?: string }> = [];
+    // ลองทุก token ที่มีในระบบ (หลัก + token บัญชีโฆษณาเพิ่มเติม + token ตอบแชท + token Ad Library)
+    // แอดอยู่คนละบัญชีโฆษณา/คนละธุรกิจ — ตัวไหนอ่านได้ใช้ตัวนั้น · อ่านไม่ได้ทุกตัว = เก็บเหตุผลของแต่ละ token ไว้ดู
+    const tokens: { label: string; token: string }[] = [];
+    const addTok = (label: string, token: string) => { if (token && !tokens.some((t) => t.token === token)) tokens.push({ label, token }); };
+    for (const t of await getAllMetaTokens()) addTok(t.label, t.token);
+    addTok("token ตอบแชท", await getMetaMessagingToken().catch(() => ""));
+    addTok("token Ad Library", (await getAdLibraryContext().catch(() => ({ token: "" }))).token);
+    const ads: Array<{ id: string; name: string; campaign: string | null; created: string; texts: string[]; error?: string; via?: string; tried?: Record<string, string> }> = [];
     await Promise.all([...adIds].map(async (id) => {
-      try {
-        const tok = await getMetaTokenForNode(id);
-        const r = await fetch(`${GRAPH}/${id}?fields=name,created_time,campaign{name},creative{object_story_spec,asset_feed_spec}&access_token=${tok}`).then((x) => x.json());
-        if (r?.error) { ads.push({ id, name: "", campaign: null, created: "", texts: [], error: r.error.message }); return; }
-        ads.push({ id, name: r.name || id, campaign: r.campaign?.name ?? null, created: r.created_time || "", texts: welcomeTexts(r.creative) });
-      } catch (e) { ads.push({ id, name: "", campaign: null, created: "", texts: [], error: String(e) }); }
+      const tried: Record<string, string> = {};
+      for (const t of tokens) {
+        try {
+          const r = await fetch(`${GRAPH}/${id}?fields=name,created_time,campaign{name},creative{object_story_spec,asset_feed_spec}&access_token=${t.token}`).then((x) => x.json());
+          if (r?.error) { tried[t.label] = `${r.error.code ?? ""}/${r.error.error_subcode ?? ""} ${String(r.error.message || "").slice(0, 90)}`; continue; }
+          ads.push({ id, name: r.name || id, campaign: r.campaign?.name ?? null, created: r.created_time || "", texts: welcomeTexts(r.creative), via: t.label });
+          return;
+        } catch (e) { tried[t.label] = String(e).slice(0, 90); }
+      }
+      ads.push({ id, name: "", campaign: null, created: "", texts: [], error: "ไม่มี token ไหนอ่านแอดนี้ได้", tried });
     }));
 
     // ---- 3) จับคู่กับแชทที่ขึ้นต้นด้วย "ตอบกลับโฆษณา" และยังไม่รู้แหล่งแอด ----
@@ -110,10 +146,16 @@ Deno.serve(async (req) => {
       }
       const ad = cands[0] || null;
       if (ad) matched++;
-      results.push({ id: row.id, name: row.customer_name, ad: ad ? { id: ad.id, name: ad.name } : null, candidates: cands.length, greet: String(greet?.t || "").slice(0, 60) });
+      // จับคู่แอดไม่ได้ (แอดโปรโมตโพสต์เดิม — Meta ไม่ส่งข้อความทักทายมา) → ระบุเป็น "กลุ่มข้อความโฆษณา" แทน
+      // รู้ว่ามาจากแอดแน่ ๆ และมาจากโปรไหน แต่ไม่ระบุตัวแอด (กันข้อมูลผิด) · เจอแอดตรงตัวทีหลังจะเขียนทับเอง
+      const firstLine = String(greet?.t || "").split("\n").map((x: string) => x.trim()).find(Boolean) || "";
+      // แอดที่ไม่ได้ตั้งข้อความทักทาย Meta ใส่ข้อความมาตรฐานที่มีชื่อลูกค้า — รวมเป็นกลุ่มเดียว ไม่งั้นแตกกลุ่มละคน
+      const isDefault = /^สวัสดี .+ มีอะไรให้เราช่วยไหม/.test(firstLine) || /^Hi,? .+!? Please let us know how we can help you/i.test(firstLine);
+      const group = !ad && firstLine ? `กลุ่มข้อความโฆษณา: ${isDefault ? "ข้อความทักทายมาตรฐานของ Meta (แอดไม่ได้ตั้งข้อความ)" : firstLine.slice(0, 80)}` : null;
+      results.push({ id: row.id, name: row.customer_name, ad: ad ? { id: ad.id, name: ad.name } : null, group, candidates: cands.length, greet: String(greet?.t || "").slice(0, 60) });
     }
 
-    let saved = 0;
+    let saved = 0, grouped = 0;
     if (apply) {
       const now = new Date().toISOString();
       for (const r of results.filter((x) => x.ad)) {
@@ -122,14 +164,22 @@ Deno.serve(async (req) => {
           .eq("id", r.id).is("entry_ad_id", null);
         if (!ue) saved++;
       }
+      for (const r of results.filter((x) => !x.ad && x.group)) {
+        const { error: ue } = await admin.from("chat_customers")
+          .update({ entry_ad_name: r.group, source: "ad", updated_at: now })
+          .eq("id", r.id).is("entry_ad_id", null);
+        if (!ue) grouped++;
+      }
       await admin.from("customer_report_cache").delete().eq("page_id", pageId);
     }
 
     return json({
       ok: true, apply, page_id: pageId, ads_total: ads.length, ads_readable: ads.filter((a) => !a.error).length,
       ads_with_greeting: ads.filter((a) => a.texts.length).length,
-      ads: ads.map((a) => ({ id: a.id, name: a.name, campaign: a.campaign, error: a.error, greeting: a.texts[0]?.slice(0, 60) })),
-      rooms_unknown: rows?.length ?? 0, rooms_ad_reply: adReply, matched, ambiguous, saved,
+      tokens_tried: tokens.map((t) => t.label),
+      ads: ads.map((a) => ({ id: a.id, name: a.name, campaign: a.campaign, via: a.via, error: a.error, tried: a.tried, greeting: a.texts[0]?.slice(0, 60) })),
+      rooms_unknown: rows?.length ?? 0, rooms_ad_reply: adReply, matched, ambiguous, saved, grouped,
+      groups: Object.entries(results.filter((x) => x.group).reduce((m: Record<string, number>, x) => { m[x.group] = (m[x.group] || 0) + 1; return m; }, {})),
       sample: results.slice(0, 30),
     });
   } catch (e) {
