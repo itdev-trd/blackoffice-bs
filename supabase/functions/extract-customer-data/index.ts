@@ -8,6 +8,7 @@
 // สำคัญ: ฟังก์ชันนี้ "ไม่เขียนข้อมูลลูกค้า" เลย — คืนเป็นข้อเสนอให้แอดมินตรวจแล้วกดบันทึกเองในหน้าแชท
 // (ระบบสกัดอัตโนมัติเคยถูกปิดไปเพราะเขียนข้อมูลผิด จึงต้องมีคนยืนยันทุกครั้ง)
 
+import { loadChatPageRules, canSeeChatPage } from "../_shared/chat-pages.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { authorizeRequest } from "../_shared/permissions.ts";
 import { readJsonBody } from "../_shared/security.ts";
@@ -66,10 +67,11 @@ Deno.serve(async (req) => {
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const { data: row } = await admin
       .from("chat_customers")
-      .select("id, customer_name, transcript, trade_id, username, phone, email")
+      .select("id, page_id, customer_name, transcript, trade_id, username, phone, email")
       .eq("id", id)
       .maybeSingle();
     if (!row) return json({ ok: false, error: "ไม่พบบทสนทนานี้" }, 404);
+    if (!canSeeChatPage(await loadChatPageRules(admin), row.page_id, auth.permission?.email ?? null)) return json({ ok: false, error: "ไม่มีสิทธิ์ดูแชทเพจนี้" }, 403);
 
     const tr = Array.isArray(row.transcript) ? row.transcript : [];
     if (tr.length === 0) return json({ ok: false, error: "บทสนทนานี้ยังไม่มีข้อความ" }, 400);

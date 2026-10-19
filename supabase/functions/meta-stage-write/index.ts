@@ -34,6 +34,7 @@
 //
 // deploy: supabase functions deploy meta-stage-write
 
+import { loadChatPageRules, canSeeChatPage, isReadOnlyChatPage, READ_ONLY_ERROR } from "../_shared/chat-pages.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { authorizeRequest } from "../_shared/permissions.ts";
 import { readJsonBody } from "../_shared/security.ts";
@@ -224,8 +225,13 @@ Deno.serve(async (req) => {
         return json({ ok: false, error: `ระยะ "${stageKey}" ไม่อยู่ในรายการที่อนุญาต` }, 400);
       }
 
-      const { data: row } = await admin.from("chat_customers").select("id, psid, source").eq("id", rowId).maybeSingle();
+      const { data: row } = await admin.from("chat_customers").select("id, psid, source, page_id").eq("id", rowId).maybeSingle();
       if (!row) return json({ ok: false, error: "ไม่พบบทสนทนานี้" }, 404);
+      {
+        const rules = await loadChatPageRules(admin);
+        if (!canSeeChatPage(rules, row.page_id, auth.permission?.email ?? null)) return json({ ok: false, error: "ไม่มีสิทธิ์ดูแชทเพจนี้" }, 403);
+        if (isReadOnlyChatPage(rules, row.page_id)) return json({ ok: true, skipped: "read_only", note: READ_ONLY_ERROR });
+      }
       if (row.source === "line") return json({ ok: true, skipped: "line", note: "LINE ไม่มีระยะข้อมูลลูกค้าของ Meta" });
 
       // รหัสห้องที่หน้าเว็บ Business Suite ใช้ = เลขท้ายของ id ในระบบเรา (t_<id>)

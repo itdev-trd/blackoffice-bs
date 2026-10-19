@@ -33,6 +33,7 @@ import { readFunctionErrorMessage } from "@/lib/utils/errors";
 import { serviceWorkerReady } from "@/lib/utils/service-worker";
 import Spinner from "@/components/shared/Spinner";
 import NumInput from "@/components/shared/NumInput";
+import ChatPageAccessPanel from "@/components/features/settings/ChatPageAccessPanel";
 import { normalizeBrandConfig } from "@/components/features/generate/GenerateTab";
 import { SETTINGS_SECTIONS } from "@/lib/constants/settings";
 import AdTargetingCard from "@/components/features/settings/AdTargetingCard";
@@ -1483,6 +1484,7 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
       {section === "openai_key" && <OpenAIKeyPanel />}
       {section === "line" && <LineOAPanel />}
       {section === "permissions" && <PermissionsPanel />}
+      {section === "permissions" && <div className="mt-6"><ChatPageAccessPanel /></div>}
       {section === "health" && <SystemHealthPanel />}
       {section === "tv_settings" && <TvAdminSettingsPanel />}
       {section === "replystats" && <ReplyStatsPanel onOpenChat={onOpenChat} />}

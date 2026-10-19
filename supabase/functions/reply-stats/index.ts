@@ -2,6 +2,7 @@
 // สรุปสถิติการตอบแชท (เฉพาะ admin) — ต่อ user × เพจ: จำนวนตอบ, เฉลี่ย (นับเฉพาะเวลาทำการ), ตอบช้าเกิน X นาทีกี่ครั้ง
 // + ฮิสโตแกรมรายชั่วโมง (เวลาไทย) ว่าตอบช้าช่วงไหนบ่อย
 // เวลาทำการอ่านจาก settings.office_hours: {days:[1-5], open:"09:00", close:"17:00", break_start, break_end, slow_min}
+import { loadChatPageRules } from "../_shared/chat-pages.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { authorizeRequest } from "../_shared/permissions.ts";
 import { readJsonBody } from "../_shared/security.ts";
@@ -83,6 +84,7 @@ Deno.serve(async (req) => {
       .gte("msg_at", since).lte("msg_at", until)
       .order("msg_at", { ascending: false }).limit(20000);
     if (pageFilter) q = q.in("page_id", pageFilter);
+    q = q.not("page_id", "in", `(${["__none__", ...(await loadChatPageRules(admin)).readOnly].join(",")})`);
     const { data: rows, error } = await q;
     if (error) throw error;
 

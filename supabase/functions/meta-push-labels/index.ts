@@ -7,6 +7,7 @@
 //   { mode: "all", page_id?, limit? }    → ทำทั้งหมด (เลือกเฉพาะเพจได้)
 // ต้องมีสิทธิ์ pages_messaging (ตัวเดียวกับที่อ่าน custom_labels ได้อยู่แล้ว)
 
+import { loadChatPageRules, isReadOnlyChatPage, READ_ONLY_ERROR } from "../_shared/chat-pages.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getMetaToken } from "../_shared/meta.ts";
 import { getMetaPages } from "../_shared/meta-pages.ts";
@@ -77,6 +78,9 @@ Deno.serve(async (req) => {
     if (onlyId) {
       const { data } = await admin.from("chat_customers").select(COLS).eq("id", onlyId).maybeSingle();
       if (!data) throw new Error("ไม่พบลูกค้า id นี้");
+      if (isReadOnlyChatPage(await loadChatPageRules(admin), data.page_id)) {
+        return json({ ok: true, processed: 0, total: 1, done: true, results: [{ name: data.customer_name || data.psid, skipped: true, unsupported: "read_only", error: null }], note: READ_ONLY_ERROR });
+      }
       // สิทธิ์ตอบแชทไม่ผูกกับเพจ — ส่งป้ายจากหน้าตอบแชทได้ทุกเพจ (โหมด bulk ยังเป็น admin เท่านั้น)
       if (data.source === "instagram") {
         return json({ ok: true, processed: 0, total: 1, done: true, results: [{ name: data.customer_name || data.psid, skipped: true, unsupported: "instagram_labels", error: null }], note: "Instagram API ไม่รองรับ Facebook Page custom labels — สถานะยังบันทึกในแอปตามปกติ" });
@@ -99,6 +103,7 @@ Deno.serve(async (req) => {
         .order("last_message_at", { ascending: false })
         .limit(limit);
       if (onlyPage) q = q.eq("page_id", onlyPage);
+      q = q.not("page_id", "in", `(${["__none__", ...(await loadChatPageRules(admin)).readOnly].join(",")})`);
       const { data, count } = await q;
       rows = data ?? [];
       remaining = Math.max(0, (count ?? rows.length) - rows.length);

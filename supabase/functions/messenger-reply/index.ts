@@ -4,6 +4,7 @@
 //   { action: "send", id, text_th }        → แปลไทย→ภาษาลูกค้า แล้วส่งเข้า Messenger + ต่อ transcript
 // ต้องมีสิทธิ์ pages_messaging และส่งได้ภายในกรอบ 24 ชม.หลังลูกค้าพิมพ์ล่าสุด (messaging_type=RESPONSE)
 
+import { loadChatPageRules, canSeeChatPage, isReadOnlyChatPage, READ_ONLY_ERROR } from "../_shared/chat-pages.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getMetaMessagingContext } from "../_shared/meta.ts";
 import { getMetaPages } from "../_shared/meta-pages.ts";
@@ -367,6 +368,12 @@ Deno.serve(async (req) => {
     const { data: row } = await admin.from("chat_customers").select("id, page_id, page_name, psid, transcript, cust_lang, country, customer_name, profile_pic, unread, source, last_user_text, last_message_at, comment_post_id, comment_permalink, entry_ad_id, comment_ad_name, comment_from_id").eq("id", id).maybeSingle();
     if (!row) throw new Error("ไม่พบบทสนทนา");
     // สิทธิ์ตอบแชทไม่ผูกกับเพจ — ใครเข้าหน้าตอบแชทได้ ก็ตอบได้ทุกเพจและทุก LINE OA
+    // ยกเว้นเพจที่จำกัดคนเห็น (chat_viewers) และเพจดูอย่างเดียว (chat_read_only) — ดู _shared/chat-pages.ts
+    const pageRules = await loadChatPageRules(admin);
+    if (!canSeeChatPage(pageRules, row.page_id, auth.permission?.email ?? null)) return json({ ok: false, error: "ไม่มีสิทธิ์ดูแชทเพจนี้" }, 403);
+    if (isReadOnlyChatPage(pageRules, row.page_id) && !["translate", "summarize", "profile"].includes(action)) {
+      return json({ ok: false, error: READ_ONLY_ERROR }, 403);
+    }
     const transcript = Array.isArray(row.transcript) ? row.transcript : [];
 
     // ---------- แปลข้อความลูกค้าเป็นไทย + ตรวจภาษา/ประเทศ ----------

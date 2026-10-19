@@ -21,6 +21,7 @@
 //   Custom Labels ผูกกับ PSID ของ Facebook Page เท่านั้น
 //   Instagram (IGSID) และ LINE ใช้ไม่ได้ — ต้องบอกผู้ใช้ตรงๆ ไม่ใช่ปล่อยให้กดแล้วเงียบ
 
+import { loadChatPageRules, canSeeChatPage, isReadOnlyChatPage, READ_ONLY_ERROR } from "../_shared/chat-pages.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getMetaMessagingContext } from "../_shared/meta.ts";
 import { getMetaPages } from "../_shared/meta-pages.ts";
@@ -111,6 +112,11 @@ Deno.serve(async (req) => {
       webTags = Array.isArray(row.tags) ? row.tags.map((t: any) => String(t).trim()).filter(Boolean) : [];
     }
     if (!pageId) return json({ ok: false, error: "ต้องส่ง page_id" }, 400);
+    {
+      const rules = await loadChatPageRules(admin);
+      if (!canSeeChatPage(rules, pageId, auth.permission?.email ?? null)) return json({ ok: false, error: "ไม่มีสิทธิ์ดูแชทเพจนี้" }, 403);
+      if (isReadOnlyChatPage(rules, pageId)) return json({ ok: false, error: READ_ONLY_ERROR }, 403);
+    }
     // สิทธิ์ตอบแชทไม่ผูกกับเพจ — ใครเข้าหน้าตอบแชทได้ ก็ตอบได้ทุกเพจและทุก LINE OA
 
     const pd = await getMetaPages(GRAPH_BASE, token, { mustIncludePageId: pageId, cacheKey: meta.cacheKey });

@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { loadChatPageRules, canSeeChatPage } from "../_shared/chat-pages.ts";
 import { authorizeRequest } from "../_shared/permissions.ts";
 
 const corsHeaders = {
@@ -80,6 +81,10 @@ Deno.serve(async (req) => {
     const auth = await authorizeRequest(req, { tab: "customerdb" });
     if (!auth.ok) return json({ ok: false, error: auth.error }, auth.status);
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    // เพจที่จำกัดคนเห็นแชท (เช่น Jr 1Shot) — ฟังก์ชันนี้ใช้ service role ข้าม RLS จึงต้องเช็คเอง
+    if (!canSeeChatPage(await loadChatPageRules(admin), pageId, auth.permission?.email ?? null)) {
+      return json({ ok: false, error: "ไม่มีสิทธิ์ดูแชทเพจนี้" }, 403);
+    }
     const key = await cacheKey(pageId, dateFilter, dateFrom, dateTo);
     if (body.action === "invalidate") {
       const { error } = await admin.from("customer_report_cache").delete().eq("page_id", pageId);

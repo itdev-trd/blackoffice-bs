@@ -180,9 +180,11 @@ Deno.serve(async (req) => {
     const msgLimit = Math.min(100, Math.max(5, Number(cfg.messages) || 30));
     let stoppedEarly = false; // true = ทำไม่ครบ (หมดเวลา/หมด budget/รอ AI) → ให้ frontend ซิงก์ต่อ
 
-    const { data: cfgRows } = await admin.from("page_lead_config").select("page_id, sync_enabled");
+    const { data: cfgRows } = await admin.from("page_lead_config").select("page_id, sync_enabled, chat_read_only");
     const enabledMap: Record<string, boolean> = {};
     for (const c of cfgRows ?? []) enabledMap[c.page_id] = c.sync_enabled !== false;
+    // เพจดูอย่างเดียว (เช่น Jr 1Shot — ดึงมาสรุปข้อมูล): ไม่ติดยังไม่อ่าน/รอตอบ → ไม่แจ้งเตือน ไม่ขึ้นแชทค้าง
+    const readOnlyPages = new Set((cfgRows ?? []).filter((c: any) => c.chat_read_only === true).map((c: any) => String(c.page_id)));
 
     const jsonResp = (b: unknown) => new Response(JSON.stringify(b), { headers: { ...corsHeaders, "content-type": "application/json" } });
 
@@ -239,7 +241,7 @@ Deno.serve(async (req) => {
           const readPsids = [...new Set(readConvs.map((c: any) =>
             (c?.participants?.data ?? []).find((p: any) => String(p?.id || "") !== String(page.id))?.id,
           ).filter(Boolean).map(String))];
-          const unreadIds = convs.filter((c) => (Number(c.unread_count) || 0) > 0).map((c) => c.id);
+          const unreadIds = readOnlyPages.has(String(page.id)) ? [] : convs.filter((c) => (Number(c.unread_count) || 0) > 0).map((c) => c.id);
           // อัปเดตเฉพาะที่ค่าจะเปลี่ยนจริง (กัน realtime เด้งฟรี)
           const readAt = new Date().toISOString();
           if (readIds.length) {
@@ -459,7 +461,7 @@ Deno.serve(async (req) => {
           source: refRow || prev?.entry_ad_id ? "ad" : (prev?.source ?? null),
           entry_ad_id: refRow?.ad_id ?? prev?.entry_ad_id ?? null,
           // ยังไม่ได้ตอบ = ข้อความล่าสุดใน transcript มาจากลูกค้า (w === "u")
-          awaiting_reply: awaitingReply,
+          awaiting_reply: awaitingReply && !readOnlyPages.has(String(r.page_id)),
           // ค่าที่มีอยู่แล้วชนะเสมอ (มาจากตัวแปล AI ตอนเปิดแชท ซึ่งแม่นกว่าการเดาจากสคริปต์)
           country: prev?.country ?? originGuess?.country ?? null,
           cust_lang: prev?.cust_lang ?? originGuess?.lang ?? null,
@@ -477,7 +479,7 @@ Deno.serve(async (req) => {
       // Meta บอกได้แค่ว่า "กล่องข้อความเพจ" อ่านหรือยัง (unread_count) จึงใช้ปิดจุดแดงได้ แต่ห้ามใช้เปิดเอง
       // รวมแถวใหม่ด้วย (เพิ่งถูก insert ด้วยค่า default unread=false) — การ์ด .eq("unread", ...) กันเขียนซ้ำอยู่แล้ว
       const metaReadIds = rows.filter((r) => r._unread_count === 0).map((r) => r.id);
-      const metaUnreadIds = rows.filter((r) => (r._unread_count ?? 0) > 0).map((r) => r.id);
+      const metaUnreadIds = rows.filter((r) => (r._unread_count ?? 0) > 0 && !readOnlyPages.has(String(r.page_id))).map((r) => r.id);
       if (metaReadIds.length) {
         await admin.from("chat_customers").update({ unread: false, read_at: now, updated_at: now })
           .in("id", metaReadIds).eq("unread", true);

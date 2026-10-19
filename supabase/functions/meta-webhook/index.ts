@@ -168,8 +168,10 @@ Deno.serve(async (req) => {
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     // เพจที่ปิด "ซิงก์แชท" ไว้ (ตั้งค่า → เพจที่ซิงก์แชท) — ห้ามเก็บแชท/คอมเมนต์ทาง webhook ด้วย
     // เดิมเช็คแค่ในงานซิงก์ดึงเอง webhook ยังเก็บต่อ ปิดซิงก์แล้วแชทก็ยังไหลเข้า (เจอกับเพจ Jr 1Shot ที่ใช้แค่วิเคราะห์แอด)
-    const { data: syncOffRows } = await admin.from("page_lead_config").select("page_id").eq("sync_enabled", false);
-    const syncOff = new Set((syncOffRows ?? []).map((r: any) => String(r.page_id)));
+    const { data: pageCfgRows } = await admin.from("page_lead_config").select("page_id, sync_enabled, chat_read_only");
+    const syncOff = new Set((pageCfgRows ?? []).filter((r: any) => r.sync_enabled === false).map((r: any) => String(r.page_id)));
+    // เพจดูอย่างเดียว (เช่น Jr 1Shot): เก็บข้อความตามปกติ แต่ไม่ติดยังไม่อ่าน/รอตอบ และไม่ยิงแจ้งเตือน
+    const readOnly = new Set((pageCfgRows ?? []).filter((r: any) => r.chat_read_only === true).map((r: any) => String(r.page_id)));
 
     // Instagram Messaging webhook ใช้ IG account id ที่ entry.id แต่ระบบกรองสิทธิ์ด้วย Facebook Page id
     // จึง map IG → Page ก่อนบันทึก และเก็บ source=instagram เพื่อแยกช่องทางใน Inbox
@@ -534,7 +536,7 @@ Deno.serve(async (req) => {
             }
             const newTr = [...tr, ...items].slice(-MAX_TRANSCRIPT_ITEMS);
             const upd: Record<string, unknown> = {
-              transcript: newTr, awaiting_reply: true, unread: true,
+              transcript: newTr, awaiting_reply: !readOnly.has(pageId), unread: !readOnly.has(pageId),
               last_user_text: lastText, last_message_at: nowIso, updated_at: nowIso,
             };
             // ปิดระบบสกัด/จัดสถานะอัตโนมัติ ฐานข้อมูลแก้ได้จากแอดมินหรือ Import เท่านั้น
@@ -574,7 +576,7 @@ Deno.serve(async (req) => {
                     message_count: items.length, user_message_count: items.length,
                     transcript: items, last_user_text: lastText, last_message_at: nowIso,
                     stage: "new", stage_auto: "new", classified_by: "manual",
-                    awaiting_reply: true, unread: true, needs_ai: false, needs_verify: false,
+                    awaiting_reply: !readOnly.has(pageId), unread: !readOnly.has(pageId), needs_ai: false, needs_verify: false,
                     synced_at: nowIso, updated_at: nowIso,
                   }, { onConflict: "id", ignoreDuplicates: false });
                   notifyPush = { page_id: pageId, page_name: pageCfg?.page_name || null, customer_name: who?.name || null, conversation_id: conv.id, text: lastText };
@@ -583,7 +585,7 @@ Deno.serve(async (req) => {
             } catch (_e) { /* พลาดก็ปล่อยให้ sync รอบถัดไปเก็บ */ }
           }
           // ยิง push "ข้อความใหม่ทันที" (เหมือน Messenger) — fire-and-forget ผ่าน send-push
-          if (notifyPush) {
+          if (notifyPush && !readOnly.has(pageId)) {
             try {
               const SB = Deno.env.get("SUPABASE_URL")!;
               const SK = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;

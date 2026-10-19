@@ -30,13 +30,41 @@ Deno.serve(async (req) => {
 
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     const myEmail = auth.user?.email?.toLowerCase();
-    const { action, email, password, role, nickname, allowed_ad_accounts, allowed_tabs, allowed_pages, allowed_settings, chat_alert, alert_minutes, alert_pages, alert_sound, alert_new } = await readJsonBody(req, 64 * 1024);
+    const reqBody: any = await readJsonBody(req, 64 * 1024);
+    const { action, email, password, role, nickname, allowed_ad_accounts, allowed_tabs, allowed_pages, allowed_settings, chat_alert, alert_minutes, alert_pages, alert_sound, alert_new } = reqBody;
     const targetEmail = typeof email === "string" ? email.trim().toLowerCase() : "";
 
     if (action === "list") {
       const { data, error } = await admin.from("user_permissions").select("email, role, nickname, allowed_ad_accounts, allowed_tabs, allowed_pages, allowed_settings, chat_alert, alert_minutes, alert_pages, alert_sound, alert_new, updated_at").order("role").order("email");
       if (error) throw error;
       return new Response(JSON.stringify({ ok: true, rows: data ?? [] }), { headers: { ...corsHeaders, "content-type": "application/json" } });
+    }
+
+    // ---- ใครเห็นแชทเพจไหน (page_lead_config.chat_viewers / chat_read_only / sync_enabled) — owner เท่านั้น ----
+    // viewers = null → ทุกคนที่มีสิทธิ์แชทเห็น · เป็นรายชื่อ → เห็นเฉพาะคนในรายชื่อ (ใช้กับทุกบทบาทรวม owner — RLS บังคับ)
+    if (action === "list_page_access") {
+      const { data, error } = await admin.from("page_lead_config").select("page_id, page_name, sync_enabled, chat_viewers, chat_read_only").order("page_name");
+      if (error) throw error;
+      return new Response(JSON.stringify({ ok: true, pages: data ?? [] }), { headers: { ...corsHeaders, "content-type": "application/json" } });
+    }
+    if (action === "set_page_access") {
+      const pageId = String(reqBody?.page_id || "").trim();
+      if (!pageId) throw new Error("ต้องระบุ page_id");
+      const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+      if ("viewers" in reqBody) {
+        const raw = reqBody.viewers;
+        // null = ไม่จำกัด · รายชื่อว่าง = ไม่มีใครเห็นเลย (ตั้งใจซ่อนทั้งเพจ)
+        patch.chat_viewers = raw === null ? null
+          : [...new Set((Array.isArray(raw) ? raw : []).map((v: unknown) => String(v).trim().toLowerCase()).filter((v: string) => v.includes("@")))];
+      }
+      if ("read_only" in reqBody) patch.chat_read_only = reqBody.read_only === true;
+      if ("sync_enabled" in reqBody) patch.sync_enabled = reqBody.sync_enabled === true;
+      const { data, error } = await admin.from("page_lead_config").update(patch).eq("page_id", pageId).select("page_id, page_name, sync_enabled, chat_viewers, chat_read_only").maybeSingle();
+      if (error) throw error;
+      if (!data) throw new Error("ไม่พบเพจนี้");
+      // รีพอร์ตที่แคชไว้ของเพจนี้อาจถูกสร้างโดยคนที่ตอนนี้ไม่มีสิทธิ์แล้ว — ล้างทิ้ง
+      await admin.from("customer_report_cache").delete().eq("page_id", pageId);
+      return new Response(JSON.stringify({ ok: true, page: data }), { headers: { ...corsHeaders, "content-type": "application/json" } });
     }
 
     if (action === "upsert") {

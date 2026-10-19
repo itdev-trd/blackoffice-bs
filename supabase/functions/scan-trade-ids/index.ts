@@ -13,6 +13,7 @@
 //
 // ไม่เขียนทับข้อมูลที่แอดมินกรอกเอง และเขียนเฉพาะรายที่ "ผ่าน" การเช็คจริงเท่านั้น
 
+import { loadChatPageRules, hiddenChatPages } from "../_shared/chat-pages.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { authorizeRequest } from "../_shared/permissions.ts";
 import { readJsonBody } from "../_shared/security.ts";
@@ -99,6 +100,7 @@ Deno.serve(async (req) => {
       .from("chat_customers")
       .select("id, customer_name, page_id, source, trade_id, username, transcript, tags, account_opened_at")
       .or("trade_id.is.null,trade_id.eq.")
+      .not("page_id", "in", `(${["__none__", ...hiddenChatPages(await loadChatPageRules(admin), auth.permission?.email ?? null)].join(",")})`)
       .order("last_message_at", { ascending: false })
       .limit(1500);
     if (qErr) return json({ ok: false, error: qErr.message }, 500);

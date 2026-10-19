@@ -8,6 +8,7 @@
 // deploy: supabase functions deploy rebuild-reply-stats
 // ตั้ง cron ให้รันทุกชั่วโมงได้ (ไม่เรียก Meta/AI เลย จึงเบามาก)
 
+import { loadChatPageRules } from "../_shared/chat-pages.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { authorizeRequest } from "../_shared/permissions.ts";
 
@@ -164,6 +165,7 @@ Deno.serve(async (req) => {
     const closingWords: string[] = Array.isArray(cw) && cw.length ? cw.map(String) : DEFAULT_CLOSING;
     const slowMin = Math.max(1, Number((ohRow?.value as any)?.slow_min) || 5);   // ใช้คำนวณ gap = slowMin×2 (ค่าเริ่มต้นต้องตรงกับ settings.office_hours = 5)
 
+    const readOnlyPages = [...(await loadChatPageRules(admin)).readOnly];
     let scanned = 0, rounds = 0, saved = 0, cleaned = 0, from = 0;
     let done = true;
     for (let batch = 0; batch < 50; batch++) {
@@ -174,6 +176,8 @@ Deno.serve(async (req) => {
         .order("last_message_at", { ascending: false })
         .range(from, from + pageSize - 1);
       if (pages) q = q.in("page_id", pages);
+      // เพจดูอย่างเดียว (เช่น Jr 1Shot) ไม่นับสถิติการตอบ/แต้ม — ทีมไม่ได้ตอบแชทเพจนั้นจากแอป
+      q = q.not("page_id", "in", `(${["__none__", ...readOnlyPages].join(",")})`);
       const { data, error } = await q;
       if (error) throw new Error(`อ่าน chat_customers ไม่สำเร็จ: ${errMsg(error)}`);
       const list = data ?? [];

@@ -4,6 +4,7 @@
 // - รายที่ส่งแล้วล้มเหลวจะยังเข้าเงื่อนไข ให้กดส่งซ้ำได้
 // ต้องตั้ง Dataset ID ใน settings.chat_sync_config.meta_dataset_id
 
+import { loadChatPageRules } from "../_shared/chat-pages.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getMetaToken } from "../_shared/meta.ts";
 import { authorizeRequest } from "../_shared/permissions.ts";
@@ -131,7 +132,9 @@ Dataset ที่ลอง: ${first[0]}
       // ต้องเขียนเป็น "source is null or source not in (...)" เพราะห้อง Messenger ส่วนใหญ่
       // มี source = NULL และใน SQL การเทียบ NULL not in (...) ได้ผลเป็น NULL = ถูกตัดทิ้งทั้งหมด
       .or("source.is.null,source.not.in.(line,comment)")
-      .not("id", "like", "fbc_%");
+      .not("id", "like", "fbc_%")
+      // เพจดูอย่างเดียว (เช่น Jr 1Shot) ไม่ส่งสถานะลูกค้ากลับ Meta
+      .not("page_id", "in", `(${["__none__", ...(await loadChatPageRules(admin)).readOnly].join(",")})`);
     // ระบุ ids มา = สั่งเฉพาะห้องนั้น (กดจากหน้าตอบแชทตอนเปลี่ยนสถานะ) ไม่ต้องจำกัดช่วงเวลาตรงนี้
     // เพราะต้องตอบให้ชัดว่าห้องนั้นส่งไม่ได้เพราะเก่าเกิน ไม่ใช่หายไปเงียบ ๆ
     if (ids) query = query.in("id", ids);

@@ -34,7 +34,7 @@ import Spinner from "@/components/shared/Spinner";
 import MetaLabels from "@/components/features/inbox/MetaLabels";
 import { SearchInput, FilterPill } from "@/components/ui";
 import { CHAT_STAGES } from "@/lib/constants/settings";
-import { isChatPage, CHAT_PAGE_IDS } from "@/lib/constants/chat-pages";
+import { isChatPage, chatPageIds, loadChatPageAccess, isReadOnlyChatPage } from "@/lib/constants/chat-pages";
 import { pushLeadStageToMeta, pushStageLabelToMeta } from "@/lib/utils/lead-stage";
 
 // ตัวเลือกอิโมจิชุดเต็มมีข้อมูลจำนวนมาก — โหลดเฉพาะตอนเปิดใช้ ไม่ถ่วงหน้าแชท/PWA ตอนเริ่มต้น
@@ -753,7 +753,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
       query = scopeToAllowedPages(query, allowedPages);
     }
     // แชท = BeSight เท่านั้น — ฐานข้อมูลมีแชทเพจอื่นหลุดเข้ามาบ้าง (เช่น Jr 1Shot) ไม่ให้โผล่ในลิสต์
-    return query.in("page_id", CHAT_PAGE_IDS);
+    return query.in("page_id", chatPageIds());
   }
 
   async function loadList({ refreshAfterCurrent = false, lean = false } = {}) {
@@ -1116,6 +1116,8 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   const lockedBy = lockHolder && lockHolder.client !== typingClientRef.current ? lockHolder : null;
   // ถูกล็อค = ปิดทุกโหมดของห้องนี้ (ตอบแชท/เช็คไอดีเทรด/ข้อมูลลูกค้า) — ไม่ render เนื้อหาเลย ไม่ใช่แค่บังไว้
   const activeCompose = lockedBy ? "reply" : activeComposeRaw;
+  // เพจดูอย่างเดียว (เช่น Jr 1Shot): ดึงมาสรุปข้อมูล — ไม่มีกล่องตอบ/ป้าย Meta (server ปฏิเสธซ้ำอยู่แล้ว)
+  const selectedReadOnly = !!selected && isReadOnlyChatPage(selected.page_id);
   const typingBy = Object.fromEntries(Object.values(peers).map((v) => [v.who, v.at]));
 
   // มีร่างคำตอบ = จองห้อง · ลบร่างหมด/ส่งแล้ว = ปล่อย
@@ -1397,6 +1399,9 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
 
   useEffect(() => {
     (async () => {
+      // เพจเพิ่มเติมที่คนนี้มีสิทธิ์เห็น (เช่น Jr 1Shot) — โหลดก่อนสร้างตัวเลือกเพจ · มีเพจเพิ่ม = โหลดลิสต์ใหม่ให้ครบ
+      const access = await loadChatPageAccess();
+      if (access.extra.length) loadRef.current();
       const { data } = await supabase.from("page_lead_config").select("page_id, page_name, picture_url").order("page_name");
       const opts = (data || []).map((p) => ({ id: p.page_id, name: p.page_name || p.page_id })).filter((o) => isChatPage(o.id) && (!allowedPages || allowedPages.includes(o.id)));
       setPageOptions(opts);
@@ -3046,7 +3051,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                   {/* ป้ายกำกับจาก Meta — ต้องเห็นก่อนเริ่มตอบ (จ่ายแล้ว/ลูกค้าเก่า/สแปม)
                       ติด/ถอด/สร้างที่นี่ได้เลย ผลขึ้นใน Meta Business Suite ทันที
                       LINE/Instagram จะไม่เรนเดอร์ เพราะ Meta ผูกป้ายกับ PSID ของเพจ Facebook เท่านั้น */}
-                  <div className="mt-1"><MetaLabels row={selected} onLabelsChange={syncQuickTagsFromMeta} refreshToken={metaLabelsRefreshToken} /></div>
+                  {!selectedReadOnly && <div className="mt-1"><MetaLabels row={selected} onLabelsChange={syncQuickTagsFromMeta} refreshToken={metaLabelsRefreshToken} /></div>}
                 </div>
               </div>
 
@@ -3376,7 +3381,13 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                   </div>
                 )}
 
-                {activeCompose === "reply" && (<>
+                {activeCompose === "reply" && selectedReadOnly && (
+                  <div className="rounded-xl border border-night-border bg-night-surface2 px-4 py-3 text-[12.5px] text-night-ink-2">
+                    👁 <b className="text-night-ink">เพจนี้ดูอย่างเดียว</b> — ดึงแชทมาไว้สรุปข้อมูล ตอบ/ติดป้าย/ส่งสถานะกลับ Meta จากแอปไม่ได้
+                    <span className="block text-[11px] text-night-ink-3 mt-0.5">เห็นเฉพาะคนที่ owner กำหนด · ไม่ขึ้นแจ้งเตือนแชทค้าง ไม่นับสถิติการตอบ/แต้ม</span>
+                  </div>
+                )}
+                {activeCompose === "reply" && !selectedReadOnly && (<>
                 {selected.source !== "line" && (
                   <div className="chat-compose-guide flex items-center gap-2 mb-2 flex-wrap rounded-xl px-3 py-2">
                     <div className="text-[11px] font-medium">✦ พิมพ์ไทย — ระบบแปลแล้วส่ง <span className="opacity-60">(Ctrl/⌘+Enter = ส่ง)</span></div>

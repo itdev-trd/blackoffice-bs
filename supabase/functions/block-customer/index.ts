@@ -1,6 +1,7 @@
 // supabase/functions/block-customer/index.ts
 // บล็อก/ปลดบล็อกแชทลูกค้า (สแปม) — ตั้ง blocked_at ผ่าน service role (client แก้เองไม่ได้ตาม RLS)
 // body: { id: string, block: boolean, reason?: string }
+import { loadChatPageRules, canSeeChatPage } from "../_shared/chat-pages.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { authorizeRequest } from "../_shared/permissions.ts";
 
@@ -27,6 +28,7 @@ Deno.serve(async (req) => {
     // สิทธิ์ตอบแชทไม่ผูกกับเพจ — ใครเข้าหน้าตอบแชทได้ ก็ตอบได้ทุกเพจและทุก LINE OA
     const { data: row } = await admin.from("chat_customers").select("id, page_id").eq("id", id).maybeSingle();
     if (!row) return json({ ok: false, error: "ไม่พบแชทนี้" }, 404);
+    if (!canSeeChatPage(await loadChatPageRules(admin), row.page_id, auth.permission?.email ?? null)) return json({ ok: false, error: "ไม่มีสิทธิ์ดูแชทเพจนี้" }, 403);
 
     const nowIso = new Date().toISOString();
     const patch = block

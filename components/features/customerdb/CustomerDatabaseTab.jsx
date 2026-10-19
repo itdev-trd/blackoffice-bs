@@ -26,7 +26,7 @@ import { beToCe, bangkokDate } from "@/lib/utils/date";
 import { hasFullData } from "@/lib/constants/roles";
 import { COUNTRIES, normalizeCountry } from "@/lib/constants/countries";
 import { logActivity } from "@/lib/utils/activity";
-import { isChatPage, BESIGHT_PAGE_ID } from "@/lib/constants/chat-pages";
+import { isChatPage, BESIGHT_PAGE_ID, loadChatPageAccess } from "@/lib/constants/chat-pages";
 const IG_OPTION = "besight:instagram";   // ค่าในตัวเลือกเพจของรีพอร์ต — ไม่ใช่ page_id จริง
 import { lsGet, lsSet } from "@/lib/utils/storage";
 import { readFunctionErrorMessage } from "@/lib/utils/errors";
@@ -1218,6 +1218,7 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
       const [fb, line] = await Promise.all([
         supabase.from("page_lead_config").select("page_id, page_name").order("page_name"),
         supabase.from("chat_customers").select("page_id, page_name").eq("source", "line").limit(500),
+        loadChatPageAccess(),   // เพจเพิ่มเติมที่คนนี้เห็น (เช่น Jr 1Shot) — ต้องโหลดก่อน isChatPage
       ]);
       const seen = new Map();
       for (const p of fb.data || []) seen.set(String(p.page_id), p.page_name || p.page_id);
@@ -1225,7 +1226,7 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
         const id = String(p.page_id || "");
         if (id && !seen.has(id)) seen.set(id, `${p.page_name || id} (LINE OA)`);
       }
-      setPageOpts([...seen].filter(([id]) => isChatPage(id)).map(([id, name]) => ({ id, name })));   // แชท = BeSight เท่านั้น
+      setPageOpts([...seen].filter(([id]) => isChatPage(id)).map(([id, name]) => ({ id, name })));   // แชท = BeSight + เพจที่คนนี้ได้รับสิทธิ์เห็น
     })();
   }, []);
 
