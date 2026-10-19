@@ -251,7 +251,7 @@ export async function getMetaTokenForAccount(accountId: unknown): Promise<string
 const nodeTokenCache = new Map<string, string>();
 export async function getMetaTokenForNode(nodeId: unknown, accountHint?: unknown): Promise<string> {
   const extras = await getExtraMetaTokens();
-  if (!extras.length) return await getMetaToken();
+  if (!extras.length && !String(nodeId ?? "").trim()) return await getMetaToken();
   if (accountHint) return await getMetaTokenForAccount(accountHint);
   const id = String(nodeId ?? "").trim();
   if (!id) return await getMetaToken();
@@ -259,7 +259,11 @@ export async function getMetaTokenForNode(nodeId: unknown, accountHint?: unknown
   const cached = nodeTokenCache.get(id);
   if (cached) return cached;
   const all = await getAllMetaTokens();
-  for (const t of all) {
+  // token ตอบแชทลองเป็นตัวสุดท้าย — แอดของเพจ Jr 1Shot บางตัว (บัญชีโฆษณา …714) อ่านได้ด้วย token นี้เท่านั้น
+  const msg = await getMetaMessagingToken().catch(() => "");
+  const candidates = msg && !all.some((t) => t.token === msg) ? [...all, { id: "messaging", label: "token ตอบแชท", token: msg }] : all;
+  if (candidates.length === 1) return candidates[0].token;
+  for (const t of candidates) {
     try {
       const r = await fetch(`https://graph.facebook.com/v22.0/${id}?fields=id&access_token=${t.token}`).then((x) => x.json());
       if (r && !r.error) { nodeTokenCache.set(id, t.token); return t.token; }
