@@ -1,0 +1,138 @@
+// หาว่าแชทมาจากแอดไหน จาก "ข้อความทักทายของแอด" — ใช้กับเพจที่ไม่มีข้อมูล referral (เช่น Jr 1Shot)
+//
+// ทำไมต้องเดา: Meta ส่ง "มาจากแอดไหน" ทาง webhook (referral) เฉพาะตอนลูกค้ากดแอดเท่านั้น ดึงย้อนหลังไม่ได้
+// และไม่ให้อ่านป้าย ad_id.X รายลูกค้า แต่แชทจากแอด Click-to-Messenger ขึ้นต้นด้วย
+//   [เพจ] "<ชื่อลูกค้า> ตอบกลับโฆษณา"  →  [เพจ] ข้อความทักทายที่ตั้งไว้ในแอดตัวนั้น
+// จึงดึงรายการแอดของเพจจากชื่อป้าย ad_id.X (อ่านรายชื่อป้ายของเพจได้) → อ่านข้อความทักทายของแต่ละแอด
+// จาก creative → จับคู่กับข้อความทักทายในแชท · แอดหลายตัวใช้ข้อความเดียวกัน = เลือกตัวที่สร้างล่าสุดก่อนแชทเริ่ม
+//
+// อ่าน Meta อย่างเดียว ไม่เขียนอะไรกลับ · เขียนเฉพาะ entry_ad_id / entry_ad_name / source ของห้องที่ยังไม่รู้แหล่ง
+// body { page_id, apply?: boolean }  — apply ไม่ใส่ = ดูผลก่อน (ไม่บันทึก)
+
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { authorizeRequest } from "../_shared/permissions.ts";
+import { getMetaToken, getMetaTokenForNode } from "../_shared/meta.ts";
+import { getMetaPages } from "../_shared/meta-pages.ts";
+import { loadChatPageRules, canSeeChatPage } from "../_shared/chat-pages.ts";
+
+const GRAPH = "https://graph.facebook.com/v22.0";
+const corsHeaders = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type" };
+const AD_REPLY_MARK = "ตอบกลับโฆษณา";
+
+// เทียบข้อความแบบไม่สนช่องว่าง/อีโมจิ/เครื่องหมาย — Meta ตัดบรรทัดหรือเว้นวรรคต่างจากที่ตั้งในแอดได้
+const norm = (s: string) => String(s || "").normalize("NFC").replace(/[\s​]+/g, "").replace(/[^\p{L}\p{N}]/gu, "").toLowerCase();
+
+// ดึงทุกข้อความใน page_welcome_message (JSON string ซ้อนหลายชั้น) — ตัวที่ยาวสุดคือข้อความทักทาย
+// เก็บเฉพาะข้อความ "ภายใน" page_welcome_message — ห้ามเก็บ message/text อื่นของ creative
+// (นั่นคือข้อความโพสต์ของแอดบนฟีด ถ้าขึ้นต้นคล้ายกันจะจับคู่ผิด)
+function welcomeTexts(creative: any): string[] {
+  const out: string[] = [];
+  const collect = (v: any, key = "") => {
+    if (v == null) return;
+    if (typeof v === "string") { if (key === "text") out.push(v); return; }
+    if (Array.isArray(v)) { for (const x of v) collect(x, key); return; }
+    if (typeof v === "object") for (const [k, x] of Object.entries(v)) collect(x, k);
+  };
+  const walk = (v: any, key = "") => {
+    if (v == null) return;
+    if (typeof v === "string") {
+      if (key === "page_welcome_message") { try { collect(JSON.parse(v)); } catch { out.push(v); } }
+      return;
+    }
+    if (Array.isArray(v)) { for (const x of v) walk(x, key); return; }
+    if (typeof v === "object") for (const [k, x] of Object.entries(v)) walk(x, k);
+  };
+  walk(creative?.object_story_spec);
+  walk(creative?.asset_feed_spec);
+  return [...new Set(out.map((s) => s.trim()).filter((s) => s.length >= 8))];
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...corsHeaders, "content-type": "application/json" } });
+  try {
+    const body = await req.json().catch(() => ({}));
+    const pageId = String(body?.page_id || "").trim();
+    if (!pageId) return json({ ok: false, error: "ต้องระบุ page_id" }, 400);
+    const apply = body?.apply === true;
+    const auth = await authorizeRequest(req, { admin: true, allowService: true });
+    if (!auth.ok) return json({ ok: false, error: auth.error }, auth.status);
+    const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
+    if (!canSeeChatPage(await loadChatPageRules(admin), pageId, auth.permission?.email ?? null)) return json({ ok: false, error: "ไม่มีสิทธิ์ดูแชทเพจนี้" }, 403);
+
+    // ---- 1) รายการแอดของเพจ จากชื่อป้าย ad_id.X ----
+    const mainTok = await getMetaToken();
+    const pd = await getMetaPages(GRAPH, mainTok, { mustIncludePageId: pageId });
+    const pageTok = (pd?.data ?? []).find((p: any) => String(p.id) === pageId)?.access_token;
+    if (!pageTok) return json({ ok: false, error: "ไม่พบ page token ของเพจนี้" });
+    const adIds = new Set<string>();
+    let url = `${GRAPH}/${pageId}/custom_labels?fields=page_label_name&limit=500&access_token=${pageTok}`;
+    for (let i = 0; url && i < 10; i++) {
+      const r = await fetch(url).then((x) => x.json());
+      if (r?.error) return json({ ok: false, error: `อ่านป้ายของเพจไม่ได้: ${r.error.message}` });
+      for (const l of r?.data ?? []) { const m = String(l.page_label_name || "").match(/^ad_id\.(\d+)$/); if (m) adIds.add(m[1]); }
+      url = r?.paging?.next || "";
+    }
+
+    // ---- 2) ข้อความทักทายของแต่ละแอด ----
+    const ads: Array<{ id: string; name: string; campaign: string | null; created: string; texts: string[]; error?: string }> = [];
+    await Promise.all([...adIds].map(async (id) => {
+      try {
+        const tok = await getMetaTokenForNode(id);
+        const r = await fetch(`${GRAPH}/${id}?fields=name,created_time,campaign{name},creative{object_story_spec,asset_feed_spec}&access_token=${tok}`).then((x) => x.json());
+        if (r?.error) { ads.push({ id, name: "", campaign: null, created: "", texts: [], error: r.error.message }); return; }
+        ads.push({ id, name: r.name || id, campaign: r.campaign?.name ?? null, created: r.created_time || "", texts: welcomeTexts(r.creative) });
+      } catch (e) { ads.push({ id, name: "", campaign: null, created: "", texts: [], error: String(e) }); }
+    }));
+
+    // ---- 3) จับคู่กับแชทที่ขึ้นต้นด้วย "ตอบกลับโฆษณา" และยังไม่รู้แหล่งแอด ----
+    const { data: rows, error } = await admin.from("chat_customers").select("id, customer_name, transcript, entry_ad_id").eq("page_id", pageId).is("entry_ad_id", null).limit(5000);
+    if (error) throw error;
+    const results: any[] = [];
+    let adReply = 0, matched = 0, ambiguous = 0;
+    for (const row of rows ?? []) {
+      const tr = Array.isArray(row.transcript) ? row.transcript : [];
+      const i = tr.findIndex((m: any) => m?.w === "p" && String(m?.t || "").trim().endsWith(AD_REPLY_MARK));
+      if (i < 0 || i > 3) continue;
+      adReply++;
+      const greet = tr.slice(i + 1, i + 3).find((m: any) => m?.w === "p" && String(m?.t || "").trim());
+      const g = norm(greet?.t || "");
+      if (!g) { results.push({ id: row.id, name: row.customer_name, ad: null, reason: "ไม่มีข้อความทักทายต่อจากบรรทัดตอบกลับโฆษณา" }); continue; }
+      const startedAt = String(tr[i]?.at || "");
+      // ตรงกันทั้งข้อความ หรือขึ้นต้นตรงกันอย่างน้อย 30 ตัวอักษร (Meta อาจตัดท้าย/ต่อปุ่มตอบด่วน)
+      const same = (n: string) => n === g || (Math.min(n.length, g.length) >= 30 && (n.startsWith(g) || g.startsWith(n)));
+      let cands = ads.filter((a) => a.texts.some((t) => { const n = norm(t); return !!n && same(n); }));
+      if (cands.length > 1) {
+        ambiguous++;
+        const before = cands.filter((a) => !a.created || !startedAt || a.created <= startedAt.replace("+0000", "Z"));
+        if (before.length) cands = before;
+        cands.sort((a, b) => b.created.localeCompare(a.created));
+      }
+      const ad = cands[0] || null;
+      if (ad) matched++;
+      results.push({ id: row.id, name: row.customer_name, ad: ad ? { id: ad.id, name: ad.name } : null, candidates: cands.length, greet: String(greet?.t || "").slice(0, 60) });
+    }
+
+    let saved = 0;
+    if (apply) {
+      const now = new Date().toISOString();
+      for (const r of results.filter((x) => x.ad)) {
+        const { error: ue } = await admin.from("chat_customers")
+          .update({ entry_ad_id: r.ad.id, entry_ad_name: r.ad.name, source: "ad", updated_at: now })
+          .eq("id", r.id).is("entry_ad_id", null);
+        if (!ue) saved++;
+      }
+      await admin.from("customer_report_cache").delete().eq("page_id", pageId);
+    }
+
+    return json({
+      ok: true, apply, page_id: pageId, ads_total: ads.length, ads_readable: ads.filter((a) => !a.error).length,
+      ads_with_greeting: ads.filter((a) => a.texts.length).length,
+      ads: ads.map((a) => ({ id: a.id, name: a.name, campaign: a.campaign, error: a.error, greeting: a.texts[0]?.slice(0, 60) })),
+      rooms_unknown: rows?.length ?? 0, rooms_ad_reply: adReply, matched, ambiguous, saved,
+      sample: results.slice(0, 30),
+    });
+  } catch (e) {
+    return json({ ok: false, error: String(e instanceof Error ? e.message : e) }, 200);
+  }
+});

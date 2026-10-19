@@ -3051,7 +3051,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                   {/* ป้ายกำกับจาก Meta — ต้องเห็นก่อนเริ่มตอบ (จ่ายแล้ว/ลูกค้าเก่า/สแปม)
                       ติด/ถอด/สร้างที่นี่ได้เลย ผลขึ้นใน Meta Business Suite ทันที
                       LINE/Instagram จะไม่เรนเดอร์ เพราะ Meta ผูกป้ายกับ PSID ของเพจ Facebook เท่านั้น */}
-                  {!selectedReadOnly && <div className="mt-1"><MetaLabels row={selected} onLabelsChange={syncQuickTagsFromMeta} refreshToken={metaLabelsRefreshToken} /></div>}
+                  <div className="mt-1"><MetaLabels row={selected} onLabelsChange={syncQuickTagsFromMeta} refreshToken={metaLabelsRefreshToken} /></div>
                 </div>
               </div>
 
@@ -3383,7 +3383,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
 
                 {activeCompose === "reply" && selectedReadOnly && (
                   <div className="rounded-xl border border-night-border bg-night-surface2 px-4 py-3 text-[12.5px] text-night-ink-2">
-                    👁 <b className="text-night-ink">เพจนี้ดูอย่างเดียว</b> — ดึงแชทมาไว้สรุปข้อมูล ตอบ/ติดป้าย/ส่งสถานะกลับ Meta จากแอปไม่ได้
+                    👁 <b className="text-night-ink">เพจนี้ดูอย่างเดียว</b> — ดึงแชทมาไว้สรุปข้อมูล ตอบแชทจากแอปไม่ได้ (ติดป้าย/สถานะได้ ส่งไป Meta ตามปกติ)
                     <span className="block text-[11px] text-night-ink-3 mt-0.5">เห็นเฉพาะคนที่ owner กำหนด · ไม่ขึ้นแจ้งเตือนแชทค้าง ไม่นับสถิติการตอบ/แต้ม</span>
                   </div>
                 )}

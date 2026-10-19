@@ -21,9 +21,9 @@
 //   Custom Labels ผูกกับ PSID ของ Facebook Page เท่านั้น
 //   Instagram (IGSID) และ LINE ใช้ไม่ได้ — ต้องบอกผู้ใช้ตรงๆ ไม่ใช่ปล่อยให้กดแล้วเงียบ
 
-import { loadChatPageRules, canSeeChatPage, isReadOnlyChatPage, READ_ONLY_ERROR } from "../_shared/chat-pages.ts";
+import { loadChatPageRules, canSeeChatPage } from "../_shared/chat-pages.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { getMetaMessagingContext } from "../_shared/meta.ts";
+import { getMetaToken, getMetaMessagingContext } from "../_shared/meta.ts";
 import { getMetaPages } from "../_shared/meta-pages.ts";
 import { authorizeRequest } from "../_shared/permissions.ts";
 import { readJsonBody } from "../_shared/security.ts";
@@ -115,12 +115,19 @@ Deno.serve(async (req) => {
     {
       const rules = await loadChatPageRules(admin);
       if (!canSeeChatPage(rules, pageId, auth.permission?.email ?? null)) return json({ ok: false, error: "ไม่มีสิทธิ์ดูแชทเพจนี้" }, 403);
-      if (isReadOnlyChatPage(rules, pageId)) return json({ ok: false, error: READ_ONLY_ERROR }, 403);
     }
     // สิทธิ์ตอบแชทไม่ผูกกับเพจ — ใครเข้าหน้าตอบแชทได้ ก็ตอบได้ทุกเพจและทุก LINE OA
 
     const pd = await getMetaPages(GRAPH_BASE, token, { mustIncludePageId: pageId, cacheKey: meta.cacheKey });
-    const pageTok = (pd?.data ?? []).find((p: any) => String(p.id) === pageId)?.access_token;
+    let pageTok = (pd?.data ?? []).find((p: any) => String(p.id) === pageId)?.access_token;
+    // token ตอบแชทไม่เห็นบางเพจ (เช่น Jr 1Shot) — ถอยไปใช้ page token จาก token หลัก
+    if (!pageTok && meta.dedicated) {
+      const mainTok = await getMetaToken();
+      if (mainTok) {
+        const md = await getMetaPages(GRAPH_BASE, mainTok, { mustIncludePageId: pageId });
+        pageTok = (md?.data ?? []).find((p: any) => String(p.id) === pageId)?.access_token;
+      }
+    }
     if (!pageTok) return json({ ok: false, error: "ไม่พบ access token ของเพจนี้ (เช็คสิทธิ์ pages_messaging)" }, 400);
 
     // ---- ป้ายทั้งหมดของเพจ ----

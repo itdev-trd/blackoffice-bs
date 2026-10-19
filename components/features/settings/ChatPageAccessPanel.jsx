@@ -2,7 +2,7 @@
 
 // ใครเห็นแชทเพจไหน (owner เท่านั้น) — เก็บใน page_lead_config.chat_viewers / chat_read_only / sync_enabled
 //   คนที่เห็น = "ทุกคน" (null) หรือ "เฉพาะคนที่เลือก" — ใช้กับทุกบทบาทรวม owner และบังคับจริงด้วย RLS
-//   ดูอย่างเดียว = ดึงแชทมาไว้สรุปข้อมูล: ตอบ/ติดป้าย/ส่งสถานะกลับ Meta ไม่ได้ ไม่แจ้งเตือน ไม่นับสถิติ/แต้ม
+//   ดูอย่างเดียว = ดึงแชทมาไว้สรุปข้อมูล: ตอบแชทไม่ได้ ไม่แจ้งเตือน ไม่นับสถิติ/แต้ม (ป้าย/สถานะยังส่งไป Meta)
 // token ตอบแชทเห็นเพจของธุรกิจอื่นอีก 20+ เพจ — แสดงเฉพาะเพจที่เปิดดึงแชทหรือตั้งค่าไว้แล้ว ที่เหลือเพิ่มทีละเพจเอง
 
 import { useEffect, useMemo, useState } from "react";
@@ -54,7 +54,7 @@ function PageCard({ page, users, onSaved }) {
         </label>
         <label className="flex items-start gap-2.5 text-[12.5px]">
           <Toggle checked={readOnly} onChange={setReadOnly} label="ดูอย่างเดียว" />
-          <span className="text-2xs pt-0.5" style={{ color: "var(--ink-3)" }}>ไว้สรุปข้อมูล: ตอบ/ติดป้ายไม่ได้ ไม่แจ้งเตือน ไม่นับแต้ม</span>
+          <span className="text-2xs pt-0.5" style={{ color: "var(--ink-3)" }}>ไว้สรุปข้อมูล: ตอบแชทไม่ได้ ไม่แจ้งเตือน ไม่นับแต้ม (ป้ายยังส่งไป Meta)</span>
         </label>
       </div>
       <div>

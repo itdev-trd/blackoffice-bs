@@ -34,7 +34,7 @@
 //
 // deploy: supabase functions deploy meta-stage-write
 
-import { loadChatPageRules, canSeeChatPage, isReadOnlyChatPage, READ_ONLY_ERROR } from "../_shared/chat-pages.ts";
+import { loadChatPageRules, canSeeChatPage } from "../_shared/chat-pages.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { authorizeRequest } from "../_shared/permissions.ts";
 import { readJsonBody } from "../_shared/security.ts";
@@ -230,7 +230,6 @@ Deno.serve(async (req) => {
       {
         const rules = await loadChatPageRules(admin);
         if (!canSeeChatPage(rules, row.page_id, auth.permission?.email ?? null)) return json({ ok: false, error: "ไม่มีสิทธิ์ดูแชทเพจนี้" }, 403);
-        if (isReadOnlyChatPage(rules, row.page_id)) return json({ ok: true, skipped: "read_only", note: READ_ONLY_ERROR });
       }
       if (row.source === "line") return json({ ok: true, skipped: "line", note: "LINE ไม่มีระยะข้อมูลลูกค้าของ Meta" });
 

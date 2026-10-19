@@ -1,7 +1,8 @@
 // กติกาการมองเห็นแชทรายเพจ (page_lead_config.chat_viewers / chat_read_only) — ฝั่ง edge function
 // คู่กับ RLS public.app_hidden_chat_pages() ใน migration 20261019 (ฟังก์ชันที่ใช้ service role ข้าม RLS ต้องเช็คเอง)
 //   chat_viewers = อีเมลที่เห็นแชทเพจนั้น · null = ทุกคนที่มีสิทธิ์แชท (ใช้กับทุกบทบาทรวม owner)
-//   chat_read_only = ดึงมาดู/สรุปอย่างเดียว: ตอบไม่ได้ ไม่ส่งป้าย/สถานะกลับ Meta ไม่นับสถิติ/แต้ม
+//   chat_read_only = ไม่ตอบแชทจากแอป: ตอบไม่ได้ ไม่ติดยังไม่อ่าน/แจ้งเตือน ไม่นับสถิติ/แต้ม
+//     (ป้าย/สถานะยังส่งไป Meta ได้ตามปกติ — Danai ยืนยันเปิดให้ Jr 1Shot 19 ต.ค. 69)
 export type ChatPageRules = { viewers: Map<string, string[]>; readOnly: Set<string> };
 
 export async function loadChatPageRules(admin: any): Promise<ChatPageRules> {
@@ -29,4 +30,4 @@ export const isReadOnlyChatPage = (rules: ChatPageRules, pageId: unknown) => rul
 export const hiddenChatPages = (rules: ChatPageRules, email: string | null | undefined) =>
   email == null ? [] : [...rules.viewers.keys()].filter((id) => !canSeeChatPage(rules, id, email));
 
-export const READ_ONLY_ERROR = "เพจนี้ตั้งเป็น \"ดูอย่างเดียว\" — ดึงแชทมาไว้สรุปข้อมูล ตอบ/ติดป้าย/ส่งสถานะกลับ Meta จากแอปไม่ได้";
+export const READ_ONLY_ERROR = "เพจนี้ตั้งเป็น \"ดูอย่างเดียว\" — ดึงแชทมาไว้สรุปข้อมูล ตอบแชทจากแอปไม่ได้";
