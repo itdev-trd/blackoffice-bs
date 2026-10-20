@@ -110,8 +110,15 @@ Deno.serve(async (req) => {
       const token = t.token;
       const before = Object.keys(byId).length;
       // 1) แหล่งหลัก: /me/adaccounts (User token มักครบอยู่แล้ว)
-      const direct = await pageEdge(`${base}/me/adaccounts?fields=${ACC_FIELDS}&limit=500&access_token=${token}`);
-      direct.rows.forEach((a) => add(a, t.id));
+      let direct = await pageEdge(`${base}/me/adaccounts?fields=${ACC_FIELDS}&limit=500&access_token=${token}`);
+      // field business ต้องมีสิทธิ์ business_management — token ที่มีแค่ ads_read/ads_management โดน #100 ทั้งคำขอ
+      // ถอยไปขอแบบไม่มีชื่อธุรกิจ แล้วใช้ชื่อเรียกของ token แทน
+      let fallbackBiz: string | undefined;
+      if (direct.error?.code === 100 && !direct.rows.length) {
+        direct = await pageEdge(`${base}/me/adaccounts?fields=${ACC_FIELDS.replace(",business{id,name}", "")}&limit=500&access_token=${token}`);
+        fallbackBiz = t.id === "main" ? undefined : t.label;
+      }
+      direct.rows.forEach((a) => add(a, t.id, a.business?.name || fallbackBiz));
       if (isRateLimit(direct.error)) rateLimited = true;
 
       // 2) ไล่รายธุรกิจ "เฉพาะเมื่อบัญชีตรงน้อย" (เคส System User) เพื่อลดการยิง API
