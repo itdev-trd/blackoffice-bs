@@ -315,7 +315,13 @@ Deno.serve(async (req) => {
       // field "business" มีเฉพาะ System User — token ของคน (user token) ขอแล้ว Meta ตอบ #100 ทั้งคำขอ
       // จึงแยกถามต่างหาก และไม่ถือว่า error ถ้าไม่มี
       const bizRes = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/me?fields=business{id,name}&access_token=${tok}`).then((r) => r.json()).catch(() => ({}));
-      const acc = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/me/adaccounts?fields=account_id,name,business{id,name}&limit=200&access_token=${tok}`).then((r) => r.json()).catch(() => ({}));
+      let acc = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/me/adaccounts?fields=account_id,name,business{id,name}&limit=200&access_token=${tok}`).then((r) => r.json()).catch(() => ({}));
+      // field "business" ต้องมีสิทธิ์ business_management — token ที่มีแค่ ads_read/ads_management โดน #100 ทั้งคำขอ
+      // ถอยไปขอรายชื่อบัญชีโดยไม่เอาชื่อธุรกิจ (ใช้ยิง/อ่านแอดได้เหมือนเดิม)
+      if (acc?.error) {
+        const plain = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/me/adaccounts?fields=account_id,name&limit=200&access_token=${tok}`).then((r) => r.json()).catch(() => ({}));
+        if (Array.isArray(plain?.data)) acc = plain;
+      }
       const rows = Array.isArray(acc?.data) ? acc.data : [];
       const accounts = rows.map((a: any) => ({ id: String(a.account_id), name: String(a.name || a.account_id), business: a.business?.name || null }));
       // user token ไม่มีธุรกิจของตัวเอง — ถ้าบัญชีที่เห็นอยู่ธุรกิจเดียวกันหมด ใช้ธุรกิจนั้นเป็นชื่อ
