@@ -268,6 +268,36 @@ const addMonthsDay = (ymd: string, k: number) => {
   return new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), Math.min(d, lastDay))).toISOString().slice(0, 10);
 };
 
+// วันหมดอายุจาก "จำนวนวัน" (เวลาไทย) — หมดตอน 23:59:59 ของวันนั้น
+//   นับเริ่มจากวันนี้ ถ้าเพิ่มหลัง 17:00 นับเริ่มจากพรุ่งนี้ (เพิ่ม 21 ก่อน 5 โมงเย็น → หมด 21 · หลัง 5 โมงเย็น → หมด 22)
+//   จำนวนวันหาร 30 ลงตัว = นับเป็นเดือน: เดือนที่เริ่มมี 31 วัน → +31 · มี 30 วันหรือน้อยกว่า (ก.พ.) → +30
+//     เช่น 21 ต.ค. → 21 พ.ย. · 21 พ.ย. → 21 ธ.ค. · 21 ก.พ. → 23 มี.ค. (ไม่ให้เดือนสั้นได้น้อยกว่า 30 วัน) · ที่เหลือนับวันตรงๆ
+//   fromMs = ต่อท้ายวันหมดอายุเดิมที่ยังไม่หมด (ไม่ใช้เวลาตัดรอบ เพราะไม่ได้เริ่มจากตอนกด)
+const TH_CUTOFF_HOUR = 17;
+const addDaysTh = (ymd: string, n: number) => new Date(Date.parse(`${ymd}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
+// 1 เดือนสิทธิ์ = 31 วันถ้าเดือนที่นับอยู่มี 31 วัน ไม่งั้น 30 วัน
+const addMonthsTh = (ymd: string, k: number) => {
+  let d = ymd;
+  for (let i = 0; i < k; i++) {
+    const [y, m] = d.split("-").map(Number);
+    const dim = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    d = addDaysTh(d, dim === 31 ? 31 : 30);
+  }
+  return d;
+};
+function expiryFromDays(days: number, fromMs?: number): string {
+  const n = Math.max(1, Math.round(days) || 1);
+  let start: string;
+  if (fromMs) start = thDay(new Date(fromMs).toISOString());
+  else {
+    const now = thNow();
+    start = now.toISOString().slice(0, 10);
+    if (now.getUTCHours() >= TH_CUTOFF_HOUR) start = new Date(Date.parse(`${start}T00:00:00Z`) + 86400000).toISOString().slice(0, 10);
+  }
+  const day = n % 30 === 0 ? addMonthsTh(start, n / 30) : addDaysTh(start, n);
+  return new Date(`${day}T23:59:59+07:00`).toISOString();
+}
+
 // รอบที่ใช้นับ lot = "รอบเดือน" ของสมาชิกคนนั้น ไม่ใช่เดือนปฏิทิน
 // ได้สิทธิ์ 10 ก.พ. → นับ 10 ก.พ.–10 มี.ค. · ต่ออายุถึง 10 เม.ย. → นับ 10 มี.ค.–10 เม.ย.
 // วิธีคิด: ถอยจากวันหมดอายุทีละ 1 เดือนจนได้รอบที่ครอบ "วันนี้" (รองรับต่ออายุหลายเดือนในครั้งเดียว
@@ -384,7 +414,7 @@ Deno.serve(async (req) => {
         // ถ้าส่ง expiration มาตรงๆ (โหมดเลือกจากปฏิทิน) ใช้เลย ไม่คิดจากจำนวนวัน (กันวันเพี้ยนเพราะปัดเศษเวลา)
         const expiration = lifetime ? null
           : (body?.expiration ? new Date(String(body.expiration)).toISOString()
-          : new Date(Date.now() + Math.max(1, days) * 86400000).toISOString());
+          : expiryFromDays(days));
         const nowIso = new Date().toISOString();
         // ใครกดเพิ่ม — ใช้ชื่อเล่นที่ตั้งไว้ (fallback = อีเมล)
         const grantEmail = gPerm?.email || null;
@@ -406,8 +436,8 @@ Deno.serve(async (req) => {
             let expForPine = expiration;
             if (renew && !lifetime && !body?.expiration) {
               const prev = existing?.expiration ? new Date(String(existing.expiration)).getTime() : 0;
-              const base = prev > Date.now() ? prev : Date.now();   // ยังไม่หมดอายุ = ต่อท้ายวันเดิม · หมดแล้ว = นับจากวันนี้
-              expForPine = new Date(base + Math.max(1, days) * 86400000).toISOString();
+              // ยังไม่หมดอายุ = ต่อท้ายวันเดิม · หมดแล้ว = นับจากวันนี้ (ตัดรอบ 17:00)
+              expForPine = expiryFromDays(days, prev > Date.now() ? prev : undefined);
             }
             const res = await callTv({ action: "grant", username, pine_id, expiration: expForPine }, cookie, { actor: gPerm?.email ?? null, brand_id });
             if (!res?.ok) { results.push({ pine_id, ok: false, error: res?.error || `n8n ตอบ: ${JSON.stringify(res).slice(0, 250)}` }); continue; }
@@ -724,7 +754,7 @@ Deno.serve(async (req) => {
           // ยังไม่หมด/เพิ่งหมดไม่เกิน 3 วัน = นับต่อจากวันหมดอายุเดิม (รอบไม่เลื่อน) · หมดนานกว่านั้น = นับจากวันนี้
           const oldMs = new Date(r.expiration).getTime();
           const baseDay = nowMs - oldMs <= 3 * 86400000 ? thDay(r.expiration) : today;
-          const newExpiration = new Date(`${addMonthsDay(baseDay, 1)}T23:59:59+07:00`).toISOString();
+          const newExpiration = new Date(`${addMonthsTh(baseDay, 1)}T23:59:59+07:00`).toISOString();
           const res = await grantOnce({ renew: true, member_type: "renew", username: m.username, pine_ids: [r.pine_id], lifetime: false, expiration: newExpiration, trade_id: r.trade_id || m.tradeIds[0], no_points: true });
           const one = res?.results?.find((x: any) => x.pine_id === r.pine_id);
           if (res?.ok && one?.ok !== false) {
@@ -1537,7 +1567,7 @@ Deno.serve(async (req) => {
           const oldMs = new Date(r.expiration).getTime();
           // keep_anchor (cron): นับต่อจากวันหมดอายุเดิมแม้เพิ่งเลยมา (ไม่เกิน 3 วัน) — รอบเดือนของสมาชิกจะไม่เลื่อน
           const baseDay = thDay(Number.isFinite(oldMs) && (oldMs > nowMs || (keepAnchor && nowMs - oldMs <= 3 * 86400000)) ? r.expiration : new Date());
-          const newExpiration = new Date(`${addMonthsDay(baseDay, 1)}T23:59:59+07:00`).toISOString();
+          const newExpiration = new Date(`${addMonthsTh(baseDay, 1)}T23:59:59+07:00`).toISOString();
           let res: any = null;
           try {
             // ต่อผ่าน runGrant ในโปรเซสเดียวกัน (สิทธิ์ของคนที่กด / null = cron) — ต่อบน TradingView + ตรวจซ้ำ + บันทึกเหมือนกดต่อเอง
