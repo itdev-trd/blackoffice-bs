@@ -358,6 +358,17 @@ async function brokerLotRows(path: string, params: Record<string, string>): Prom
 
 type BrokerLot = { lots: number; campaign_name: string | null; excluded_lots: number };
 
+// แคชยอด lot ต่อช่วงวัน 10 นาที (instance อุ่นใช้ซ้ำ) — ปุ่มให้สิทธิ์ย้อนหลังเรียกทีละชุด ไม่ต้องยิง broker ทุกชุด
+const lotCache = new Map<string, { at: number; map: Map<string, BrokerLot> }>();
+async function brokerLotsCached(from: string, to: string): Promise<Map<string, BrokerLot>> {
+  const key = `${from}|${to}`;
+  const hit = lotCache.get(key);
+  if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.map;
+  const map = await fetchBrokerLots(from, to);
+  lotCache.set(key, { at: Date.now(), map });
+  return map;
+}
+
 // คืน Map<login, ยอด lot> ดิบ ๆ ไม่ยุ่งกับ DB (ผู้เรียกเอาไปจับคู่กับ trade_id เอง)
 // tradeId: ใส่เพื่อกรองเฉพาะบัญชีเดียว (พารามิเตอร์ tradeid ใช้ได้จริง ยืนยันแล้ว) ไม่ใส่ = ทุกบัญชีใต้ IB
 async function fetchBrokerLots(periodStart: string, periodEnd: string, tradeId?: string): Promise<Map<string, BrokerLot>> {
@@ -513,6 +524,144 @@ Deno.serve(async (req) => {
         return { ok: okCount > 0, username: realUser, expiration, results };
     };
 
+    // ให้สิทธิ์สคริปต์ใหม่ให้ลูกค้าเดิม (ปุ่มในตั้งค่า + cron lot_auto_grant_cron) — คืน object ธรรมดา ผู้เรียกห่อ json เอง
+    // perm = คนที่กด (null = cron)
+    const runBackfill = async (body: any, perm: any): Promise<any> => {
+      const target = String(body?.target_pine || "").trim();
+      const sources: string[] = Array.isArray(body?.source_pines) ? [...new Set(body.source_pines.map(String).filter((x: string) => x && x !== target))] as string[] : [];
+      const mode = body?.mode === "all" ? "all" : "any";
+      if (!target || !sources.length) return ({ ok: false, error: "เลือกสคริปต์ใหม่ และสคริปต์เดิมอย่างน้อย 1 ตัว" });
+      const nowMs = Date.now();
+      const nowIso = new Date(nowMs).toISOString();
+
+      // อ่านสิทธิ์ที่ยัง active ของสคริปต์เดิมทั้งหมด (แบ่งหน้า — PostgREST คืนได้ทีละ 1,000)
+      const srcRows: any[] = [];
+      for (let from = 0; from < 50_000; from += 1000) {
+        const { data, error } = await db.from("tv_access")
+          .select("username, pine_id, expiration, display_name, email, trade_id, lot, contact_channel, member_type, broker, phone, country, telegram, updated_at")
+          .in("pine_id", sources).eq("status", "active").range(from, from + 999);
+        if (error) return ({ ok: false, error: error.message });
+        srcRows.push(...(data ?? []));
+        if ((data ?? []).length < 1000) break;
+      }
+      const { data: tgtRows } = await db.from("tv_access").select("username, status, expiration").eq("pine_id", target);
+      // รายชื่อจริงจาก TradingView (ซิงก์ทุกคืน) — ใช้เป็นหลัก ดูเหตุผลใน _shared/tv-backfill.ts
+      const tvRows: any[] = [];
+      for (let from = 0; from < 50_000; from += 1000) {
+        const { data, error } = await db.from("tv_external_members").select("username, pine_id, expiration, status")
+          .in("pine_id", [...sources, target]).range(from, from + 999);
+        if (error) return ({ ok: false, error: error.message });
+        tvRows.push(...(data ?? []));
+        if ((data ?? []).length < 1000) break;
+      }
+      // ทำรายคน (ปุ่มในหน้าสมาชิก) — จำกัดเฉพาะ username ที่ส่งมา
+      const onlyUsers: Set<string> | null = Array.isArray(body?.usernames) && body.usernames.length
+        ? new Set(body.usernames.map((u: unknown) => String(u).toLowerCase().trim()).filter(Boolean)) : null;
+      const pick = (rows: any[]) => onlyUsers ? rows.filter((r) => onlyUsers.has(String(r.username || "").toLowerCase())) : rows;
+
+      const { pending: pendingList, summary: summaryRaw, hasTarget } = buildBackfill(
+        pick(srcRows), pick(tgtRows ?? []), sources, mode, nowMs,
+        pick(tvRows.filter((r) => r.pine_id !== target)), pick(tvRows.filter((r) => r.pine_id === target)),
+      );
+      const summary: any = { ...summaryRaw };
+      // เงื่อนไข lot (ไม่บังคับ): ได้เฉพาะคนที่เทรดรวมทุกไอดีเทรดใน N วันล่าสุด ≥ min_lots
+      const minLots = Math.max(0, Number(body?.min_lots) || 0);
+      const lotDays = Math.min(90, Math.max(1, Number(body?.lot_days) || 30));
+      const lotsOf = new Map<string, number>();
+      let lotWindow: { from: string; to: string } | null = null;
+      if (minLots > 0 && pendingList.length) {
+        const to = thDay(new Date(nowMs).toISOString());
+        const from = addDaysTh(to, -lotDays);
+        lotWindow = { from, to };
+        let map: Map<string, BrokerLot>;
+        try { map = await brokerLotsCached(from, to); }
+        catch (e) { return ({ ok: false, error: `ดึง lot ไม่สำเร็จ: ${String(e instanceof Error ? e.message : e)}` }); }
+        const tradeIdsOf = new Map<string, Set<string>>();
+        for (const r of srcRows) {
+          const k = String(r.username || "").toLowerCase(); const t = String(r.trade_id || "").replace(/\D/g, "");
+          if (k && t) tradeIdsOf.set(k, new Set([...(tradeIdsOf.get(k) ?? []), t]));
+        }
+        for (const c of pendingList) {
+          const ids = [...(tradeIdsOf.get(c.key) ?? [])];
+          const t = String(c.profile?.trade_id || "").replace(/\D/g, ""); if (t && !ids.includes(t)) ids.push(t);
+          lotsOf.set(c.key, Math.round(ids.reduce((sum, id) => sum + (map.get(id)?.lots ?? 0), 0) * 10000) / 10000);
+        }
+        const before = pendingList.length;
+        pendingList.splice(0, pendingList.length, ...pendingList.filter((c) => (lotsOf.get(c.key) ?? 0) >= minLots));
+        summary.below_lots = before - pendingList.length;
+        summary.pending = pendingList.length;
+        for (const t of ["lifetime", "decide", "timed"] as const) summary[t] = pendingList.filter((c) => c.tier === t).length;
+      }
+      if (lotWindow) summary.lot_window = { ...lotWindow, min_lots: minLots };
+      const skipUsers = new Set((Array.isArray(body?.skip_usernames) ? body.skip_usernames : []).map((u: unknown) => String(u).toLowerCase()));
+      const pending = pendingList.filter((c) => !skipUsers.has(c.key)).map((c) => [c.key, c] as const);
+
+      if (body?.dry_run === true) {
+        return ({ ok: true, dry_run: true, ...summary,
+          ...(minLots > 0 ? { lot_list: pendingList.map((c) => ({ username: c.username, lots: lotsOf.get(c.key) ?? 0, tier: c.tier })) } : {}),
+          // รายคน: บอกเหตุผลถ้าไม่เข้าเกณฑ์ จะได้ไม่ต้องเดา
+          ...(onlyUsers ? { not_eligible: [...onlyUsers].filter((u) => !pendingList.some((c) => c.key === u)).map((u) => ({
+            username: u, reason: hasTarget.has(u) ? "มีสคริปต์นี้อยู่แล้ว" : "ไม่มีสิทธิ์สคริปต์เดิมที่ยังไม่หมดอายุ (ทั้งในระบบและบน TradingView)",
+          })), pending_list: pendingList.map((c) => ({ key: c.key, username: c.username, tier: c.tier,
+            expiration: c.tier === "timed" ? new Date(c.maxExp).toISOString() : null })) } : {}),
+          // กลุ่มที่ต้องตัดสินใจ — ส่งรายชื่อครบให้หน้าเว็บเลือกรายคนได้
+          decide_list: pendingList.filter((c) => c.tier === "decide").map((c) => ({
+            key: c.key, username: c.username, display_name: c.profile?.display_name ?? null,
+            lifetime_pines: [...c.lifetimePines], timed_pines: [...c.pines].filter((p) => !c.lifetimePines.has(p)),
+            max_expiration: c.maxExp ? new Date(c.maxExp).toISOString() : null,
+          })) });
+      }
+
+      const decideDefault = body?.decide_default === "lifetime" ? "lifetime" : "month";
+      const decideOverrides = (body?.decide_overrides && typeof body.decide_overrides === "object") ? body.decide_overrides as Record<string, unknown> : {};
+      const after = String(body?.after || "").toLowerCase();
+      const batchSize = Math.min(Number(body?.max_batch) || 25, Math.max(1, Number(body?.batch) || 10));
+      const batch = pending.filter(([k]) => k > after).slice(0, batchSize);
+      const brand_id = await pineBrandId(target);
+      const cookie = await getBrandCookie(brand_id);
+      const grantEmail = perm?.email || null;
+      let grantedBy = grantEmail;
+      if (grantEmail) {
+        const { data: np } = await db.from("user_permissions").select("nickname").eq("email", grantEmail).maybeSingle();
+        if (np?.nickname) grantedBy = np.nickname;
+      }
+      const deadline = Date.now() + (Number(body?.time_budget_ms) || 100_000);
+      const failed: { username: string; error: string }[] = [];
+      let okCount = 0;
+      let last = after;
+      for (const [key, c] of batch) {
+        if (Date.now() > deadline) break;
+        const expiration = backfillExpiration(c, choiceFor(c, decideDefault, decideOverrides), nowMs);
+        try {
+          const res = await callTv({ action: "grant", username: c.username, pine_id: target, expiration }, cookie, { actor: grantEmail, brand_id });
+          if (!res?.ok) throw new Error(res?.error || "ให้สิทธิ์ไม่สำเร็จ");
+          const realUser = res.username || c.username;
+          if (res?.already === true) {
+            const ext = await callTv({ action: "extend", username: realUser, pine_id: target, expiration }, cookie, { actor: grantEmail, brand_id });
+            if (!ext?.ok) throw new Error(`มีสิทธิ์อยู่แล้วแต่ตั้งวันหมดอายุไม่สำเร็จ: ${ext?.error || ""}`);
+          }
+          const p = c.profile || {};
+          const { error: upErr } = await db.from("tv_access").upsert({
+            username: realUser, pine_id: target, brand_id,
+            display_name: p.display_name ?? null, email: p.email ?? null, trade_id: p.trade_id ?? null, lot: p.lot ?? null,
+            contact_channel: p.contact_channel ?? null, member_type: p.member_type ?? null, broker: p.broker ?? "XM",
+            phone: p.phone ?? null, country: p.country ?? null, telegram: p.telegram ?? null,
+            expiration, status: "active", last_granted_at: nowIso, last_synced_at: nowIso, last_error: null,
+            granted_by: body?.granted_label || (grantedBy ? `${grantedBy} (ย้อนหลัง)` : "ให้สิทธิ์ย้อนหลัง"), granted_by_email: grantEmail, granted_at: nowIso, updated_at: nowIso,
+          }, { onConflict: "username,pine_id" });
+          if (upErr) throw new Error(`ให้สิทธิ์บน TradingView แล้ว แต่บันทึกไม่สำเร็จ: ${upErr.message}`);
+          okCount++;
+        } catch (e) {
+          failed.push({ username: c.username, error: String(e instanceof Error ? e.message : e) });
+        }
+        last = key;
+        await new Promise((r) => setTimeout(r, 250));   // เว้นจังหวะ กัน TradingView ตัดเพราะยิงถี่
+      }
+      const remaining = pending.filter(([k]) => k > last).length;
+      return ({ ok: true, ...summary, processed: okCount + failed.length, granted: okCount, failed,
+        next_after: remaining ? last : null, remaining, done: remaining === 0 });
+    };
+
     // ---- cron/service: ถอนสิทธิ์ที่หมดอายุ ----
     if (action === "expire") {
       if (!isService) { const a = await authorizeRequest(req, { admin: true }); if (!a.ok) return json({ ok: false, error: a.error }, a.status); }
@@ -659,6 +808,42 @@ Deno.serve(async (req) => {
     // คนที่ผ่านทุกเดือนจะมีสิทธิ์ล่วงหน้าไปเรื่อย ๆ ไม่มีวันขาด
     // ยอด lot: ยิง broker ทีละ "ช่วงวัน" ได้ทุกบัญชีในครั้งเดียว (แบบ refresh_lots) ไม่ยิงรายคน
     //   เดิมเรียก lot_check ของตัวเองทีละคน → Supabase ตัดด้วย "Rate limit exceeded for trace" (คืน 15 ต.ค. ล้ม 9 คน)
+    // ให้สคริปต์ใหม่อัตโนมัติตาม lot — สคริปต์ที่ตั้ง tv_scripts.auto_grant_min_lots ไว้
+    // ลูกค้าที่มีสคริปต์อื่นของแบรนด์เดียวกันที่ยังไม่หมดอายุ + เทรดรวมใน auto_grant_lot_days วันล่าสุด ≥ เกณฑ์ → ได้สคริปต์นี้
+    // วันหมดอายุ = เท่ากับตัวเดิมที่ไกลที่สุด (ตลอดชีพครบ = ตลอดชีพ) จะได้ต่ออายุพร้อมกันในรอบ lot
+    // ทำทีละรอบตามเวลาที่มี ที่เหลือรอบถัดไปทำต่อ · ใครล้ม 3 รอบติดข้ามไป (ดูใน settings.lot_auto_grant_last)
+    if (action === "lot_auto_grant_cron") {
+      if (!isService) { const a = await authorizeRequest(req, { admin: true }); if (!a.ok) return json({ ok: false, error: a.error }, a.status); }
+      const dryRun = body?.dry_run === true;
+      const startedAt = Date.now();
+      const { data: allScripts } = await db.from("tv_scripts").select("pine_id, name, brand_id, auto_grant_min_lots, auto_grant_lot_days");
+      const targets = (allScripts || []).filter((x: any) => Number(x.auto_grant_min_lots) > 0 && (!body?.pine_id || x.pine_id === body.pine_id));
+      const { data: prevRow } = await db.from("settings").select("value").eq("key", "lot_auto_grant_last").maybeSingle();
+      const failCount: Record<string, number> = { ...((prevRow?.value as any)?.fail_count || {}) };
+      const results: any[] = [];
+      for (const t of targets) {
+        const sources = (allScripts || []).filter((x: any) => x.pine_id !== t.pine_id && x.brand_id === t.brand_id).map((x: any) => x.pine_id);
+        if (!sources.length) { results.push({ pine_id: t.pine_id, name: t.name, error: "แบรนด์นี้ไม่มีสคริปต์อื่นให้อ้างอิง" }); continue; }
+        const left = 120_000 - (Date.now() - startedAt);
+        if (!dryRun && left < 15_000) { results.push({ pine_id: t.pine_id, name: t.name, deferred: true }); continue; }
+        const skip = Object.entries(failCount).filter(([k, n]) => k.startsWith(`${t.pine_id}|`) && n >= 3).map(([k]) => k.split("|")[1]);
+        const res = await runBackfill({
+          target_pine: t.pine_id, source_pines: sources, mode: "any", decide_default: "month",
+          min_lots: Number(t.auto_grant_min_lots), lot_days: Number(t.auto_grant_lot_days) || 30,
+          dry_run: dryRun, batch: 500, max_batch: 500, time_budget_ms: left - 10_000, skip_usernames: skip,
+          granted_label: `อัตโนมัติ (lot ≥ ${Number(t.auto_grant_min_lots)})`,
+        }, null);
+        if (!dryRun) {
+          for (const f of res?.failed || []) { const k = `${t.pine_id}|${String(f.username).toLowerCase()}`; failCount[k] = (failCount[k] || 0) + 1; }
+        }
+        results.push({ pine_id: t.pine_id, name: t.name, ...res, ...(dryRun ? {} : { skipped_failing: skip.length }) });
+      }
+      const summary = { at: new Date().toISOString(), scripts: targets.length, granted: results.reduce((n, r) => n + (r.granted || 0), 0) };
+      if (!dryRun) await db.from("settings").upsert({ key: "lot_auto_grant_last", value: { ...summary, fail_count: failCount,
+        results: results.map((r) => ({ ...r, lot_list: undefined, decide_list: undefined, failed: (r.failed || []).slice(0, 50) })) }, updated_at: summary.at });
+      return json({ ok: true, dry_run: dryRun, ...summary, results });
+    }
+
     if (action === "lot_renew_cron") {
       if (!isService) { const a = await authorizeRequest(req, { admin: true }); if (!a.ok) return json({ ok: false, error: a.error }, a.status); }
       const dryRun = body?.dry_run === true;
@@ -940,6 +1125,18 @@ Deno.serve(async (req) => {
       return json({ ok: true });
     }
 
+    // ตั้งเกณฑ์ให้สคริปต์อัตโนมัติตาม lot (null/0 = ปิด)
+    if (action === "script_auto_grant") {
+      if (!isAdmin) return json({ ok: false, error: "เฉพาะแอดมิน" }, 403);
+      const pine_id = String(body?.pine_id || "").trim();
+      if (!pine_id) return json({ ok: false, error: "ไม่มี pine_id" });
+      const min = Number(body?.min_lots) || 0;
+      const days = Math.min(90, Math.max(1, Number(body?.lot_days) || 30));
+      const { error } = await db.from("tv_scripts").update({ auto_grant_min_lots: min > 0 ? min : null, auto_grant_lot_days: days }).eq("pine_id", pine_id);
+      if (error) return json({ ok: false, error: error.message });
+      return json({ ok: true });
+    }
+
     if (action === "delete_script") {
       if (!isAdmin) return json({ ok: false, error: "เฉพาะแอดมิน" }, 403);
       const pine_id = String(body?.pine_id || "").trim();
@@ -1102,107 +1299,7 @@ Deno.serve(async (req) => {
     //   · dry_run = นับ/ดูรายชื่ออย่างเดียว ไม่ยิง TradingView
     if (action === "backfill_script") {
       if (!isAdmin) return json({ ok: false, error: "เฉพาะแอดมิน" }, 403);
-      const target = String(body?.target_pine || "").trim();
-      const sources: string[] = Array.isArray(body?.source_pines) ? [...new Set(body.source_pines.map(String).filter((x: string) => x && x !== target))] as string[] : [];
-      const mode = body?.mode === "all" ? "all" : "any";
-      if (!target || !sources.length) return json({ ok: false, error: "เลือกสคริปต์ใหม่ และสคริปต์เดิมอย่างน้อย 1 ตัว" });
-      const nowMs = Date.now();
-      const nowIso = new Date(nowMs).toISOString();
-
-      // อ่านสิทธิ์ที่ยัง active ของสคริปต์เดิมทั้งหมด (แบ่งหน้า — PostgREST คืนได้ทีละ 1,000)
-      const srcRows: any[] = [];
-      for (let from = 0; from < 50_000; from += 1000) {
-        const { data, error } = await db.from("tv_access")
-          .select("username, pine_id, expiration, display_name, email, trade_id, lot, contact_channel, member_type, broker, phone, country, telegram, updated_at")
-          .in("pine_id", sources).eq("status", "active").range(from, from + 999);
-        if (error) return json({ ok: false, error: error.message });
-        srcRows.push(...(data ?? []));
-        if ((data ?? []).length < 1000) break;
-      }
-      const { data: tgtRows } = await db.from("tv_access").select("username, status, expiration").eq("pine_id", target);
-      // รายชื่อจริงจาก TradingView (ซิงก์ทุกคืน) — ใช้เป็นหลัก ดูเหตุผลใน _shared/tv-backfill.ts
-      const tvRows: any[] = [];
-      for (let from = 0; from < 50_000; from += 1000) {
-        const { data, error } = await db.from("tv_external_members").select("username, pine_id, expiration, status")
-          .in("pine_id", [...sources, target]).range(from, from + 999);
-        if (error) return json({ ok: false, error: error.message });
-        tvRows.push(...(data ?? []));
-        if ((data ?? []).length < 1000) break;
-      }
-      // ทำรายคน (ปุ่มในหน้าสมาชิก) — จำกัดเฉพาะ username ที่ส่งมา
-      const onlyUsers: Set<string> | null = Array.isArray(body?.usernames) && body.usernames.length
-        ? new Set(body.usernames.map((u: unknown) => String(u).toLowerCase().trim()).filter(Boolean)) : null;
-      const pick = (rows: any[]) => onlyUsers ? rows.filter((r) => onlyUsers.has(String(r.username || "").toLowerCase())) : rows;
-
-      const { pending: pendingList, summary, hasTarget } = buildBackfill(
-        pick(srcRows), pick(tgtRows ?? []), sources, mode, nowMs,
-        pick(tvRows.filter((r) => r.pine_id !== target)), pick(tvRows.filter((r) => r.pine_id === target)),
-      );
-      const pending = pendingList.map((c) => [c.key, c] as const);
-
-      if (body?.dry_run === true) {
-        return json({ ok: true, dry_run: true, ...summary,
-          // รายคน: บอกเหตุผลถ้าไม่เข้าเกณฑ์ จะได้ไม่ต้องเดา
-          ...(onlyUsers ? { not_eligible: [...onlyUsers].filter((u) => !pendingList.some((c) => c.key === u)).map((u) => ({
-            username: u, reason: hasTarget.has(u) ? "มีสคริปต์นี้อยู่แล้ว" : "ไม่มีสิทธิ์สคริปต์เดิมที่ยังไม่หมดอายุ (ทั้งในระบบและบน TradingView)",
-          })), pending_list: pendingList.map((c) => ({ key: c.key, username: c.username, tier: c.tier,
-            expiration: c.tier === "timed" ? new Date(c.maxExp).toISOString() : null })) } : {}),
-          // กลุ่มที่ต้องตัดสินใจ — ส่งรายชื่อครบให้หน้าเว็บเลือกรายคนได้
-          decide_list: pendingList.filter((c) => c.tier === "decide").map((c) => ({
-            key: c.key, username: c.username, display_name: c.profile?.display_name ?? null,
-            lifetime_pines: [...c.lifetimePines], timed_pines: [...c.pines].filter((p) => !c.lifetimePines.has(p)),
-            max_expiration: c.maxExp ? new Date(c.maxExp).toISOString() : null,
-          })) });
-      }
-
-      const decideDefault = body?.decide_default === "lifetime" ? "lifetime" : "month";
-      const decideOverrides = (body?.decide_overrides && typeof body.decide_overrides === "object") ? body.decide_overrides as Record<string, unknown> : {};
-      const after = String(body?.after || "").toLowerCase();
-      const batchSize = Math.min(25, Math.max(1, Number(body?.batch) || 10));
-      const batch = pending.filter(([k]) => k > after).slice(0, batchSize);
-      const brand_id = await pineBrandId(target);
-      const cookie = await getBrandCookie(brand_id);
-      const grantEmail = auth.permission?.email || null;
-      let grantedBy = grantEmail;
-      if (grantEmail) {
-        const { data: np } = await db.from("user_permissions").select("nickname").eq("email", grantEmail).maybeSingle();
-        if (np?.nickname) grantedBy = np.nickname;
-      }
-      const deadline = Date.now() + 100_000;
-      const failed: { username: string; error: string }[] = [];
-      let okCount = 0;
-      let last = after;
-      for (const [key, c] of batch) {
-        if (Date.now() > deadline) break;
-        const expiration = backfillExpiration(c, choiceFor(c, decideDefault, decideOverrides), nowMs);
-        try {
-          const res = await callTv({ action: "grant", username: c.username, pine_id: target, expiration }, cookie, { actor: grantEmail, brand_id });
-          if (!res?.ok) throw new Error(res?.error || "ให้สิทธิ์ไม่สำเร็จ");
-          const realUser = res.username || c.username;
-          if (res?.already === true) {
-            const ext = await callTv({ action: "extend", username: realUser, pine_id: target, expiration }, cookie, { actor: grantEmail, brand_id });
-            if (!ext?.ok) throw new Error(`มีสิทธิ์อยู่แล้วแต่ตั้งวันหมดอายุไม่สำเร็จ: ${ext?.error || ""}`);
-          }
-          const p = c.profile || {};
-          const { error: upErr } = await db.from("tv_access").upsert({
-            username: realUser, pine_id: target, brand_id,
-            display_name: p.display_name ?? null, email: p.email ?? null, trade_id: p.trade_id ?? null, lot: p.lot ?? null,
-            contact_channel: p.contact_channel ?? null, member_type: p.member_type ?? null, broker: p.broker ?? "XM",
-            phone: p.phone ?? null, country: p.country ?? null, telegram: p.telegram ?? null,
-            expiration, status: "active", last_granted_at: nowIso, last_synced_at: nowIso, last_error: null,
-            granted_by: grantedBy ? `${grantedBy} (ย้อนหลัง)` : "ให้สิทธิ์ย้อนหลัง", granted_by_email: grantEmail, granted_at: nowIso, updated_at: nowIso,
-          }, { onConflict: "username,pine_id" });
-          if (upErr) throw new Error(`ให้สิทธิ์บน TradingView แล้ว แต่บันทึกไม่สำเร็จ: ${upErr.message}`);
-          okCount++;
-        } catch (e) {
-          failed.push({ username: c.username, error: String(e instanceof Error ? e.message : e) });
-        }
-        last = key;
-        await new Promise((r) => setTimeout(r, 250));   // เว้นจังหวะ กัน TradingView ตัดเพราะยิงถี่
-      }
-      const remaining = pending.filter(([k]) => k > last).length;
-      return json({ ok: true, ...summary, processed: okCount + failed.length, granted: okCount, failed,
-        next_after: remaining ? last : null, remaining, done: remaining === 0 });
+      return json(await runBackfill(body, auth.permission));
     }
 
     // renew: true = "ต่ออายุ" (ปุ่มต่ออายุหน้าแชท) — ต่างจากการให้สิทธิ์ใหม่ 2 อย่าง

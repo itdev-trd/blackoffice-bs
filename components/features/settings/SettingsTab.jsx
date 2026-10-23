@@ -906,6 +906,7 @@ function TvAdminSettingsPanel() {
                   <div className="min-w-0">
                     <div className="font-medium text-[var(--ink)] truncate text-sm">{s.name}</div>
                     <div className="text-[11px] text-[var(--ink-3)] truncate font-mono">{s.pine_id}</div>
+                    {bs.length > 1 && <ScriptAutoGrant script={s} onSaved={loadScripts} />}
                   </div>
                   <button onClick={() => deleteScript(s)} className="flex items-center gap-1 text-[11px] font-medium text-rose-600 hover:bg-rose-50 rounded-md px-2 py-1 shrink-0" title="ลบสคริปต์นี้"><Trash2 size={13} /> ลบ</button>
                 </div>
@@ -929,6 +930,58 @@ function TvAdminSettingsPanel() {
         </div>
       )}
       <TvBackfillPanel scripts={scripts} />
+    </div>
+  );
+}
+
+// ให้สคริปต์นี้อัตโนมัติตาม lot — ลูกค้าที่มีสคริปต์อื่นของแบรนด์เดียวกัน (ยังไม่หมดอายุ) + lot รวม N วันล่าสุดถึงเกณฑ์
+// cron tradingview lot_auto_grant_cron ทุก 30 นาที · วันหมดอายุเท่ากับตัวเดิมที่ไกลที่สุด
+function ScriptAutoGrant({ script, onSaved }) {
+  const on0 = Number(script.auto_grant_min_lots) > 0;
+  const [on, setOn] = useState(on0);
+  const [min, setMin] = useState(on0 ? String(script.auto_grant_min_lots) : "1");
+  const [days, setDays] = useState(String(script.auto_grant_lot_days || 30));
+  const [busy, setBusy] = useState("");
+  const [msg, setMsg] = useState(null);
+  const dirty = on !== on0 || (on && (Number(min) !== Number(script.auto_grant_min_lots) || Number(days) !== Number(script.auto_grant_lot_days || 30)));
+  const tv = async (body) => {
+    const { data, error } = await supabase.functions.invoke("tradingview", { body });
+    if (error || !data?.ok) throw new Error(data?.error || (error ? await readFunctionErrorMessage(error) : "") || "ไม่สำเร็จ");
+    return data;
+  };
+  async function save() {
+    if (on && !(Number(min) > 0)) { setMsg({ ok: false, text: "ใส่เกณฑ์ lot มากกว่า 0" }); return; }
+    setBusy("save"); setMsg(null);
+    try { await tv({ action: "script_auto_grant", pine_id: script.pine_id, min_lots: on ? Number(min) : 0, lot_days: Number(days) || 30 }); setMsg({ ok: true, text: on ? "บันทึกแล้ว — ระบบตรวจทุก 30 นาที" : "ปิดแล้ว" }); onSaved?.(); }
+    catch (e) { setMsg({ ok: false, text: e.message }); }
+    setBusy("");
+  }
+  async function preview() {
+    setBusy("check"); setMsg(null);
+    try {
+      const d = await tv({ action: "lot_auto_grant_cron", pine_id: script.pine_id, dry_run: true });
+      const r = d.results?.[0];
+      if (!r) setMsg({ ok: false, text: "ยังไม่ได้บันทึกเกณฑ์" });
+      else if (r.error) setMsg({ ok: false, text: r.error });
+      else setMsg({ ok: true, text: `ช่วง ${r.lot_window?.from || "-"} ถึง ${r.lot_window?.to || "-"}: จะได้สิทธิ์ ${r.pending} คน · lot ไม่ถึง ${r.below_lots || 0} คน · มีอยู่แล้ว ${r.already} คน` });
+    } catch (e) { setMsg({ ok: false, text: e.message }); }
+    setBusy("");
+  }
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-[var(--ink-2)]">
+      <label className="inline-flex items-center gap-1.5 cursor-pointer">
+        <input type="checkbox" checked={on} onChange={(e) => setOn(e.target.checked)} />
+        ให้อัตโนมัติเมื่อ lot รวม
+      </label>
+      <input type="number" min="0" step="0.01" value={min} disabled={!on} onChange={(e) => setMin(e.target.value)}
+        className="w-16 rounded-md border border-[var(--line-strong)] bg-[var(--surface)] px-1.5 py-0.5 disabled:opacity-50" />
+      <span>lot ขึ้นไป ใน</span>
+      <input type="number" min="1" max="90" value={days} disabled={!on} onChange={(e) => setDays(e.target.value)}
+        className="w-14 rounded-md border border-[var(--line-strong)] bg-[var(--surface)] px-1.5 py-0.5 disabled:opacity-50" />
+      <span>วันล่าสุด</span>
+      <button onClick={save} disabled={!dirty || !!busy} className="rounded-md bg-brand-600 px-2 py-0.5 font-medium text-white disabled:opacity-40">{busy === "save" ? "..." : "บันทึก"}</button>
+      {on0 && !dirty && <button onClick={preview} disabled={!!busy} className="rounded-md border border-[var(--line-strong)] px-2 py-0.5 hover:bg-[var(--ground)] disabled:opacity-50">{busy === "check" ? "กำลังนับ..." : "ดูว่าจะได้กี่คน"}</button>}
+      {msg && <span className={msg.ok ? "text-emerald-700" : "text-rose-600"}>{msg.text}</span>}
     </div>
   );
 }
@@ -1803,7 +1856,7 @@ export function SavedRepliesPanel({ allowedPages = null }) {
   async function load() {
     const { data } = await supabase.from("saved_replies").select("*").order("sort").order("created_at");
     // จำกัดสิทธิ์: เห็นเฉพาะข้อความกลาง (ทุกเพจ) + ข้อความของเพจที่ตัวเองมีสิทธิ์
-    setItems((data || []).filter((r) => !r.page_id || pageOk(r.page_id)));
+    setItems((data || []).filter((r) => !r.page_id || pageOk(r.page_id)).map((r) => ({ ...r, _sort0: r.sort })));
   }
   useEffect(() => {
     load();
@@ -1870,7 +1923,7 @@ export function SavedRepliesPanel({ allowedPages = null }) {
     const triggers = String(it.line_triggers_text ?? (it.line_triggers || []).join(", ")).split(/[,\n]/).map((t) => t.trim()).filter(Boolean);
     const payload = { page_id: it.page_id || null, brand_id: it.brand_id || null, title: it.title || null, message: it.message || "", image_urls: imgs, image_url: imgs[0] || null, line_triggers: triggers, updated_at: new Date().toISOString() };
     if (it.id) await supabase.from("saved_replies").update(payload).eq("id", it.id);
-    else await supabase.from("saved_replies").insert(payload);
+    else await supabase.from("saved_replies").insert({ ...payload, sort: Math.min(10, ...items.filter((x) => x.id).map((x) => Number(x.sort) || 0)) - 10 });   // ของใหม่ขึ้นบนสุด แล้วค่อยจัดอันดับเอง
     setSaving(""); load();
   }
   // บีบรูปเก่าที่อัปไว้ก่อนมีการย่อรูปอัตโนมัติ — รูปคลังคำตอบถูกโหลดซ้ำบ่อยที่สุดในระบบ
@@ -1919,13 +1972,35 @@ export function SavedRepliesPanel({ allowedPages = null }) {
     if (it.id) { if (!window.confirm("ลบข้อความนี้?")) return; await supabase.from("saved_replies").delete().eq("id", it.id); }
     setItems((list) => list.filter((_, i) => i !== idx));
   }
+  // จัดอันดับ — บนสุด = สำคัญสุด ขึ้นก่อนในหน้าตอบแชท (หน้าตอบแชทเรียงตาม sort)
+  // เลื่อนแล้วเรียงเลขใหม่ทั้งรายการ (10, 20, 30…) บันทึกเฉพาะแถวที่เลขเปลี่ยน
+  const [ordering, setOrdering] = useState(false);
+  async function move(id, to) {
+    const drafts = items.filter((x) => !x.id);          // ข้อความใหม่ที่ยังไม่บันทึก อยู่บนสุดเหมือนเดิม
+    const list = items.filter((x) => x.id);
+    const from = list.findIndex((x) => x.id === id);
+    if (from < 0 || to < 0 || to >= list.length || to === from || ordering) return;
+    const [it] = list.splice(from, 1);
+    list.splice(to, 0, it);
+    const next = list.map((x, i) => ({ ...x, sort: (i + 1) * 10 }));
+    const changed = next.filter((x) => x.sort !== x._sort0);
+    setItems([...drafts, ...next]);
+    setOrdering(true);
+    const results = await Promise.all(changed.map((x) => supabase.from("saved_replies").update({ sort: x.sort }).eq("id", x.id)));
+    setOrdering(false);
+    const failed = results.find((r) => r.error);
+    if (failed) { alert("บันทึกลำดับไม่สำเร็จ: " + failed.error.message); load(); return; }
+    setItems((cur) => cur.map((x) => (x.id ? { ...x, _sort0: x.sort } : x)));
+  }
   if (!items) return <div className="bg-[var(--surface)] rounded-2xl border border-[var(--line)] p-5 shadow-sm"><Spinner label="กำลังโหลด..." /></div>;
+  const savedIds = items.filter((x) => x.id).map((x) => x.id);
+  const savedCount = savedIds.length;
   return (
     <div className="bg-[var(--surface)] rounded-2xl border border-[var(--line)] p-5 shadow-sm space-y-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h3 className="font-semibold text-[var(--ink)]">ข้อความบันทึกไว้</h3>
-          <p className="text-xs text-[var(--ink-3)] mt-0.5">ข้อความสำเร็จรูปสำหรับกดใช้ในหน้า "ตอบแชท" (แนบรูปได้) · เลือกได้ว่าใช้ทุกเพจหรือเฉพาะเพจ</p>
+          <p className="text-xs text-[var(--ink-3)] mt-0.5">ข้อความสำเร็จรูปสำหรับกดใช้ในหน้า "ตอบแชท" (แนบรูปได้) · เลือกได้ว่าใช้ทุกเพจหรือเฉพาะเพจ · จัดอันดับด้วยลูกศร — อันดับ 1 = สำคัญสุด ขึ้นก่อนในหน้าตอบแชท</p>
         </div>
         <div className="flex items-center gap-2">
           <button onClick={shrinkOldImages} disabled={!!shrink?.running} title="ย่อรูปที่ใหญ่เกิน 400 KB ให้เล็กลง โหลดเร็วขึ้นและประหยัดโควตา"
@@ -1950,6 +2025,18 @@ export function SavedRepliesPanel({ allowedPages = null }) {
       <div className="space-y-3">
         {items.map((it, idx) => (
           <div key={it.id || it.tmp} className="rounded-xl border border-[var(--line)] p-3 space-y-2">
+            {it.id && (() => { const rank = savedIds.indexOf(it.id); return (
+              <div className="flex items-center gap-1.5">
+                <span className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full px-1.5 text-[11px] font-bold ${rank < 3 ? "bg-brand-600 text-white" : "bg-[var(--ground)] text-[var(--ink-2)]"}`}>{rank + 1}</span>
+                <span className="text-[11px] text-[var(--ink-3)]">อันดับ</span>
+                <div className="ml-auto flex items-center gap-1">
+                  {[["บนสุด", 0, rank === 0], ["▲", rank - 1, rank === 0], ["▼", rank + 1, rank >= savedCount - 1], ["ล่างสุด", savedCount - 1, rank >= savedCount - 1]].map(([label, to, off]) => (
+                    <button key={label} type="button" onClick={() => move(it.id, to)} disabled={off || ordering}
+                      className="rounded-md border border-[var(--line-strong)] px-2 py-1 text-[11px] text-[var(--ink-2)] hover:bg-[var(--ground)] disabled:opacity-30">{label}</button>
+                  ))}
+                </div>
+              </div>
+            ); })()}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <input value={it.title || ""} onChange={(e) => setField(idx, "title", e.target.value)} placeholder="หัวข้อ (เช่น ทักทาย, ราคา, วิธีสมัคร)" className="rounded-lg border border-[var(--line-strong)] px-3 py-2 text-sm" />
               <select value={it.brand_id || ""} onChange={(e) => setField(idx, "brand_id", e.target.value ? Number(e.target.value) : null)} className="rounded-lg border border-[var(--line-strong)] px-3 py-2 text-sm bg-[var(--surface)]">
