@@ -559,8 +559,11 @@ html:not(.dark) .chat-bubble-me * { color: #FFFFFF; }
 
 /* แผงลูกค้าด้านขวา: ลดช่องไฟเพื่อคืนพื้นที่ให้บทสนทนา แต่ยังแสดงข้อมูลทุกส่วน */
 .chat-customer-panel > .chat-customer-form,
-.chat-customer-panel > .chat-insights { gap: .5rem; }
-.chat-customer-panel > * + * { margin-top: .75rem !important; }
+.chat-customer-panel > .chat-insights,
+.chat-panel-work > .chat-customer-form,
+.chat-panel-work > .chat-insights { gap: .5rem; }
+.chat-customer-panel > * + *,
+.chat-panel-work > * + * { margin-top: .75rem !important; }
 .chat-customer-panel .chat-customer-form > * + *,
 .chat-customer-panel .chat-insights > * + * { margin-top: .5rem !important; }
 .chat-customer-panel .chat-customer-form { padding-top: .6rem; margin-top: 0; }

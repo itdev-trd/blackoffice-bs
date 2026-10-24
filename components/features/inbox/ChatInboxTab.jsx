@@ -94,6 +94,7 @@ const LIST_COLS = "id, customer_name, last_user_text, last_reply_text, last_repl
 
 const CHAT_OPEN_COLS = "id, page_id, page_name, psid, customer_name, source, stage, stage_manual, classified_by, needs_ai, needs_verify, manual_data, manual_data_by, manual_data_at, trade_id, username, phone, email, address, awaiting_reply, unread, read_at, cust_read_at, cust_lang, country, broker, profile_pic, transcript, account_opened_at, entry_ad_id, entry_ad_name, last_user_text, last_reply_text, last_reply_by, last_reply_at, last_message_at, comment_ad_name, comment_ad_ids, comment_ad_names, comment_is_ad, comment_promoted_to_inbox, comment_permalink, blocked_at, synced_at, updated_at, notes, tags, ai_summary, ai_summary_at, not_interested_at, purge_at";
 
+const FORM_IDLE_MS = 120_000;  // ล็อคแชท: ไม่แตะฟอร์มข้อมูลลูกค้า/เพิ่มสิทธิ์นานเท่านี้ = ปล่อยห้อง
 const TAKEOVER_WAIT_S = 30;   // ล็อคแชท: คนถือล็อคมีเวลากี่วินาทีให้ตอบคำขอตอบแทน ก่อนยกให้อัตโนมัติ
 
 export default function ChatInboxTab({ allowedPages = null, alertAllowed = true, alertMin = 3, alertPages = [], alertSound = true, alertNew = true, gotoChat = null, onGotoDone, active = true }) {
@@ -186,7 +187,13 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   const [claimSince, setClaimSince] = useState(null);
   const claimSinceRef = useRef(null);
   const lastBeatRef = useRef(0);
+  const lockedByRef = useRef(null);
   const replyRef = useRef("");
+  // ทำงานในฟอร์มข้อมูลลูกค้า/เพิ่มสิทธิ์อินดิเคเตอร์/เช็คไอดีเทรด = จองห้องเหมือนกำลังพิมพ์ตอบ
+  // (เคยเจอ: แอดมินกำลังเพิ่มสิทธิ์ อีกคนพิมพ์ตอบแทรก ล็อคไปตกที่คนพิมพ์ ฟอร์มคนแรกโดนปิด เพิ่มสิทธิ์ไม่สำเร็จ)
+  // นับว่ายังทำอยู่ถ้ามีการแตะ/พิมพ์ในฟอร์มภายใน FORM_IDLE_MS · มือถือเปิดแท็บ "ข้อมูลลูกค้า"/"เช็คไอดีเทรด" ก็นับทันที
+  const formActiveAtRef = useRef(0);
+  const [formActiveTick, setFormActiveTick] = useState(0);
   // ตอนกดข้อความบันทึก จดเวลาข้อความฝั่งเพจล่าสุดที่เครื่องเรา "เห็น" ไว้ (0 = ยังไม่ได้กด)
   // ก่อนส่งเทียบกับประวัติจริงในฐานข้อมูล — มีข้อความฝั่งเพจใหม่กว่านั้น = มีคนตอบไปแล้ว กันส่งข้อความบันทึกซ้ำ
   // เทียบกับเวลาข้อความ ไม่ใช่นาฬิกาเครื่อง (นาฬิกาแต่ละเครื่องไม่ตรงกัน) และไม่กรองด้วยอีเมล (ทีมใช้บัญชีร่วมกันหลายเครื่อง)
@@ -1056,6 +1063,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   useEffect(() => {
     setPeers({});
     setClaimSince(null); claimSinceRef.current = null; lastBeatRef.current = 0;
+    formActiveAtRef.current = 0;
     typingChanRef.current = null;
     const id = selected?.id;
     if (!active || !id) return;
@@ -1114,6 +1122,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     return all[0] || null;
   })();
   const lockedBy = lockHolder && lockHolder.client !== typingClientRef.current ? lockHolder : null;
+  lockedByRef.current = lockedBy;
   // ถูกล็อค = ปิดทุกโหมดของห้องนี้ (ตอบแชท/เช็คไอดีเทรด/ข้อมูลลูกค้า) — ไม่ render เนื้อหาเลย ไม่ใช่แค่บังไว้
   const activeCompose = lockedBy ? "reply" : activeComposeRaw;
   // เพจดูอย่างเดียว (เช่น Jr 1Shot): ดึงมาสรุปข้อมูล — ไม่มีกล่องตอบ/ป้าย Meta (server ปฏิเสธซ้ำอยู่แล้ว)
@@ -1122,14 +1131,35 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
 
   // มีร่างคำตอบ = จองห้อง · ลบร่างหมด/ส่งแล้ว = ปล่อย
   // ร่าง = ข้อความ หรือ ไฟล์/รูปที่แนบรอส่ง — ข้อความบันทึกบางอันมีแต่รูป ถ้านับแค่ข้อความ สองคนจะส่งรูปชุดเดียวกันซ้ำได้
+  // มือถือ: เปิดแท็บข้อมูลลูกค้า/เช็คไอดีเทรดค้างไว้ = จองตลอด (ถ้าเดินหนีไป อีกคนกด "ขอตอบแทน" ได้ — ไม่ตอบ 30 วิยกให้เอง)
+  const nonReplyModeRef = useRef(false);
+  nonReplyModeRef.current = !hasSidePanel && composeMode !== "reply";
+  const formBusy = () => nonReplyModeRef.current || (!!formActiveAtRef.current && Date.now() - formActiveAtRef.current < FORM_IDLE_MS);
   useEffect(() => {
     replyRef.current = reply;
-    const has = !!reply.trim() || pendingFiles.length > 0;
-    if (has && claimSinceRef.current == null) { claimSinceRef.current = Date.now(); setClaimSince(claimSinceRef.current); }
-    if (!has) savedPickAtRef.current = 0;
+    const draft = !!reply.trim() || pendingFiles.length > 0;
+    const has = draft || formBusy();
+    if (has && claimSinceRef.current == null && !lockedByRef.current) { claimSinceRef.current = Date.now(); setClaimSince(claimSinceRef.current); }
+    if (!draft) savedPickAtRef.current = 0;
     if (!has && claimSinceRef.current != null && claimSinceRef.current > 0) releaseClaim();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reply, pendingFiles.length]);
+  }, [reply, pendingFiles.length, formActiveTick]);
+  // แตะ/พิมพ์ในฟอร์ม = ยังทำงานอยู่ (อัปเดต state อย่างมากทุก 5 วิ) · หมดเวลาแล้วตัวจับเวลาด้านล่างปล่อยล็อคให้
+  const markFormActivity = () => {
+    if (lockedByRef.current) return;   // ห้องถูกคนอื่นถืออยู่ ไม่แย่ง
+    const now = Date.now();
+    const was = formActiveAtRef.current;
+    formActiveAtRef.current = now;
+    if (!was || now - was > 5000 || claimSinceRef.current == null) setFormActiveTick(now);
+  };
+  const clearFormActivity = () => { formActiveAtRef.current = 0; setFormActiveTick(Date.now()); };
+  useEffect(() => {
+    if (!formActiveAtRef.current) return;
+    const iv = setInterval(() => { if (!formBusy()) clearFormActivity(); }, 5000);
+    return () => clearInterval(iv);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formActiveTick]);
+  const formActivityProps = { onPointerDownCapture: markFormActivity, onKeyDownCapture: markFormActivity, onInputCapture: markFormActivity, onChangeCapture: markFormActivity };
 
   // ล็อคกันได้แค่ตอนพิมพ์พร้อมกัน — ถ้าอีกคนส่งเร็วแล้วปล่อยล็อคไปแล้ว ร่างข้อความบันทึกที่ค้างอยู่ของเราจะส่งซ้ำได้
   // จึงอ่านประวัติล่าสุดของห้องนี้ (แถวเดียว) ก่อนส่ง: มีคนอื่นตอบหลังเวลาที่เรากดข้อความบันทึก = ไม่ให้ส่ง
@@ -1157,7 +1187,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
         lastBeatRef.current = now; claimSinceRef.current = now; setClaimSince(now); return;
       }
       // กดขอตอบแทนแล้วไม่พิมพ์อะไรใน 15 วิ = คืนล็อค
-      if (claimSince < 0 && !replyRef.current.trim() && now + claimSince > 15000) { releaseClaim(); return; }
+      if (claimSince < 0 && !replyRef.current.trim() && !formBusy() && now + claimSince > 15000) { releaseClaim(); return; }
       lastBeatRef.current = now;
       typingChanRef.current?.send({ type: "broadcast", event: "typing", payload: { by: myEmail, client: typingClientRef.current, since: claimSince } });
     };
@@ -2580,6 +2610,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     setMessageMenu(null);
     setAddressDraft({ text: String(text || ""), at: Date.now() });
     if (!hasSidePanel) setComposeMode("customer");
+    markFormActivity();
   }
   async function quickSaveField(field, value, key) {
     if (!selected) return;
@@ -3335,7 +3366,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                     <button
                       key={key}
                       type="button"
-                      onClick={() => setComposeMode(key)}
+                      onClick={() => { setComposeMode(key); if (key === "reply") clearFormActivity(); else markFormActivity(); }}
                       className={`flex-1 rounded-lg px-2 py-1.5 text-[12px] font-medium transition ${
                         composeMode === key
                           ? "bg-night-accent text-white shadow-sm"
@@ -3349,12 +3380,12 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                 )}
 
                 {activeCompose === "trade" && (
-                  <div className="max-h-[32vh] overflow-y-auto overscroll-contain rounded-xl border border-night-border p-3">
+                  <div {...formActivityProps} className="max-h-[32vh] overflow-y-auto overscroll-contain rounded-xl border border-night-border p-3">
                     <TradeIdChecker darkMode />
                   </div>
                 )}
                 {activeCompose === "customer" && (
-                  <div className="max-h-[32vh] overflow-y-auto overscroll-contain rounded-xl border border-night-border px-3 py-2.5">
+                  <div {...formActivityProps} className="max-h-[32vh] overflow-y-auto overscroll-contain rounded-xl border border-night-border px-3 py-2.5">
                     <CustomerDataForm
                       darkMode
                       compact
@@ -3611,7 +3642,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
             </div>
             {lockedBy ? (
               <div className="chat-lock-panel">{renderLockCard(true)}</div>
-            ) : <>
+            ) : <div {...formActivityProps} className="chat-panel-work">
             <CustomerDataForm darkMode addressDraft={addressDraft} row={selected} onSaved={(v) => { setSelected((s) => (s ? { ...s, ...v } : s)); setList((l) => (l || []).map((x) => (x.id === selected.id ? { ...x, ...v } : x))); }} />
             {isBeSightPage(selected) && <TradeIdChecker darkMode />}
             <ConversationInsights />
@@ -3620,7 +3651,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
               className={`w-full rounded-lg px-3 py-2 text-sm font-medium flex items-center justify-center gap-1.5 disabled:opacity-50 ${selected.blocked_at ? "border border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/15" : "border border-rose-500/40 text-rose-400 hover:bg-rose-500/15"}`}>
               {blocking ? <Loader2 className="animate-spin" size={14} /> : <AlertTriangle size={14} />} {selected.blocked_at ? "ปลดบล็อก" : "บล็อก (สแปม)"}
             </button>
-            </>}
+            </div>}
           </div>
         )}
       </div>
