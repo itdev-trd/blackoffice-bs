@@ -94,7 +94,7 @@ const LIST_COLS = "id, customer_name, last_user_text, last_reply_text, last_repl
 
 const CHAT_OPEN_COLS = "id, page_id, page_name, psid, customer_name, source, stage, stage_manual, classified_by, needs_ai, needs_verify, manual_data, manual_data_by, manual_data_at, trade_id, username, phone, email, address, awaiting_reply, unread, read_at, cust_read_at, cust_lang, country, broker, profile_pic, transcript, account_opened_at, entry_ad_id, entry_ad_name, last_user_text, last_reply_text, last_reply_by, last_reply_at, last_message_at, comment_ad_name, comment_ad_ids, comment_ad_names, comment_is_ad, comment_promoted_to_inbox, comment_permalink, blocked_at, synced_at, updated_at, notes, tags, ai_summary, ai_summary_at, not_interested_at, purge_at";
 
-const FORM_IDLE_MS = 120_000;  // ล็อคแชท: ไม่แตะฟอร์มข้อมูลลูกค้า/เพิ่มสิทธิ์นานเท่านี้ = ปล่อยห้อง
+const FORM_IDLE_MS = 60_000;   // ล็อคแชท (คอม): ไม่พิมพ์/กดปุ่มในฟอร์มข้อมูลลูกค้า/เพิ่มสิทธิ์นานเท่านี้ = ปล่อยห้อง
 const TAKEOVER_WAIT_S = 30;   // ล็อคแชท: คนถือล็อคมีเวลากี่วินาทีให้ตอบคำขอตอบแทน ก่อนยกให้อัตโนมัติ
 
 export default function ChatInboxTab({ allowedPages = null, alertAllowed = true, alertMin = 3, alertPages = [], alertSound = true, alertNew = true, gotoChat = null, onGotoDone, active = true }) {
@@ -1132,8 +1132,11 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   // มีร่างคำตอบ = จองห้อง · ลบร่างหมด/ส่งแล้ว = ปล่อย
   // ร่าง = ข้อความ หรือ ไฟล์/รูปที่แนบรอส่ง — ข้อความบันทึกบางอันมีแต่รูป ถ้านับแค่ข้อความ สองคนจะส่งรูปชุดเดียวกันซ้ำได้
   // มือถือ: เปิดแท็บข้อมูลลูกค้า/เช็คไอดีเทรดค้างไว้ = จองตลอด (ถ้าเดินหนีไป อีกคนกด "ขอตอบแทน" ได้ — ไม่ตอบ 30 วิยกให้เอง)
+  // คอม (เมาส์) ไม่จองค้างแบบนี้ — แค่คลิกดูแท็บข้อมูลลูกค้าบนจอแคบเคยทำให้ห้องค้างว่า "กำลังตอบ" ทั้งที่ไม่ได้ทำอะไร
+  const isTouchRef = useRef(false);
+  if (typeof window !== "undefined") isTouchRef.current = !!window.matchMedia?.("(pointer: coarse)")?.matches;
   const nonReplyModeRef = useRef(false);
-  nonReplyModeRef.current = !hasSidePanel && composeMode !== "reply";
+  nonReplyModeRef.current = isTouchRef.current && !hasSidePanel && composeMode !== "reply";
   const formBusy = () => nonReplyModeRef.current || (!!formActiveAtRef.current && Date.now() - formActiveAtRef.current < FORM_IDLE_MS);
   useEffect(() => {
     replyRef.current = reply;
@@ -1159,7 +1162,12 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     return () => clearInterval(iv);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formActiveTick]);
-  const formActivityProps = { onPointerDownCapture: markFormActivity, onKeyDownCapture: markFormActivity, onInputCapture: markFormActivity, onChangeCapture: markFormActivity };
+  // นับเฉพาะ "ลงมือทำ": พิมพ์/แก้ช่อง/กดปุ่ม/ติ๊กเลือก — คลิกเข้าไปในช่องเฉย ๆ เพื่อดูหรือก็อปข้อมูลไม่นับ
+  const onFormPointer = (e) => {
+    if (isTouchRef.current && !hasSidePanel) { markFormActivity(); return; }
+    if (e.target?.closest?.("button, select, [role='button'], input[type='checkbox'], input[type='radio']")) markFormActivity();
+  };
+  const formActivityProps = { onPointerDownCapture: onFormPointer, onInputCapture: markFormActivity, onChangeCapture: markFormActivity };
 
   // ล็อคกันได้แค่ตอนพิมพ์พร้อมกัน — ถ้าอีกคนส่งเร็วแล้วปล่อยล็อคไปแล้ว ร่างข้อความบันทึกที่ค้างอยู่ของเราจะส่งซ้ำได้
   // จึงอ่านประวัติล่าสุดของห้องนี้ (แถวเดียว) ก่อนส่ง: มีคนอื่นตอบหลังเวลาที่เรากดข้อความบันทึก = ไม่ให้ส่ง
@@ -3366,7 +3374,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                     <button
                       key={key}
                       type="button"
-                      onClick={() => { setComposeMode(key); if (key === "reply") clearFormActivity(); else markFormActivity(); }}
+                      onClick={() => { setComposeMode(key); if (key === "reply") clearFormActivity(); else if (isTouchRef.current) markFormActivity(); }}
                       className={`flex-1 rounded-lg px-2 py-1.5 text-[12px] font-medium transition ${
                         composeMode === key
                           ? "bg-night-accent text-white shadow-sm"
