@@ -1,7 +1,8 @@
 import "./globals.css";
 import "./studio.css";
 import "./nova.css";
-import { Noto_Sans_Thai, Roboto } from "next/font/google";
+import "./settings-pro.css";
+import { Fira_Code, Fira_Sans, Noto_Sans_Thai, Roboto } from "next/font/google";
 import UpdateBanner from "@/components/shared/UpdateBanner";
 import KeyboardViewport from "@/components/shared/KeyboardViewport";
 import AuthListener from "@/components/shared/AuthListener";
@@ -20,6 +21,11 @@ const roboto = Roboto({
   weight: ["400", "500", "600", "700"],
   display: "swap",
 });
+
+// ฟอนต์หน้าตั้งค่า (สไตล์ ui-ux-pro-max: Fira Sans + Fira Code สำหรับรหัส/ตัวเลข) — ไทยตกไปใช้ Noto Sans Thai
+// preload: false = ไม่โหลดล่วงหน้าทุกหน้า โหลดเฉพาะเมื่อหน้าตั้งค่าใช้จริง
+const firaSans = Fira_Sans({ variable: "--font-fira-sans", subsets: ["latin"], weight: ["400", "500", "600", "700"], display: "swap", preload: false });
+const firaCode = Fira_Code({ variable: "--font-fira-code", subsets: ["latin"], weight: ["400", "500", "600"], display: "swap", preload: false });
 
 export const metadata = {
   title: "Besight — ระบบยิงโฆษณาและตอบแชทอัตโนมัติ",
@@ -63,7 +69,7 @@ export const viewport = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="th" suppressHydrationWarning className={`${notoSansThai.variable} ${roboto.variable}`}>
+    <html lang="th" suppressHydrationWarning className={`${notoSansThai.variable} ${roboto.variable} ${firaSans.variable} ${firaCode.variable}`}>
       <head>
         {/* ทาคลาสธีมก่อนหน้าจอวาด — ไม่งั้นเห็นจอขาวแวบก่อนกลายเป็นมืด
             ต้องเป็น inline script เพราะ React hydrate ทีหลังเสมอ */}

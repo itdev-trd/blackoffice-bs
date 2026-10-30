@@ -1,0 +1,229 @@
+/* =====================================================================
+   หน้าตั้งค่า — สไตล์ใหม่ตาม ui-ux-pro-max (28 ต.ค. 69)
+   design system: Glassmorphism · slate + เขียว status (#22C55E) · Fira Sans / Fira Code · density 8 (แดชบอร์ด)
+   ทำเฉพาะใต้ .settings-pro — หน้าอื่นไม่กระทบ
+   ตัวแปรสี (--surface/--ink/--line/--brand) ถูก override ในขอบเขตนี้ แผงย่อยทุกอันที่ใช้ตัวแปรอยู่แล้วจึงเปลี่ยนตามเอง
+   ธีมสว่าง/มืดยังสลับตามปุ่มของแอป (html.dark) · คอนทราสต์ตัวอักษรทุกคู่ ≥ 4.5:1
+   ===================================================================== */
+
+.settings-pro {
+  /* ธีมสว่าง: กระจกขาวบนพื้น slate อ่อน */
+  --sp-bg: #EEF2F6;
+  --sp-glass: rgb(255 255 255 / .72);
+  --sp-glass-strong: rgb(255 255 255 / .88);
+  --sp-glass-border: rgb(15 23 42 / .08);
+  --sp-highlight: rgb(255 255 255 / .9);
+  --sp-shadow: 0 1px 2px rgb(15 23 42 / .04), 0 8px 24px rgb(15 23 42 / .06);
+  --sp-accent: #22C55E;          /* พื้นปุ่ม/แถบ active (ตัวอักษรบนพื้นนี้ใช้ --sp-on-accent) */
+  --sp-on-accent: #052E16;
+  --sp-accent-text: #15803D;     /* ตัวอักษรสีเขียวบนพื้นสว่าง 5.0:1 */
+  --sp-accent-soft: rgb(34 197 94 / .12);
+  --sp-ring: rgb(34 197 94 / .45);
+
+  --ground: transparent;
+  --surface: var(--sp-glass);
+  --surface-2: rgb(241 245 249 / .8);
+  --line: rgb(15 23 42 / .09);
+  --line-strong: rgb(15 23 42 / .18);
+  --ink: #0F172A;
+  --ink-2: #334155;
+  --ink-3: #5B6B80;              /* 5.0:1 บนกระจกขาว */
+  --brand: var(--sp-accent-text);
+  --brand-strong: #166534;
+  --brand-soft: var(--sp-accent-soft);
+  --radius-card: 14px;
+  --radius-control: 10px;
+
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  font-family: var(--font-fira-sans), var(--font-noto-sans-thai), system-ui, sans-serif;
+  color: var(--ink-2);
+}
+html.dark .settings-pro {
+  /* ธีมมืด: ค่าที่ skill แนะนำตรงตัว (Dark tech + status green) */
+  --sp-bg: #0F172A;
+  --sp-glass: rgb(27 35 54 / .72);   /* #1B2336 card */
+  --sp-glass-strong: rgb(27 35 54 / .9);
+  --sp-glass-border: rgb(255 255 255 / .08);
+  --sp-highlight: rgb(255 255 255 / .06);
+  --sp-shadow: 0 1px 2px rgb(0 0 0 / .3), 0 12px 32px rgb(0 0 0 / .28);
+  --sp-on-accent: #0F172A;
+  --sp-accent-text: #4ADE80;     /* 9.6:1 บนการ์ดมืด */
+  --sp-accent-soft: rgb(34 197 94 / .14);
+
+  --surface-2: #272F42;           /* muted */
+  --line: rgb(148 163 184 / .16);
+  --line-strong: #475569;
+  --ink: #F8FAFC;
+  --ink-2: #CBD5E1;
+  --ink-3: #94A3B8;               /* 6.3:1 บนการ์ดมืด */
+  --brand-strong: #22C55E;
+}
+
+/* พื้นหลังไล่เฉด + แสงเขียวจาง ๆ ให้กระจกมีอะไรให้เบลอ */
+.settings-pro::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 520px;
+  z-index: -1;
+  border-radius: 28px;
+  background:
+    radial-gradient(600px 260px at 12% 0%, rgb(34 197 94 / .16), transparent 70%),
+    radial-gradient(520px 240px at 92% 10%, rgb(56 189 248 / .12), transparent 70%),
+    linear-gradient(180deg, var(--sp-bg), transparent);
+  pointer-events: none;
+}
+
+/* ---------- กระจก (ใช้ซ้ำ) ---------- */
+.settings-pro .sp-hero,
+.settings-pro .sp-nav-desktop,
+.settings-pro .sp-nav,
+.settings-pro .sp-content > :is(.bg-white, .ds-card, section, form),
+.settings-pro .sp-content > div > :is(.bg-white, .ds-card) {
+  background: var(--sp-glass) !important;
+  border: 1px solid var(--sp-glass-border) !important;
+  border-radius: 16px !important;
+  box-shadow: inset 0 1px 0 var(--sp-highlight), var(--sp-shadow) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  backdrop-filter: blur(16px) saturate(140%);
+}
+
+/* ---------- หัวหน้า ---------- */
+.settings-pro .sp-hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 20px 22px;
+}
+.settings-pro .sp-eyebrow { font-family: var(--font-fira-code), monospace; font-size: 11px; font-weight: 600; letter-spacing: .14em; color: var(--sp-accent-text); }
+.settings-pro .sp-title { margin-top: 4px; font-size: 26px; line-height: 1.2; font-weight: 700; color: var(--ink); }
+.settings-pro .sp-subtitle { margin-top: 4px; font-size: 13.5px; line-height: 1.5; color: var(--ink-3); }
+.settings-pro .sp-hero-side { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; width: min(100%, 340px); }
+.settings-pro .sp-search {
+  position: relative; display: flex; align-items: center; gap: 8px; width: 100%;
+  min-height: 42px; padding: 0 12px;
+  border: 1px solid var(--line-strong); border-radius: 12px;
+  background: var(--sp-glass-strong); color: var(--ink-3);
+  transition: border-color .18s ease, box-shadow .18s ease;
+}
+.settings-pro .sp-search:focus-within { border-color: var(--sp-accent); box-shadow: 0 0 0 3px var(--sp-ring); }
+.settings-pro .sp-search input { flex: 1; min-width: 0; border: 0 !important; background: transparent !important; box-shadow: none !important; padding: 0; font-size: 14px; color: var(--ink); outline: none; }
+.settings-pro .sp-search input::placeholder { color: var(--ink-3); }
+.settings-pro .sp-search button { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; color: var(--ink-3); cursor: pointer; }
+.settings-pro .sp-search button:hover { background: var(--surface-2); color: var(--ink); }
+.settings-pro .sp-crumb { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-3); }
+.settings-pro .sp-crumb b { font-weight: 600; color: var(--ink); }
+
+/* ---------- เลย์เอาต์ ---------- */
+.settings-pro .sp-layout { display: flex; flex-direction: column; gap: 16px; align-items: stretch; }
+@media (min-width: 768px) {
+  .settings-pro .sp-layout { flex-direction: row; align-items: flex-start; gap: 20px; }
+  .settings-pro .sp-aside { width: 264px; flex-shrink: 0; }
+}
+
+/* ---------- เมนูหัวข้อ ---------- */
+.nova-main[data-page] .settings-pro .sp-nav-desktop,
+.settings-pro .sp-nav-desktop {
+  position: sticky; top: 88px;
+  gap: 2px;
+  width: auto; max-height: calc(100dvh - 120px); overflow: auto;
+  padding: 10px;
+}
+.settings-pro .sp-nav { flex-direction: column; gap: 2px; padding: 8px; }   /* display มาจากคลาส Tailwind (flex / md:hidden) */
+.settings-pro .sp-nav-group + .sp-nav-group { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--line); }
+.settings-pro .sp-nav-group-head {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  min-height: 36px; padding: 6px 10px; border-radius: 10px;
+  font-size: 11.5px; font-weight: 600; letter-spacing: .02em; color: var(--ink-3);
+  cursor: pointer; transition: color .15s ease, background-color .15s ease;
+}
+.settings-pro .sp-nav-group-head > span:first-child { flex: 1; text-align: left; }
+.settings-pro .sp-nav-group-head:hover { color: var(--ink); background: var(--surface-2); }
+.settings-pro .sp-nav-count { font-family: var(--font-fira-code), monospace; font-size: 10.5px; padding: 1px 6px; border-radius: 999px; background: var(--surface-2); color: var(--ink-3); }
+.settings-pro .sp-nav-chevron { transition: transform .2s ease; }
+.settings-pro .sp-nav-items { display: flex; flex-direction: column; gap: 2px; padding: 2px 0 4px; }
+.settings-pro .sp-nav-item {
+  position: relative; display: flex; align-items: center; gap: 10px; width: 100%;
+  min-height: 40px; padding: 8px 10px; border-radius: 10px;
+  font-size: 13px; font-weight: 500; text-align: left; color: var(--ink-2);
+  cursor: pointer; transition: background-color .15s ease, color .15s ease;
+}
+.settings-pro .sp-nav-item:hover { background: var(--surface-2); color: var(--ink); }
+.settings-pro .sp-nav-item.is-active { background: var(--sp-accent-soft); color: var(--ink); font-weight: 600; }
+.settings-pro .sp-nav-item.is-active::before {
+  content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; border-radius: 3px;
+  background: var(--sp-accent); box-shadow: 0 0 10px rgb(34 197 94 / .6);
+}
+.settings-pro .sp-nav-icon {
+  display: grid; place-items: center; width: 28px; height: 28px; flex-shrink: 0;
+  border-radius: 8px; background: var(--surface-2); color: var(--ink-3);
+  transition: background-color .15s ease, color .15s ease;
+}
+.settings-pro .sp-nav-item.is-active .sp-nav-icon { background: var(--sp-accent); color: var(--sp-on-accent); }
+.settings-pro .sp-nav-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-pro .sp-nav-go { color: var(--ink-3); flex-shrink: 0; }
+.settings-pro .sp-empty { padding: 14px; text-align: center; font-size: 12.5px; color: var(--ink-3); }
+/* มือถือ: แตะง่าย ≥ 44px */
+@media (max-width: 767px) {
+  .settings-pro .sp-nav-item { min-height: 48px; font-size: 14px; }
+  .settings-pro .sp-nav-group-head { min-height: 44px; font-size: 12.5px; }
+  .settings-pro .sp-hero { padding: 16px; }
+  .settings-pro .sp-title { font-size: 22px; }
+  .settings-pro .sp-hero-side { width: 100%; align-items: stretch; }
+  .settings-pro .sp-crumb { display: none; }
+}
+
+/* ---------- เนื้อหา ---------- */
+.settings-pro .sp-content { display: flex; flex-direction: column; gap: 16px; }
+.settings-pro .sp-back { align-items: center; gap: 6px; min-height: 44px; font-size: 14px; font-weight: 500; color: var(--ink-2); }
+.settings-pro .sp-back-cur { color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-pro .sp-section-head { display: flex; align-items: center; gap: 12px; padding: 2px 2px 0; }
+.settings-pro .sp-section-icon {
+  display: grid; place-items: center; width: 40px; height: 40px; flex-shrink: 0; border-radius: 12px;
+  background: var(--sp-accent); color: var(--sp-on-accent); box-shadow: 0 6px 18px rgb(34 197 94 / .28);
+}
+.settings-pro .sp-section-group { font-size: 11.5px; font-weight: 600; letter-spacing: .02em; color: var(--ink-3); }
+.settings-pro .sp-section-title { font-size: 19px; line-height: 1.3; font-weight: 700; color: var(--ink); }
+
+/* แผงย่อยเดิม (เขียนด้วย Tailwind) — ปรับให้เข้าธีมโดยไม่ต้องแก้ทีละไฟล์ */
+.nova-main[data-page] .settings-pro .sp-content > :is(.bg-white, .ds-card, section) { padding: 20px !important; }
+.settings-pro .sp-content :is(h3, h4) { color: var(--ink); }
+.settings-pro .sp-content :is(.rounded-2xl) { border-radius: 16px; }
+.settings-pro .sp-content :is(.rounded-xl, .rounded-lg) { border-radius: 12px; }
+.settings-pro .sp-content :is(.border-slate-100, .border-slate-200, .border-\[var\(--line\)\]) { border-color: var(--line) !important; }
+
+/* ช่องกรอก */
+.settings-pro .sp-content :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([type="color"]), select, textarea) {
+  background-color: var(--sp-glass-strong);
+  border-color: var(--line-strong);
+  color: var(--ink);
+  border-radius: 10px;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.settings-pro .sp-content :is(input, select, textarea)::placeholder { color: var(--ink-3); }
+.settings-pro .sp-content :is(input, select, textarea):focus { outline: none; border-color: var(--sp-accent); box-shadow: 0 0 0 3px var(--sp-ring); }
+.settings-pro .sp-content :is(input[type="checkbox"], input[type="radio"]) { accent-color: var(--sp-accent); }
+
+/* ปุ่มหลัก (bg-brand-600 / ds-btn-primary) = เขียว status ตัวอักษรเข้ม */
+.settings-pro :is(.bg-brand-600, .ds-btn-primary) { background-color: var(--sp-accent) !important; color: var(--sp-on-accent) !important; border-color: transparent !important; }
+.settings-pro :is(.hover\:bg-brand-700:hover, .ds-btn-primary:hover:not(:disabled)) { background-color: #16A34A !important; }
+.settings-pro :is(.text-brand-600, .text-brand-700) { color: var(--sp-accent-text) !important; }
+.settings-pro :is(.bg-brand-50) { background-color: var(--sp-accent-soft) !important; }
+
+/* โฟกัสคีย์บอร์ดชัดทุกปุ่ม/ลิงก์ */
+.settings-pro :is(button, a, [role="button"], summary):focus-visible { outline: 2px solid var(--sp-accent); outline-offset: 2px; border-radius: 10px; }
+.settings-pro :is(button, a, [role="button"], summary, label[for], select) { cursor: pointer; }
+.settings-pro :is(button:disabled) { cursor: not-allowed; }
+
+/* รหัส/ตัวเลข/ID ใช้ Fira Code */
+.settings-pro :is(.font-mono, code, kbd, pre) { font-family: var(--font-fira-code), ui-monospace, monospace; }
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-pro *, .settings-pro *::before { transition: none !important; animation: none !important; }
+}

@@ -40,7 +40,7 @@ import AdTargetingCard from "@/components/features/settings/AdTargetingCard";
 import ImportOldDbPanel from "@/components/features/settings/ImportOldDbPanel";
 import ChatMenuPanel from "@/components/features/settings/ChatMenuPanel";
 import MetaSyncHealthPanel from "@/components/features/settings/MetaSyncHealthPanel";
-import { EmptyState, SectionTitle } from "@/components/ui";
+import { EmptyState } from "@/components/ui";
 import {
   AiAssistPanel,
   BrandAssetUploader,
@@ -1417,96 +1417,87 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
     return <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-sm text-amber-800">ยังไม่ได้รับสิทธิ์เข้าถึงหัวข้อย่อยในหน้าตั้งค่า</div>;
   }
 
-  return (
-    <div className="w-full max-w-[1400px] space-y-5 settings-page">
-      <SectionTitle eyebrow="WORKSPACE SETTINGS" title="ตั้งค่า" subtitle="ปรับการทำงานของระบบ คีย์ API สิทธิ์ผู้ใช้ และงานอัตโนมัติ" />
-      <div className="settings-page-overview ds-card flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
-          <div className="text-sm font-semibold text-[var(--ink)]">{cur.label}</div>
-        </div>
-        <div className="relative w-full sm:max-w-xs">
-          <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--ink-3)]" />
-          <input
-            value={sectionQuery}
-            onChange={(e) => setSectionQuery(e.target.value)}
-            placeholder="ค้นหาหัวข้อตั้งค่า..."
-            className="w-full rounded-control border border-[var(--line-strong)] bg-[var(--surface)] py-2.5 pl-9 pr-3 text-sm"
-          />
-        </div>
-      </div>
-      <div className="settings-page-layout flex flex-col md:flex-row gap-4">
-      {/* แถบเมนูตั้งค่า — มือถือ: โชว์เป็นลิสต์เหมือนหน้าโฮม (ซ่อนเมื่อเข้าไปดูหัวข้อ) */}
-      <div className={`settings-page-nav md:w-56 shrink-0 ${mobileDetail ? "hidden md:block" : "block"}`}>
-        {/* มือถือ: ลิสต์หัวข้อแนวตั้งแบบเมนูหน้าโฮม แตะเพื่อเข้าไปดูเนื้อหา */}
-        <nav className="md:hidden flex flex-col gap-2 bg-[var(--surface)] rounded-2xl border border-[var(--line)] p-2">
-          {groupedSections.map((group) => (
-            <div key={group.label} className="settings-nav-group rounded-xl border border-slate-100 overflow-hidden">
-              <button
-                type="button"
-                onClick={() => setOpenSettingsGroups((open) => ({ ...open, [group.label]: !(open[group.label] ?? group.items.some((s) => s.key === section)) }))}
-                className="flex w-full items-center justify-between gap-2 px-3 py-2.5 text-left hover:bg-[var(--ground)]"
-              >
-                <span className="text-sm font-bold text-[var(--ink-3)]">{group.label}</span>
-                <ChevronDown size={15} className={`text-[var(--ink-3)] transition-transform ${(openSettingsGroups[group.label] ?? group.items.some((s) => s.key === section)) ? "" : "-rotate-90"}`} />
-              </button>
-              {(openSettingsGroups[group.label] ?? group.items.some((s) => s.key === section)) && group.items.map((s) => (
-                <button
-                  key={s.key}
-                  onClick={() => { setSection(s.key); setOpenSettingsGroups((open) => ({ ...open, [group.label]: true })); setMobileDetail(true); window.scrollTo({ top: 0, behavior: "smooth" }); }}
-                  className={`flex w-full items-center gap-2 px-4 py-2 text-xs font-medium text-left ${section === s.key ? "bg-brand-50 text-brand-700" : "text-[var(--ink-2)] hover:bg-[var(--ground)]"}`}
-                >
-                  <s.icon size={15} className="shrink-0 text-[var(--ink-3)]" />
-                  <span className="truncate flex-1">{s.label}</span>
-                  <ChevronDown size={15} className="-rotate-90 text-[var(--ink-3)] shrink-0" />
+  // กลุ่มที่เปิดอยู่: ค่าที่ผู้ใช้กดไว้ ไม่งั้นเปิดเฉพาะกลุ่มที่มีหัวข้อปัจจุบัน · ค้นหาอยู่ = เปิดทุกกลุ่ม
+  const groupOpen = (group) => sectionQuery.trim() ? true : (openSettingsGroups[group.label] ?? group.items.some((s) => s.key === section));
+  const toggleGroup = (group) => setOpenSettingsGroups((open) => ({ ...open, [group.label]: !groupOpen(group) }));
+  const curGroup = settingsGroups.find((g) => g.keys.includes(cur.key));
+  const pick = (key, groupLabel, mobile = false) => {
+    setSection(key);
+    setOpenSettingsGroups((open) => ({ ...open, [groupLabel]: true }));
+    if (mobile) { setMobileDetail(true); window.scrollTo({ top: 0, behavior: "smooth" }); }
+  };
+  // รายการเมนูตั้งค่า — ใช้ร่วมกันทั้งมือถือ (ลิสต์เต็มจอ) และคอม (แถบข้างติดขอบ)
+  const navList = (mobile) => (
+    <>
+      {groupedSections.map((group) => (
+        <div key={group.label} className="sp-nav-group">
+          <button type="button" className="sp-nav-group-head" onClick={() => toggleGroup(group)} aria-expanded={groupOpen(group)}>
+            <span>{group.label}</span>
+            <span className="sp-nav-count">{group.items.length}</span>
+            <ChevronDown size={14} className={`sp-nav-chevron ${groupOpen(group) ? "" : "-rotate-90"}`} aria-hidden="true" />
+          </button>
+          {groupOpen(group) && (
+            <div className="sp-nav-items">
+              {group.items.map((s) => (
+                <button key={s.key} type="button" onClick={() => pick(s.key, group.label, mobile)}
+                  className={`sp-nav-item ${section === s.key ? "is-active" : ""}`} aria-current={section === s.key ? "page" : undefined}>
+                  <span className="sp-nav-icon"><s.icon size={16} aria-hidden="true" /></span>
+                  <span className="sp-nav-label">{s.label}</span>
+                  {mobile && <ChevronDown size={15} className="-rotate-90 sp-nav-go" aria-hidden="true" />}
                 </button>
               ))}
             </div>
-          ))}
-          {filteredSections.length === 0 && <div className="p-3 text-center text-xs text-[var(--ink-3)]">ไม่พบหัวข้อนี้</div>}
-        </nav>
+          )}
+        </div>
+      ))}
+      {filteredSections.length === 0 && <div className="sp-empty">ไม่พบหัวข้อ "{sectionQuery}"</div>}
+    </>
+  );
 
-        {/* เดสก์ท็อป: รายการแนวตั้งติดขอบจอ */}
-        <div className="settings-page-nav-desktop hidden md:flex md:flex-col gap-1 bg-[var(--surface)] rounded-2xl border border-[var(--line)] p-2 md:sticky md:top-24">
-          {groupedSections.map((group) => (
-            <div key={group.label} className="settings-nav-group">
-              <button
-                type="button"
-                onClick={() => setOpenSettingsGroups((open) => ({ ...open, [group.label]: !(open[group.label] ?? group.items.some((s) => s.key === section)) }))}
-                className="flex w-full items-center justify-between gap-2 px-3 pb-1 pt-2 text-left hover:text-[var(--ink-2)]"
-              >
-                <span className="text-xs font-bold text-[var(--ink-3)]">{group.label}</span>
-                <ChevronDown size={14} className={`text-[var(--ink-3)] transition-transform ${(openSettingsGroups[group.label] ?? group.items.some((s) => s.key === section)) ? "" : "-rotate-90"}`} />
-              </button>
-              {(openSettingsGroups[group.label] ?? group.items.some((s) => s.key === section)) && group.items.map((s) => (
-                <button
-                  key={s.key}
-                  onClick={() => { setSection(s.key); setOpenSettingsGroups((open) => ({ ...open, [group.label]: true })); }}
-                  className={`flex w-full items-center gap-2 px-3 py-1.5 rounded-control text-xs font-medium whitespace-nowrap text-left shrink-0 border-l-[3px] ${
-                    section === s.key
-                      ? "border-brand-600 bg-brand-50 text-brand-700"
-                      : "border-transparent text-[var(--ink-2)] hover:bg-[var(--ground)]"
-                  }`}
-                >
-                  <s.icon size={16} /> <span className="truncate">{s.label}</span>
-                </button>
-              ))}
-            </div>
-          ))}
-          {filteredSections.length === 0 && <div className="p-3 text-center text-xs text-[var(--ink-3)]">ไม่พบหัวข้อนี้</div>}
+  return (
+    <div className="w-full max-w-[1400px] settings-page settings-pro">
+      {/* หัวหน้า: ชื่อหน้า + หัวข้อปัจจุบัน + ค้นหาหัวข้อ */}
+      <header className="sp-hero">
+        <div className="sp-hero-text">
+          <div className="sp-eyebrow">WORKSPACE SETTINGS</div>
+          <h1 className="sp-title">ตั้งค่า</h1>
+          <p className="sp-subtitle">ปรับการทำงานของระบบ คีย์ API สิทธิ์ผู้ใช้ และงานอัตโนมัติ</p>
         </div>
-      </div>
+        <div className="sp-hero-side">
+          <label className="sp-search">
+            <Search size={16} aria-hidden="true" />
+            <input value={sectionQuery} onChange={(e) => setSectionQuery(e.target.value)} placeholder="ค้นหาหัวข้อตั้งค่า..." aria-label="ค้นหาหัวข้อตั้งค่า" />
+            {sectionQuery && <button type="button" onClick={() => setSectionQuery("")} aria-label="ล้างคำค้น">✕</button>}
+          </label>
+          <div className="sp-crumb">
+            <span>{curGroup?.label || "ตั้งค่า"}</span>
+            <ChevronDown size={13} className="-rotate-90" aria-hidden="true" />
+            <b>{cur.label}</b>
+          </div>
+        </div>
+      </header>
+
+      <div className="settings-page-layout sp-layout">
+        {/* มือถือ: ลิสต์หัวข้อเต็มจอ (ซ่อนเมื่อเข้าไปดูหัวข้อ) · คอม: แถบข้างติดขอบ */}
+        <aside className={`settings-page-nav sp-aside ${mobileDetail ? "hidden md:block" : "block"}`}>
+          <nav className="sp-nav flex md:hidden" aria-label="หัวข้อตั้งค่า">{navList(true)}</nav>
+          <nav className="settings-page-nav-desktop sp-nav sp-nav-desktop hidden md:flex" aria-label="หัวข้อตั้งค่า">{navList(false)}</nav>
+        </aside>
 
       {/* เนื้อหาของหมวดที่เลือก — มือถือโชว์เฉพาะตอนเข้าไปในหัวข้อ (มีปุ่มย้อนกลับ) */}
-      <div className={`settings-page-content flex-1 min-w-0 space-y-6 ${mobileDetail ? "block" : "hidden md:block"}`}>
-        {/* มือถือ: ปุ่มย้อนกลับไปลิสต์เมนู + ชื่อหัวข้อปัจจุบัน */}
-        <button
-          onClick={() => { setMobileDetail(false); window.scrollTo({ top: 0, behavior: "smooth" }); }}
-          className="md:hidden flex items-center gap-2 text-sm font-medium text-[var(--ink-2)] hover:text-[var(--ink)] -mb-2"
-        >
-          <ChevronDown size={18} className="rotate-90 shrink-0" />
+      <div className={`settings-page-content sp-content flex-1 min-w-0 ${mobileDetail ? "block" : "hidden md:block"}`}>
+        <button type="button" onClick={() => { setMobileDetail(false); window.scrollTo({ top: 0, behavior: "smooth" }); }} className="sp-back flex md:hidden">
+          <ChevronDown size={18} className="rotate-90 shrink-0" aria-hidden="true" />
           <span>ตั้งค่า</span>
-          {cur && <span className="text-[var(--ink-3)]">/ {cur.label}</span>}
+          <span className="sp-back-cur">/ {cur.label}</span>
         </button>
+        <div className="sp-section-head">
+          <span className="sp-section-icon"><cur.icon size={18} aria-hidden="true" /></span>
+          <div className="min-w-0">
+            <div className="sp-section-group">{curGroup?.label}</div>
+            <h2 className="sp-section-title">{cur.label}</h2>
+          </div>
+        </div>
       {section === "general" && (
         <AiAssistPanel
           onApplied={handleAiApplied}
