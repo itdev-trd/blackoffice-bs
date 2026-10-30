@@ -596,6 +596,11 @@ html:not(.dark) .chat-bubble-me * { color: #FFFFFF; }
 }
 .chat-tool-button:hover,
 .chat-tool-button.is-active { color: var(--brand-strong); background: var(--brand-soft); }
+/* ปุ่ม AI ร่างคำตอบ — สีม่วงแยกจากเครื่องมือทั่วไป ให้รู้ว่าเป็นข้อความที่ AI เขียน ต้องตรวจก่อนส่ง */
+.chat-tool-ai { color: #7C3AED; border-color: rgb(124 58 237 / .35); background: rgb(124 58 237 / .08); }
+.chat-tool-ai:hover { color: #6D28D9; background: rgb(124 58 237 / .14); }
+html.dark .chat-tool-ai { color: #C4B5FD; }
+html.dark .chat-tool-ai:hover { color: #DDD6FE; }
 
 /* รายการแชทบนมือถือ/แท็บเล็ต — compact แต่ยังคงชื่อเพจ, ช่องทาง, ค้นหา และตัวกรองครบ */
 @media (max-width: 1023px) {

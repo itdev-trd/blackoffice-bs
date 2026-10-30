@@ -21,6 +21,7 @@ import {
   Instagram,
   MoreVertical,
   Lock,
+  Sparkles,
 } from "lucide-react";
 import { supabase, SUPABASE_URL, SUPABASE_ANON_KEY } from "@/lib/supabase/client";
 import { lsGet, lsSet } from "@/lib/utils/storage";
@@ -138,6 +139,8 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   const [savedOpen, setSavedOpen] = useState(false);
   const [savedErr, setSavedErr] = useState("");
   const [knowledgeOpen, setKnowledgeOpen] = useState(false);
+  // AI ร่างคำตอบ: { loading } ระหว่างรอ · { reply, confidence, note, sources } หลังได้ร่าง · { error }
+  const [aiDraft, setAiDraft] = useState(null);
   const [knowledgeQuery, setKnowledgeQuery] = useState("");
   const [knowledgeResults, setKnowledgeResults] = useState([]);
   const [knowledgeLoading, setKnowledgeLoading] = useState(false);
@@ -722,6 +725,33 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     setKnowledgeResults(data.items || []);
   }
 
+  // AI อ่านบทสนทนา + คำตอบที่แอดมินเคยใช้จริง แล้วร่างข้อความมาใส่ช่องพิมพ์ (ไม่ส่งเอง ต้องตรวจแล้วกดส่ง)
+  //   force = "ร่างใหม่" (ไม่ใช้ร่างเดิมที่แคชไว้) · ร่างใหม่จะแทนร่างเดิมในช่องพิมพ์ ไม่ต่อท้ายซ้อน
+  async function requestAiDraft(force = false) {
+    if (!selected?.id || aiDraft?.loading) return;
+    const chatId = selected.id;
+    const prevReply = aiDraft?.chatId === chatId ? aiDraft.reply : null;
+    setAiDraft({ loading: true, chatId }); setSavedOpen(false); setKnowledgeOpen(false);
+    // กันปุ่มหมุนค้าง: เซิร์ฟเวอร์ลองใหม่เองได้ราว 60 วิ เกินกว่านั้นถือว่าล้ม
+    const timeout = new Promise((resolve) => setTimeout(() => resolve({ data: { ok: false, error: "AI ใช้เวลานานเกินไป — ลองกดใหม่อีกครั้ง" } }), 70_000));
+    const { data, error } = await Promise.race([supabase.functions.invoke("chat-ai-draft", { body: { id: chatId, force } }), timeout]);
+    if (selRef.current?.id !== chatId) return;   // เปลี่ยนห้องไปแล้ว ทิ้งผล
+    if (error || !data?.ok) {
+      const detail = data?.error || (await error?.context?.json?.().catch(() => null))?.error;
+      // FunctionsFetchError = ต่อเซิร์ฟเวอร์ไม่ได้ (เน็ตหลุด/ฟังก์ชันยังไม่ deploy) — ข้อความอังกฤษดิบไม่บอกว่าต้องทำอะไร
+      setAiDraft({ error: detail || (error?.name === "FunctionsFetchError" ? "ติดต่อระบบ AI ไม่ได้ — เช็คอินเทอร์เน็ตแล้วกดอีกครั้ง" : error?.message) || "AI ร่างคำตอบไม่สำเร็จ", chatId });
+      return;
+    }
+    setAiDraft({ ...data, chatId });
+    setReply((r) => {
+      const cur = r.trim();
+      if (!cur || (prevReply && cur === prevReply.trim())) return data.reply;   // ช่องว่าง หรือยังเป็นร่างเดิมที่ไม่ได้แก้ = แทนที่
+      return `${cur}\n${data.reply}`;
+    });
+    setSendPreview(null);
+    replyInputRef.current?.focus();
+  }
+
   function openKnowledgeSearch() {
     const latest = [...(selected?.transcript || [])].reverse().find((m) => m?.w === "u" && String(m?.t || "").trim());
     const term = latest ? (thOf(latest) || latest.t) : "";
@@ -764,14 +794,17 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   }
 
   async function loadList({ refreshAfterCurrent = false, lean = false } = {}) {
+    // แท็บ "ทั้งหมด"/LINE ไม่ใช้ตัวเลือกเพจ (ดู applyListFilters) — ไม่นับในกุญแจ
+    // ไม่งั้นตอนโหลดตัวเลือกเพจที่บันทึกไว้เสร็จ จะดึงลิสต์ 200 ห้องเดิมซ้ำอีกรอบ (~1.5 วิ)
+    const usesPageSel = listTab !== "everything" && listTab !== "line";
     const key = JSON.stringify({
       listTab,
       showBlocked,
       showDropped,
       unreadOnly,
-      pageMode: pageSel.mode,
-      pageSingle: pageSel.single || null,
-      pageMulti: pageSel.multi || [],
+      pageMode: usesPageSel ? pageSel.mode : null,
+      pageSingle: usesPageSel ? pageSel.single || null : null,
+      pageMulti: usesPageSel ? pageSel.multi || [] : [],
       allowedPages,
     });
     latestListKeyRef.current = key;
@@ -791,6 +824,8 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     const timeout = setTimeout(() => controller.abort(), 15_000);
     const promise = (async () => {
       try {
+        // รอรู้ก่อนว่าคนนี้เห็นเพจเพิ่มเติมไหม (แคชไว้ ~0.1 วิ ครั้งแรกเท่านั้น) — ไม่งั้นต้องดึงลิสต์ 200 ห้องซ้ำอีกรอบ
+        await loadChatPageAccess();
         let query = applyListFilters(supabase.from("chat_customers")
           .select(LIST_COLS)
           .order("last_message_at", { ascending: false }).limit(LIST_PAGE));
@@ -1438,8 +1473,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   useEffect(() => {
     (async () => {
       // เพจเพิ่มเติมที่คนนี้มีสิทธิ์เห็น (เช่น Jr 1Shot) — โหลดก่อนสร้างตัวเลือกเพจ · มีเพจเพิ่ม = โหลดลิสต์ใหม่ให้ครบ
-      const access = await loadChatPageAccess();
-      if (access.extra.length) loadRef.current();
+      await loadChatPageAccess();   // loadList รอตัวนี้อยู่แล้ว ไม่ต้องโหลดลิสต์ซ้ำ
       const { data } = await supabase.from("page_lead_config").select("page_id, page_name, picture_url").order("page_name");
       const opts = (data || []).map((p) => ({ id: p.page_id, name: p.page_name || p.page_id })).filter((o) => isChatPage(o.id) && (!allowedPages || allowedPages.includes(o.id)));
       setPageOptions(opts);
@@ -1485,7 +1519,10 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     syncCommentReplies();
     syncInstagramRecent();
   }, [active, pageSel.mode, pageSel.single, pageSel.multi.join(","), pageOptions.map((page) => page.id).join(",")]);
-  useEffect(() => { setList(null); loadList(); }, [pageSel.mode, pageSel.single, pageSel.multi.join(",")]);
+  useEffect(() => {
+    if (listTab === "everything" || listTab === "line") return;   // แท็บนี้ไม่กรองตามเพจ — ลิสต์เดิมใช้ได้เลย ไม่ต้องดึงใหม่
+    setList(null); loadList();
+  }, [pageSel.mode, pageSel.single, pageSel.multi.join(",")]);
   useEffect(() => () => {
     openRequestRef.current.controller?.abort();
     clearTimeout(unreadRefreshTimerRef.current);
@@ -1574,7 +1611,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     const preloaded = cachedChat(item.id);
     setSelected(preloaded || { ...item, transcript: null });
     logActivity("open_chat", { id: item.id, customer_name: item.customer_name, page_id: item.page_id });
-    setTranslations({}); setReply(""); setSendPreview(null); setSendMsg(""); setFailedText(""); setAdSources([]); setAdLoading(false); setSavedReplies([]); setSavedOpen(false); setKnowledgeOpen(false); setKnowledgeResults([]); setReplyTo(null); setMessageMenu(null); setKnowledgeCapture(null); setKnowledgeCaptureMsg(""); setEmojiOpen(false); setInfoOpen(false); setComposeMode("reply"); setLabelMsg(null); setQuickFillState({}); setAddressDraft(null);
+    setTranslations({}); setReply(""); setSendPreview(null); setSendMsg(""); setFailedText(""); setAdSources([]); setAdLoading(false); setSavedReplies([]); setSavedOpen(false); setKnowledgeOpen(false); setKnowledgeResults([]); setAiDraft(null); setReplyTo(null); setMessageMenu(null); setKnowledgeCapture(null); setKnowledgeCaptureMsg(""); setEmojiOpen(false); setInfoOpen(false); setComposeMode("reply"); setLabelMsg(null); setQuickFillState({}); setAddressDraft(null);
     setForceLang(item.source === "line" ? "Thai" : lsGet(`ui.forceLang.${item.id}`, "auto"));   // LINE เป็นภาษาไทย ไม่ต้องแปล
     // LINE OA ใช้ภาษาไทย ไม่ต้องเรียกตัวแปลหรือสร้างคำแปลใต้ข้อความ
     const translationPromise = item.source === "line" ? null : supabase.functions.invoke("messenger-reply", { body: { action: "translate", id: item.id } });
@@ -3484,6 +3521,24 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                     </div>
                   </div>
                 )}
+                {aiDraft && aiDraft.chatId === selected.id && !aiDraft.loading && (
+                  <div className={`flex items-start justify-between gap-2 rounded-lg px-3 py-2 mb-1 text-xs border ${aiDraft.error ? "border-rose-500/40 bg-rose-500/10 text-rose-300" : "border-violet-500/30 bg-violet-500/10 text-night-ink-2"}`}>
+                    {aiDraft.error ? <span className="flex flex-wrap items-center gap-x-2">{aiDraft.error}<button onClick={() => requestAiDraft(true)} className="underline underline-offset-2">ลองอีกครั้ง</button></span> : (
+                      <div className="min-w-0 space-y-1">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                          <span className="font-semibold text-violet-300 inline-flex items-center gap-1"><Sparkles size={12} /> AI ร่างให้แล้ว — ตรวจ/แก้ก่อนส่ง</span>
+                          <span className={aiDraft.confidence >= 0.7 ? "text-emerald-400" : aiDraft.confidence >= 0.4 ? "text-amber-400" : "text-rose-400"}>มั่นใจ {Math.round(aiDraft.confidence * 100)}%</span>
+                          <button onClick={() => requestAiDraft(true)} disabled={!!lockedBy} className="text-violet-300 underline underline-offset-2 hover:text-violet-200 disabled:opacity-40">ร่างใหม่</button>
+                        </div>
+                        {aiDraft.note && <div className="text-amber-300 whitespace-pre-wrap">{aiDraft.note}</div>}
+                        {aiDraft.sources?.some((s) => s.used) && (
+                          <div className="text-night-ink-3 line-clamp-2">อ้างอิง: {aiDraft.sources.filter((s) => s.used).map((s) => s.kind === "saved" ? `ข้อความบันทึก "${s.title || ""}"` : s.kind === "knowledge" ? "คลังคำตอบ" : `คำตอบที่แอดมินเคยใช้ ${s.uses} ครั้ง`).join(" · ")}</div>
+                        )}
+                      </div>
+                    )}
+                    <button onClick={() => setAiDraft(null)} className="text-night-ink-3 hover:text-night-ink shrink-0"><X size={14} /></button>
+                  </div>
+                )}
                 {replyTo && (
                   <div className="flex items-start justify-between gap-2 bg-night-surface2 rounded-lg px-3 py-2 mb-1 text-xs">
                     <div className="min-w-0 flex items-start gap-2">
@@ -3529,6 +3584,11 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                   <input ref={fileInputRef} type="file" multiple className="hidden" onChange={onFile} accept="image/*,video/*,application/pdf" />
                   <button onClick={() => setSavedOpen((o) => !o)} className={`chat-tool-button chat-tool-saved ${savedOpen ? "is-active" : ""}`} title="ข้อความตอบกลับที่บันทึกไว้"><MessageSquare size={16} /><span>ข้อความบันทึก</span><b>{savedReplies.length}</b></button>
                   <button onClick={openKnowledgeSearch} className={`chat-tool-button chat-tool-knowledge ${knowledgeOpen ? "is-active" : ""}`} title="ค้นหาคำตอบเก่าที่อนุมัติแล้ว"><Search size={16} /><span>คลังคำตอบ</span></button>
+                  {!isCommentChat(selected) && !isReadOnlyChatPage(selected.page_id) && (
+                    <button onClick={() => requestAiDraft(false)} disabled={!!lockedBy || aiDraft?.loading} className="chat-tool-button chat-tool-ai disabled:opacity-40" title="ให้ AI ร่างคำตอบจากบทสนทนา + คำตอบที่แอดมินเคยใช้จริง (ไม่ส่งเอง)">
+                      {aiDraft?.loading && aiDraft.chatId === selected.id ? <Loader2 className="animate-spin" size={16} /> : <Sparkles size={16} />}<span>{aiDraft?.loading && aiDraft.chatId === selected.id ? "กำลังร่าง..." : "AI ร่าง"}</span>
+                    </button>
+                  )}
                   <span className="ml-auto text-[10px] text-night-ink-3 font-mono hidden sm:inline">Ctrl+↵ ส่ง</span>
                 </div>
                 </>)}
