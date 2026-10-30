@@ -1511,7 +1511,17 @@ function CampaignOverviewView({ initialResult, campaignIds, range, textModel, on
     : !expRange.since || !expRange.until ? "เลือกวันเริ่มและวันสิ้นสุดให้ครบ"
     : expRange.since > expRange.until ? "วันเริ่มต้องไม่เกินวันสิ้นสุด"
     : expRange.until > todayStr ? "วันสิ้นสุดต้องไม่เกินวันนี้" : "";
-  const exportRange = () => (expRange.custom ? { preset: "custom", since: expRange.since, until: expRange.until } : range);
+  // เลือกวันเอง = แก้ช่องวันได้อิสระ แต่ไฟล์ใช้ช่วงที่ "กดอัปเดตแล้ว" เท่านั้น (แบบตัวเลือกวันของ Ads Manager)
+  //   กันพลาด: เลือกวันเริ่มแล้วกดดาวน์โหลดทันทีก่อนเลือกวันจบ = ได้ไฟล์ผิดช่วงโดยไม่รู้ตัว
+  const [expApplied, setExpApplied] = useState(null);   // { since, until } ที่ยืนยันแล้ว
+  const expDirty = expRange.custom && (!expApplied || expApplied.since !== expRange.since || expApplied.until !== expRange.until);
+  const expBlocked = !!expRangeError || expDirty;
+  const exportRange = () => (expRange.custom && expApplied ? { preset: "custom", since: expApplied.since, until: expApplied.until } : range);
+  const applyExpRange = () => { if (!expRangeError) setExpApplied({ since: expRange.since, until: expRange.until }); };
+  const cancelExpRange = () => {
+    if (expApplied) setExpRange((r) => ({ ...r, since: expApplied.since, until: expApplied.until }));
+    else setExpRange((r) => ({ ...r, custom: false }));
+  };
   const [dashItem, setDashItem] = useState(() => lsGet("ov.dashItem", null));
   const [expandedCamps, setExpandedCamps] = useState(() => lsGet("ov.expandedCamps", {}));
   const toggleCamp = (id) => setExpandedCamps((prev) => ({ ...prev, [id]: !prev[id] }));
@@ -1532,7 +1542,7 @@ function CampaignOverviewView({ initialResult, campaignIds, range, textModel, on
 
   // สรุปรายแคมเปญ: ช่วงตามรายงาน = ใช้ผลที่อยู่บนจอ (รวมคำวิเคราะห์ AI) · ช่วงกำหนดเอง = ดึงตัวเลขช่วงนั้นใหม่
   async function runSummary(label, fn) {
-    if (expRangeError) return;
+    if (expBlocked) return;
     logActivity("export", { format: label, name: "รายงานแคมเปญ", range: rangeLabel(exportRange()) });
     if (!expRange.custom) { fn(result); return; }
     setTrackerBusy("กำลังดึงตัวเลขช่วงที่เลือก...");
@@ -1547,7 +1557,7 @@ function CampaignOverviewView({ initialResult, campaignIds, range, textModel, on
 
   async function runTrackerAll(fmt) {
     const camps = result.campaigns || [];
-    if (!camps.length || expRangeError) return;
+    if (!camps.length || expBlocked) return;
     setTrackerBusy(`กำลังดึง 0/${camps.length} แคมเปญ...`);
     logActivity("export", { format: `งบยิง Ads รวมแคมเปญ (${fmt})`, count: camps.length, range: rangeLabel(exportRange()) });
     try {
@@ -1612,7 +1622,19 @@ function CampaignOverviewView({ initialResult, campaignIds, range, textModel, on
                           </label>
                         </div>
                       )}
+                      {expRange.custom && (
+                        <div className="flex items-center justify-end gap-1.5 pt-0.5">
+                          <button type="button" onClick={cancelExpRange} disabled={!expDirty}
+                            className="rounded-md border border-slate-200 px-2.5 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40">ยกเลิก</button>
+                          <button type="button" onClick={applyExpRange} disabled={!expDirty || !!expRangeError}
+                            className="rounded-md bg-brand-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-brand-700 disabled:opacity-40">อัปเดต</button>
+                        </div>
+                      )}
                       {expRangeError && <div className="text-[10.5px] text-rose-600">{expRangeError}</div>}
+                      {expRange.custom && !expRangeError && expDirty && <div className="text-[10.5px] text-amber-600">กด "อัปเดต" เพื่อยืนยันช่วงวันก่อนดาวน์โหลด</div>}
+                      {expRange.custom && !expDirty && expApplied && (
+                        <div className="text-[10.5px] text-emerald-700">✓ ไฟล์จะใช้ช่วง {[expApplied.since, expApplied.until].map((d) => d.split("-").reverse().join("/")).join(" – ")}</div>
+                      )}
                       {expRange.custom && !expRangeError && <div className="text-[10px] text-slate-400">สรุปรายแคมเปญจะเป็นตัวเลขล้วน (ไม่มีคำวิเคราะห์ AI)</div>}
                     </div>
                     <div className="px-3 pt-1 pb-0.5 text-[10px] font-semibold text-slate-400">สรุปรายแคมเปญ</div>
@@ -1621,7 +1643,7 @@ function CampaignOverviewView({ initialResult, campaignIds, range, textModel, on
                       ["Excel (.xls)", (r) => exportCampaignAnalysisExcel(r)],
                       ["CSV", (r) => exportCampaignAnalysisCsv(r)],
                     ].map(([label, fn]) => (
-                      <button key={label} disabled={!!expRangeError} onClick={() => { setExportMenu(false); runSummary(label, fn); }}
+                      <button key={label} disabled={expBlocked} onClick={() => { setExportMenu(false); runSummary(label, fn); }}
                         className="w-full text-left text-xs px-3 py-2 hover:bg-slate-50 text-slate-700 flex items-center gap-2 disabled:opacity-40 disabled:hover:bg-transparent">
                         <FileDown size={13} className="text-slate-400" /> {label}
                       </button>
@@ -1633,7 +1655,7 @@ function CampaignOverviewView({ initialResult, campaignIds, range, textModel, on
                       ["งบยิง Ads (Excel)", "excel"],
                       ["งบยิง Ads (CSV)", "csv"],
                     ].map(([label, fmt]) => (
-                      <button key={label} disabled={!!expRangeError} onClick={() => { setExportMenu(false); runTrackerAll(fmt); }}
+                      <button key={label} disabled={expBlocked} onClick={() => { setExportMenu(false); runTrackerAll(fmt); }}
                         className="w-full text-left text-xs px-3 py-2 hover:bg-slate-50 text-slate-700 flex items-center gap-2 disabled:opacity-40 disabled:hover:bg-transparent">
                         <FileDown size={13} className="text-emerald-500" /> {label}
                       </button>
