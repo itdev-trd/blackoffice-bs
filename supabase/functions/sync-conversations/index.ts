@@ -27,6 +27,8 @@ const RATE_LIMIT_CODES = new Set([4, 17, 32, 613, 80004]); // Meta rate limit (a
 const READ_STATUS_STATE_KEY = "messenger_read_status_sync";
 const RECENT_STATE_KEY = "messenger_recent_sync";
 const RECENT_COOLDOWN_MS = 5 * 1000;    // cooldown ร่วมต่อเพจ — หลายเครื่อง/หลายแท็บเปิดพร้อมกันก็ยิง Meta รอบเดียว
+const RECENT_GAP_REPAIRS = 3;           // job recent ดึงทั้งห้องเติมช่วงที่ขาดได้รอบละไม่เกินกี่ห้อง (กันโควตา Meta)
+const SYNC_SLACK_MS = 10 * 1000;       // ดึงห้องซ้ำได้ถ้า Meta ขยับไม่เกิน 10 วิก่อนรอบที่แล้ว (Graph อาจยังไม่คืนข้อความล่าสุด)
                                         // 5 วิ เพราะรอบที่ "ไม่มีอะไรใหม่" เสียแค่คำขอเคาะถามใบเดียว (ดูยามด้านล่าง)
 const RECENT_LIMIT = 25;                // Meta เรียง conversations ตาม updated_time ล่าสุดก่อน
 const DEFAULT_READ_STATUS_COOLDOWN_MS = 5 * 60 * 1000;
@@ -553,69 +555,6 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ ok: true, full: true, page: page.name, processed, skipped_old: skippedOld, next_after: done ? null : cursor, done }), { headers: { ...corsHeaders, "content-type": "application/json" } });
     }
 
-    // ================= ซิงก์ "แชทล่าสุด" แบบเบา: 1 คำขอ/เพจ =================
-    // Meta ส่ง webhook ข้อความของลูกค้าทั่วไปให้ไม่ได้จนกว่าแอปจะได้ Advanced Access ของ pages_messaging
-    // (ตอนนี้ push เฉพาะคนที่มี role ในแอป) แชทใหม่จึงเข้าระบบได้ทางเดียวคือ "ดึงเอง"
-    // cron ทุก 15 นาทีช้าเกินสำหรับกล่องตอบแชท จ็อบนี้ให้หน้าเว็บเรียกได้ทุก ~30 วิ
-    // ดึงแค่ 25 ห้องที่ขยับล่าสุด และ upsert เฉพาะห้องที่ updated_time ใหม่กว่าที่เก็บไว้ (กัน WAL/realtime เด้งฟรี)
-    if (job === "recent") {
-      const guard = await getMetaBackgroundGuard(admin);
-      if (guard.blocked) return jsonResp({ ok: true, job, upserted: 0, changed: 0, skipped: "rate_guard" });
-      let recentPages = pages;
-      if (!auth.isService && !(auth.permission && hasFullData(auth.permission))) {
-        recentPages = recentPages.filter((p: any) => auth.permission?.allowedPages.includes(String(p.id)));
-      }
-      if (!recentPages.length) return jsonResp({ ok: true, job, upserted: 0, changed: 0, skipped: "no_pages" });
-      const { data: recentState } = await admin.from("settings").select("value").eq("key", RECENT_STATE_KEY).maybeSingle();
-      const recentBy = (recentState?.value?.last_by_page && typeof recentState.value.last_by_page === "object")
-        ? recentState.value.last_by_page : {};
-      const due = recentPages.filter((p: any) => Date.now() - new Date(recentBy[String(p.id)] || 0).getTime() >= RECENT_COOLDOWN_MS);
-      if (!due.length) return jsonResp({ ok: true, job, upserted: 0, changed: 0, skipped: "cooldown" });
-      const claimedAt = new Date().toISOString();
-      for (const p of due) recentBy[String(p.id)] = claimedAt;
-      // จับคิวก่อนยิง Meta — เครื่องอื่นที่เข้ามาพร้อมกันจะเห็นว่าเพจนี้มีคนดึงอยู่แล้ว
-      await admin.from("settings").upsert({ key: RECENT_STATE_KEY, value: { last_by_page: recentBy }, updated_at: claimedAt });
-      let recentUpserted = 0;
-      let recentChanged = 0;
-      const recentErrors: { page: string; error: string }[] = [];
-      let probedOnly = 0;
-      for (const page of due) {
-        // ---- ยาม: เคาะถามก่อนว่ามีอะไรใหม่ไหม (1 คำขอจิ๋ว) ----
-        // Meta เรียง conversations ตาม updated_time ล่าสุดก่อน ขอแค่ห้องเดียวเอาเฉพาะ id+updated_time
-        // ถ้าไม่ใหม่กว่าที่เก็บไว้ = ไม่มีใครทักเข้ามา จบรอบตรงนี้ ไม่ต้องดึง 25 ห้องพร้อมข้อความ
-        // ทำให้เรียกถี่ทุก 5-7 วินาทีได้โดยไม่เปลืองโควตา (ตอนเงียบเสียแค่คำขอเล็ก ๆ ใบเดียว)
-        const probe = await fetchJson(`${base}/${page.id}/conversations?platform=messenger&fields=id,updated_time&limit=1&access_token=${page.access_token}`, 1);
-        if (!probe?.error) {
-          const newestAt = timeMs(probe?.data?.[0]?.updated_time);
-          const { data: seen } = await admin.from("chat_customers")
-            .select("last_message_at").eq("page_id", String(page.id)).is("source", null)
-            .order("last_message_at", { ascending: false }).limit(1).maybeSingle();
-          const seenAt = timeMs(seen?.last_message_at);
-          if (newestAt && seenAt && newestAt <= seenAt) { probedOnly++; continue; }
-        }
-        const url = `${base}/${page.id}/conversations?platform=messenger&fields=${encodeURIComponent(fieldsQ)}&limit=${RECENT_LIMIT}&access_token=${page.access_token}`;
-        const data = await fetchJson(url, 2);
-        if (data?.error) { recentErrors.push({ page: page.name, error: data.error.message || String(data.error) }); continue; }
-        const convs = (data?.data ?? []) as any[];
-        if (!convs.length) continue;
-        const { data: known } = await admin.from("chat_customers").select("id, last_message_at").in("id", convs.map((c: any) => String(c.id)));
-        const knownAt = new Map((known ?? []).map((r: any) => [String(r.id), timeMs(r.last_message_at)]));
-        const fresh = convs.filter((c: any) => {
-          const prev = knownAt.get(String(c.id));
-          if (prev === undefined) return true;                     // ห้องใหม่ที่ยังไม่มีในฐานข้อมูล
-          const at = timeMs(c.updated_time);
-          return !at || at > prev;                                 // มีความเคลื่อนไหวใหม่กว่าที่เก็บไว้
-        });
-        if (!fresh.length) continue;
-        const rb = await processBatch(page, fresh, false);
-        recentUpserted += rb.upserted;
-        recentChanged += rb.worked;
-      }
-      // มีห้องใหม่/ห้องขยับ = อาจมี ad_id ที่ยังไม่รู้ชื่อ เติมให้เลยด้วยคำขอเดียว
-      const adNamesFilled = recentUpserted > 0 ? await fillMissingAdNames(admin, base, await getMetaToken()) : 0;
-      return jsonResp({ ok: recentErrors.length === 0, job, pages: due.length, probed_only: probedOnly, upserted: recentUpserted, changed: recentChanged, ad_names_filled: adNamesFilled, errors: recentErrors });
-    }
-
     // ================= กู้ประวัติแชทย้อนหลังให้ครบ =================
     // ต้นเหตุที่ประวัติไม่ครบ: ทั้งตอนนำเข้าครั้งแรกและทุกรอบ sync ดึงแค่ messages.limit(chat_sync_config.messages)
     // ข้อความล่าสุดต่อห้อง (ตั้งไว้ 10) ห้องที่คุยกันมาก่อนหน้านั้นจึงเหลือแค่ช่วงท้าย
@@ -678,6 +617,90 @@ Deno.serve(async (req) => {
       const { error: updErr } = await admin.from("chat_customers").update(patch).eq("id", row.id);
       return !updErr && patch.transcript ? merged.length - prevTr.length : 0;
     }
+
+    // ================= ซิงก์ "แชทล่าสุด" แบบเบา: 1 คำขอ/เพจ =================
+    // Meta ส่ง webhook ข้อความของลูกค้าทั่วไปให้ไม่ได้จนกว่าแอปจะได้ Advanced Access ของ pages_messaging
+    // (ตอนนี้ push เฉพาะคนที่มี role ในแอป) แชทใหม่จึงเข้าระบบได้ทางเดียวคือ "ดึงเอง"
+    // cron ทุก 15 นาทีช้าเกินสำหรับกล่องตอบแชท จ็อบนี้ให้หน้าเว็บเรียกได้ทุก ~30 วิ
+    // ดึงแค่ 25 ห้องที่ขยับล่าสุด และ upsert เฉพาะห้องที่ updated_time ใหม่กว่าที่เก็บไว้ (กัน WAL/realtime เด้งฟรี)
+    if (job === "recent") {
+      const guard = await getMetaBackgroundGuard(admin);
+      if (guard.blocked) return jsonResp({ ok: true, job, upserted: 0, changed: 0, skipped: "rate_guard" });
+      let recentPages = pages;
+      if (!auth.isService && !(auth.permission && hasFullData(auth.permission))) {
+        recentPages = recentPages.filter((p: any) => auth.permission?.allowedPages.includes(String(p.id)));
+      }
+      if (!recentPages.length) return jsonResp({ ok: true, job, upserted: 0, changed: 0, skipped: "no_pages" });
+      const { data: recentState } = await admin.from("settings").select("value").eq("key", RECENT_STATE_KEY).maybeSingle();
+      const recentBy = (recentState?.value?.last_by_page && typeof recentState.value.last_by_page === "object")
+        ? recentState.value.last_by_page : {};
+      const due = recentPages.filter((p: any) => Date.now() - new Date(recentBy[String(p.id)] || 0).getTime() >= RECENT_COOLDOWN_MS);
+      if (!due.length) return jsonResp({ ok: true, job, upserted: 0, changed: 0, skipped: "cooldown" });
+      const claimedAt = new Date().toISOString();
+      for (const p of due) recentBy[String(p.id)] = claimedAt;
+      // จับคิวก่อนยิง Meta — เครื่องอื่นที่เข้ามาพร้อมกันจะเห็นว่าเพจนี้มีคนดึงอยู่แล้ว
+      await admin.from("settings").upsert({ key: RECENT_STATE_KEY, value: { last_by_page: recentBy }, updated_at: claimedAt });
+      let recentUpserted = 0;
+      let recentChanged = 0;
+      const recentErrors: { page: string; error: string }[] = [];
+      let probedOnly = 0;
+      let gapRepaired = 0;
+      for (const page of due) {
+        // ---- ยาม: เคาะถามก่อนว่ามีอะไรใหม่ไหม (1 คำขอจิ๋ว) ----
+        // Meta เรียง conversations ตาม updated_time ล่าสุดก่อน ขอแค่ห้องเดียวเอาเฉพาะ id+updated_time
+        // ถ้าไม่ใหม่กว่าที่เก็บไว้ = ไม่มีใครทักเข้ามา จบรอบตรงนี้ ไม่ต้องดึง 25 ห้องพร้อมข้อความ
+        // ทำให้เรียกถี่ทุก 5-7 วินาทีได้โดยไม่เปลืองโควตา (ตอนเงียบเสียแค่คำขอเล็ก ๆ ใบเดียว)
+        const probe = await fetchJson(`${base}/${page.id}/conversations?platform=messenger&fields=id,updated_time&limit=1&access_token=${page.access_token}`, 1);
+        // เทียบกับ synced_at (เวลาที่ดึงห้องนี้จาก Meta ครั้งล่าสุด) ไม่ใช่ last_message_at —
+        // ตอบผ่านเว็บ/webhook echo เลื่อน last_message_at ไปเป็น "ตอนตอบ" ถ้าลูกค้าทักมาก่อนรอบดึงแล้วแอดมินตอบตามทันที
+        // ห้องจะดูเหมือนไม่มีอะไรใหม่และข้อความลูกค้าหายถาวร (เคส Nok Potter 1 พ.ย. 69)
+        // เผื่อ SYNC_SLACK_MS ไว้ เพราะข้อความที่เพิ่งเข้ามาก่อนดึงไม่กี่วินาทีอาจยังไม่โผล่ใน Graph รอบนั้น
+        if (!probe?.error) {
+          const top = probe?.data?.[0];
+          const newestAt = timeMs(top?.updated_time);
+          const { data: seen } = top?.id
+            ? await admin.from("chat_customers").select("synced_at").eq("id", String(top.id)).maybeSingle()
+            : { data: null };
+          const seenAt = timeMs(seen?.synced_at);
+          if (newestAt && seenAt && newestAt <= seenAt - SYNC_SLACK_MS) { probedOnly++; continue; }
+        }
+        const url = `${base}/${page.id}/conversations?platform=messenger&fields=${encodeURIComponent(fieldsQ)}&limit=${RECENT_LIMIT}&access_token=${page.access_token}`;
+        const data = await fetchJson(url, 2);
+        if (data?.error) { recentErrors.push({ page: page.name, error: data.error.message || String(data.error) }); continue; }
+        const convs = (data?.data ?? []) as any[];
+        if (!convs.length) continue;
+        const { data: known } = await admin.from("chat_customers").select("id, synced_at").in("id", convs.map((c: any) => String(c.id)));
+        const knownAt = new Map((known ?? []).map((r: any) => [String(r.id), timeMs(r.synced_at)]));
+        const fresh = convs.filter((c: any) => {
+          const prev = knownAt.get(String(c.id));
+          if (prev === undefined) return true;                     // ห้องใหม่ที่ยังไม่มีในฐานข้อมูล
+          const at = timeMs(c.updated_time);
+          return !at || at > prev - SYNC_SLACK_MS;                 // Meta ขยับหลังจากที่ดึงห้องนี้ครั้งล่าสุด (ดูเหตุผลที่ probe)
+        });
+        if (!fresh.length) continue;
+        const rb = await processBatch(page, fresh, false);
+        recentUpserted += rb.upserted;
+        recentChanged += rb.worked;
+        // รอบนี้ได้มาแค่ msgLimit ข้อความท้ายห้อง — ถ้าข้อความเก่าสุดที่ได้ยังใหม่กว่ารอบที่แล้ว แปลว่าช่วงกลางขาด
+        // (คุยรัวเกิน msgLimit ระหว่างสองรอบ เช่นแอดมินส่งข้อความชุดยาว) ดึงทั้งห้องมาเติมทันที จำกัดรอบละไม่กี่ห้อง
+        const gaps = fresh.filter((c: any) => {
+          const msgs = c.messages?.data ?? [];
+          if (msgs.length < msgLimit) return false;
+          const prev = knownAt.get(String(c.id));
+          const oldest = timeMs(msgs[msgs.length - 1]?.created_time);
+          return prev === undefined || (oldest && oldest > prev - SYNC_SLACK_MS);
+        }).slice(0, RECENT_GAP_REPAIRS);
+        for (const c of gaps) {
+          const got = await recoverRow(page, { id: c.id, message_count: c.message_count });
+          if (got === "rate") break;
+          gapRepaired += got;
+        }
+      }
+      // มีห้องใหม่/ห้องขยับ = อาจมี ad_id ที่ยังไม่รู้ชื่อ เติมให้เลยด้วยคำขอเดียว
+      const adNamesFilled = recentUpserted > 0 ? await fillMissingAdNames(admin, base, await getMetaToken()) : 0;
+      return jsonResp({ ok: recentErrors.length === 0, job, pages: due.length, probed_only: probedOnly, upserted: recentUpserted, changed: recentChanged, gap_messages: gapRepaired, ad_names_filled: adNamesFilled, errors: recentErrors });
+    }
+
     const historyRows = (pageId: string, afterId: string, limit: number) => admin.from("chat_customers")
       .select("id, transcript, message_count, history_synced_count")
       .eq("page_id", pageId).or("source.is.null,source.eq.ad").not("id", "like", "fbc_%")
@@ -711,6 +734,51 @@ Deno.serve(async (req) => {
         messages_recovered: messagesRecovered, next_after: done ? null : (lastId ?? after ?? null),
         done, rate_limited: rateLimited,
       });
+    }
+
+    // ---- ซ่อมข้อความลูกค้าที่หลุดจาก job recent รุ่นเก่า (เทียบ last_message_at แทน synced_at) ----
+    // ห้องที่ขยับหลังจากดึงจาก Meta ครั้งล่าสุด (ตอบผ่านเว็บ/echo) อาจมีข้อความลูกค้าตกหล่น
+    // needsHistory ช่วยไม่ได้เพราะ message_count ที่ Meta คืนมักต่ำกว่าจริง จึงดึงทั้งห้องแล้วผสานด้วย mid
+    // ตรวจรูปทรงข้อความดิบจาก Graph (ไม่คืนเนื้อหา) — ไว้หาว่าทำไมข้อความบางแบบไม่เข้า transcript
+    if (job === "peek_conv") {
+      const page = pages.find((p: any) => p.id === onlyPage);
+      if (!page || !body?.conv_id) throw new Error("peek_conv ต้องระบุ page_id และ conv_id");
+      const data = await fetchJson(`${base}/${encodeURIComponent(String(body.conv_id))}/messages?fields=${encodeURIComponent("id,message,from,created_time,sticker,shares,attachments")}&limit=${Math.min(100, Number(body?.limit) || 30)}&access_token=${page.access_token}`, 1);
+      if (data?.error) return jsonResp({ ok: false, error: data.error.message });
+      return jsonResp({ ok: true, items: (data?.data ?? []).map((m: any) => ({
+        mid: String(m.id || "").slice(0, 14), at: m.created_time, page: m.from?.id === page.id, msg_len: String(m.message || "").length,
+        att: (m.attachments?.data ?? []).map((a: any) => a.mime_type || Object.keys(a).join("|")),
+        shares: (m.shares?.data ?? []).map((s: any) => Object.keys(s).join("|")), sticker: !!m.sticker,
+      })) });
+    }
+
+    if (job === "repair_gaps") {
+      if (!onlyPage) throw new Error("repair_gaps ต้องระบุ page_id");
+      const page = pages.find((p: any) => p.id === onlyPage);
+      if (!page) throw new Error("ไม่พบเพจนี้ในสิทธิ์ token");
+      const days = Math.min(30, Math.max(1, Number(body?.days) || 7));
+      const batchSize = Math.min(20, Math.max(1, Number(body?.batch_size) || 10));
+      const { data: batchRows, error: batchErr } = await admin.from("chat_customers")
+        .select("id, message_count, synced_at, last_message_at")
+        .eq("page_id", onlyPage).or("source.is.null,source.eq.ad").not("id", "like", "fbc_%")
+        .gte("last_message_at", new Date(Date.now() - days * 86400000).toISOString())
+        .gt("id", after || "").order("id", { ascending: true }).limit(batchSize);
+      if (batchErr) throw batchErr;
+      const rows = batchRows ?? [];
+      let checked = 0, repaired = 0, messagesRecovered = 0, rateLimited = false;
+      let lastId: string | null = null;
+      for (const row of rows) {
+        if (body?.force === true || timeMs(row.last_message_at) > timeMs(row.synced_at) + SYNC_SLACK_MS) {
+          const got = await recoverRow(page, row);
+          if (got === "rate") { rateLimited = true; break; }
+          await admin.from("chat_customers").update({ synced_at: new Date().toISOString() }).eq("id", row.id);
+          checked++;
+          if (got > 0) { repaired++; messagesRecovered += got; }
+        }
+        lastId = String(row.id);
+      }
+      const done = rows.length < batchSize && !rateLimited;
+      return jsonResp({ ok: true, job, page: page.name, scanned: rows.length, checked, repaired, messages_recovered: messagesRecovered, next_after: done ? null : (lastId ?? after ?? null), done, rate_limited: rateLimited });
     }
 
     // ---- เก็บประวัติครบอัตโนมัติ (cron) — ไม่ต้องมีใครเปิดหน้าเว็บค้างไว้ ----
