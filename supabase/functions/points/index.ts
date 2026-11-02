@@ -109,7 +109,18 @@ Deno.serve(async (req) => {
         const upto = rows.filter((r: any) => Number(r.id) <= Number(pr.last_event_id || 0));
         hashOk = (await sha256(ledgerFingerprint(upto))) === pr.snapshot_hash;
       }
+      // ทุกเดือนตั้งแต่เดือนแรกที่มีแต้ม — เดิมมีแค่เดือนปัจจุบัน + เดือนที่ปิดยอดแล้ว เดือนที่ยังไม่ปิด (เช่นเดือนที่แล้ว) เลือกดูไม่ได้
       const periods = new Set<string>([currentPeriod, ...(periodsRows || []).map((r: any) => r.period)]);
+      const { data: firstEv } = await admin.from("point_events").select("period").order("period", { ascending: true }).limit(1).maybeSingle();
+      if (firstEv?.period && PERIOD_RE.test(firstEv.period)) {
+        let [y, m] = firstEv.period.split("-").map(Number);
+        for (let i = 0; i < 36; i++) {
+          const p = `${y}-${String(m).padStart(2, "0")}`;
+          if (p > currentPeriod) break;
+          periods.add(p);
+          m++; if (m > 12) { m = 1; y++; }
+        }
+      }
       const { startMs, endMs } = periodRange(periodArg);
       return json({
         ok: true, period: periodArg, current_period: currentPeriod, me, is_owner: owner,
