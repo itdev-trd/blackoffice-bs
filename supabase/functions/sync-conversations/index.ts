@@ -758,27 +758,35 @@ Deno.serve(async (req) => {
       if (!page) throw new Error("ไม่พบเพจนี้ในสิทธิ์ token");
       const days = Math.min(30, Math.max(1, Number(body?.days) || 7));
       const batchSize = Math.min(20, Math.max(1, Number(body?.batch_size) || 10));
-      const { data: batchRows, error: batchErr } = await admin.from("chat_customers")
-        .select("id, message_count, synced_at, last_message_at")
-        .eq("page_id", onlyPage).or("source.is.null,source.eq.ad").not("id", "like", "fbc_%")
-        .gte("last_message_at", new Date(Date.now() - days * 86400000).toISOString())
-        .gt("id", after || "").order("id", { ascending: true }).limit(batchSize);
-      if (batchErr) throw batchErr;
-      const rows = batchRows ?? [];
-      let checked = 0, repaired = 0, messagesRecovered = 0, rateLimited = false;
-      let lastId: string | null = null;
-      for (const row of rows) {
-        if (body?.force === true || timeMs(row.last_message_at) > timeMs(row.synced_at) + SYNC_SLACK_MS) {
-          const got = await recoverRow(page, row);
-          if (got === "rate") { rateLimited = true; break; }
-          await admin.from("chat_customers").update({ synced_at: new Date().toISOString() }).eq("id", row.id);
-          checked++;
-          if (got > 0) { repaired++; messagesRecovered += got; }
+      // skip_synced_after = ข้ามห้องที่ดึงจาก Meta หลังเวลานี้แล้ว (ซ่อมรอบก่อนไปแล้ว) · วนทีละ batch จนใกล้หมดเวลา
+      const skipAfter = body?.skip_synced_after ? timeMs(body.skip_synced_after) : 0;
+      const stopAt = Date.now() + Math.min(90000, Math.max(10000, Number(body?.budget_ms) || 70000));   // เผื่อเวลาเหลือ — เคยโดน 502 ตอนใช้ถึง ~105 วิ
+      let cursor = after || "";
+      let scanned = 0, checked = 0, repaired = 0, messagesRecovered = 0, rateLimited = false, done = false;
+      while (!done && !rateLimited && Date.now() < stopAt) {
+        const { data: batchRows, error: batchErr } = await admin.from("chat_customers")
+          .select("id, message_count, synced_at, last_message_at")
+          .eq("page_id", onlyPage).or("source.is.null,source.eq.ad").not("id", "like", "fbc_%")
+          .gte("last_message_at", new Date(Date.now() - days * 86400000).toISOString())
+          .gt("id", cursor).order("id", { ascending: true }).limit(batchSize);
+        if (batchErr) throw batchErr;
+        const rows = batchRows ?? [];
+        for (const row of rows) {
+          if (Date.now() >= stopAt) break;
+          const skip = skipAfter && timeMs(row.synced_at) >= skipAfter;
+          if (!skip && (body?.force === true || timeMs(row.last_message_at) > timeMs(row.synced_at) + SYNC_SLACK_MS)) {
+            const got = await recoverRow(page, row);
+            if (got === "rate") { rateLimited = true; break; }
+            await admin.from("chat_customers").update({ synced_at: new Date().toISOString() }).eq("id", row.id);
+            checked++;
+            if (got > 0) { repaired++; messagesRecovered += got; }
+          }
+          scanned++;
+          cursor = String(row.id);
         }
-        lastId = String(row.id);
+        if (rows.length < batchSize && !rateLimited && cursor === String(rows[rows.length - 1]?.id ?? cursor)) done = true;
       }
-      const done = rows.length < batchSize && !rateLimited;
-      return jsonResp({ ok: true, job, page: page.name, scanned: rows.length, checked, repaired, messages_recovered: messagesRecovered, next_after: done ? null : (lastId ?? after ?? null), done, rate_limited: rateLimited });
+      return jsonResp({ ok: true, job, page: page.name, scanned, checked, repaired, messages_recovered: messagesRecovered, next_after: done ? null : (cursor || null), done, rate_limited: rateLimited });
     }
 
     // ---- เก็บประวัติครบอัตโนมัติ (cron) — ไม่ต้องมีใครเปิดหน้าเว็บค้างไว้ ----
