@@ -549,7 +549,7 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
           contact_channel: contactChannelOfChat(row) || null, phone: f.phone.trim() || null, country: f.country || null,
         } });
         if (ge || !g?.ok) fails.push(`${name}: ${g?.error || g?.results?.[0]?.error || "ลองใหม่"}`);
-        else summ.push(`${name} (${durLabel(d)})`);
+        else summ.push(`${name} (${grantExpLabel(g, d, durLabel(d))})`);
       }
       if (summ.length) logActivity("tv_grant_from_chat", { id: row.id, username: userTv });
       setBusy(false);
@@ -600,8 +600,7 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
         expiration: expIso, trade_id: f.trade_id.trim() || null,
       } });
       if (ge || !g?.ok) { fails.push(`${name}: ${g?.error || g?.results?.[0]?.error || "ลองใหม่"}`); continue; }
-      const newExp = g.results?.find((r) => r.ok)?.expiration || g.expiration;
-      summ.push(`${name} → ${d.mode === "lifetime" ? "ตลอดชีพ" : newExp ? `หมดอายุ ${new Date(newExp).toLocaleDateString("th-TH")}` : durLabel(d)}`);
+      summ.push(`${name} (${grantExpLabel(g, d, durLabel(d))})`);
     }
     if (summ.length) logActivity("tv_renew_from_chat", { id: row.id, username: userTv });
     setBusy(false);
@@ -921,6 +920,15 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
   );
 }
 
+
+// ป้ายในวงเล็บหลังชื่อสคริปต์ตอนเพิ่ม/ต่ออายุสิทธิ์สำเร็จ — โชว์วันหมดอายุจริงที่ TradingView ตั้งให้
+// (เดิมโชว์ "31 วัน" แอดมินต้องนับเองว่าหมดวันไหน) ไม่มีวันที่คืนมาค่อยถอยไปใช้ป้ายระยะเวลาเดิม
+function grantExpLabel(g, d, fallback) {
+  if (d.mode === "lifetime") return "ตลอดชีพ";
+  const exp = g?.results?.find((r) => r.ok)?.expiration || g?.expiration;
+  if (!exp) return fallback;
+  return `หมดอายุ ${new Date(exp).toLocaleDateString("th-TH", { timeZone: "Asia/Bangkok", day: "numeric", month: "short", year: "numeric" })}`;
+}
 
 // ---------------------------------------------------------------
 // ฐานข้อมูลลูกค้า — ตารางข้อมูลที่ซิงก์มา (ค้นหา + filter + เรียงลำดับ + export)
