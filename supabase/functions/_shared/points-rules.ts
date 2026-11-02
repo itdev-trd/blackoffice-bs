@@ -175,6 +175,19 @@ export function tvEventKind(existing: { expiration?: string | null } | null | un
   return new Date(newExpiration).getTime() > oldExp ? "tv_renew" : null;
 }
 
+// ถอนสิทธิ์แล้วโดนหักแต้มคืน (reversal) → ให้สิทธิ์ใหม่ได้แต้มคืนอีกครั้ง
+//  - ต้องมี reversal และแต้มสุทธิของสิทธิ์นี้ ≤ 0 (ถอนหลัง N วันไม่โดนหัก = ยังถือแต้มเดิมอยู่ ห้ามได้ซ้ำ)
+//  - ได้แต้มแบบเดียวกับรายการล่าสุดที่โดนหัก · idem ผูกกับจำนวนครั้งที่โดนหัก (ปั่นไม่ได้ ได้คืนครั้งเดียวต่อการหัก 1 ครั้ง)
+export function tvRegrant(events: { kind: string; points: number | string }[]): { kind: "tv_grant" | "tv_renew"; round: number } | null {
+  const reversals = events.filter((e) => e.kind === "reversal");
+  if (!reversals.length) return null;
+  const net = events.reduce((s, e) => s + (Number(e.points) || 0), 0);
+  if (net > 0) return null;
+  const earned = events.filter((e) => (e.kind === "tv_grant" || e.kind === "tv_renew") && Number(e.points) > 0);
+  const last = earned[earned.length - 1];
+  return last ? { kind: last.kind as "tv_grant" | "tv_renew", round: reversals.length } : null;
+}
+
 export function isExcludedCustomer(oh: OfficeHours, customerName: unknown, conversationId: unknown) {
   if (!oh.exclude.length) return false;
   const name = String(customerName || "").toLowerCase();

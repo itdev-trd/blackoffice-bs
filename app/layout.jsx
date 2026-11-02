@@ -5,6 +5,7 @@ import "./settings-pro.css";
 import { Fira_Code, Fira_Sans, Noto_Sans_Thai, Roboto } from "next/font/google";
 import UpdateBanner from "@/components/shared/UpdateBanner";
 import KeyboardViewport from "@/components/shared/KeyboardViewport";
+import NumberWheelGuard from "@/components/shared/NumberWheelGuard";
 import AuthListener from "@/components/shared/AuthListener";
 import ServiceWorkerRegistrar from "@/components/shared/ServiceWorkerRegistrar";
 
@@ -85,6 +86,7 @@ export default function RootLayout({ children }) {
         {children}
         <UpdateBanner />
         <KeyboardViewport />
+        <NumberWheelGuard />
       </body>
     </html>
   );

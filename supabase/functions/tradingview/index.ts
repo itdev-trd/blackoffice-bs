@@ -442,7 +442,7 @@ Deno.serve(async (req) => {
             const cookie = await getBrandCookie(brand_id);
             // แถวเดิม (ถ้ามี) — ต้องรู้ก่อนยิง TradingView เพราะการต่ออายุต้องต่อจากวันหมดอายุเดิม
             const existingOf = async (user: string) => (await db.from("tv_access")
-              .select("id, expiration, renew_count, member_type").eq("username", user).eq("pine_id", pine_id).maybeSingle()).data;
+              .select("id, expiration, renew_count, member_type, status").eq("username", user).eq("pine_id", pine_id).maybeSingle()).data;
             let existing = await existingOf(username);
             let expForPine = expiration;
             if (renew && !lifetime && !body?.expiration) {
@@ -512,7 +512,7 @@ Deno.serve(async (req) => {
             if (verification.ok && verification.found && grantEmail && body?.no_points !== true) {
               await awardTvPoints(db, {
                 staffEmail: grantEmail, tvAccessId: Number(savedRow.id), username: realUser, pineId: pine_id,
-                existing: existing ? { expiration: existing.expiration ?? null } : null, newExpiration: expForPine, at: nowIso,
+                existing: existing ? { expiration: existing.expiration ?? null, status: existing.status ?? null } : null, newExpiration: expForPine, at: nowIso,
               });
             }
             results.push({ pine_id, ok: true, extended, renewed: renew, expiration: expForPine, verification });

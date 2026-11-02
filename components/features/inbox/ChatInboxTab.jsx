@@ -91,7 +91,13 @@ const MSG_WINDOW_STEP = 80;
 // ลิสต์ซ้ายโหลดทีละหน้า — poll ทุก 10 วิดึงแค่หน้าแรก แชทเก่าที่เลื่อนโหลดมาแล้วเก็บไว้ในลิสต์ต่อ
 // (เดิม limit 200 ตายตัว: ลูกค้าใหม่ทักเข้ามา 1 คน ห้องที่ 200 ก็หลุดจากลิสต์ ดูเหมือนแชทเก่าหาย ทั้งที่ข้อมูลยังอยู่ครบ)
 const LIST_PAGE = 200;
-const LIST_COLS = "id, customer_name, last_user_text, last_reply_text, last_reply_by, last_reply_at, last_message_at, page_id, page_name, country, cust_lang, source, entry_ad_id, entry_ad_name, comment_ad_name, comment_ad_ids, comment_ad_names, comment_is_ad, comment_promoted_to_inbox, stage, stage_manual, psid, profile_pic, awaiting_reply, unread, cust_read_at, blocked_at, synced_at, updated_at, tags, not_interested_at, purge_confirmed_at, purge_at";
+const LIST_COLS = "id, customer_name, trade_id, manual_data, last_user_text, last_reply_text, last_reply_by, last_reply_at, last_message_at, page_id, page_name, country, cust_lang, source, entry_ad_id, entry_ad_name, comment_ad_name, comment_ad_ids, comment_ad_names, comment_is_ad, comment_promoted_to_inbox, stage, stage_manual, psid, profile_pic, awaiting_reply, unread, cust_read_at, blocked_at, synced_at, updated_at, tags, not_interested_at, purge_confirmed_at, purge_at";
+
+// LINE OA: แอดมินใส่ข้อมูลลูกค้าแล้ว → ต่อเลขบัญชีเทรดท้ายชื่อ (ชื่อ LINE ซ้ำกันบ่อย ดูเลขบัญชีแยกคนได้ทันที)
+const chatName = (x, fallback = "(ไม่มีชื่อ)") => {
+  const name = x?.customer_name || fallback;
+  return x?.source === "line" && x?.manual_data && x?.trade_id ? `${name} · ${x.trade_id}` : name;
+};
 
 const CHAT_OPEN_COLS = "id, page_id, page_name, psid, customer_name, source, stage, stage_manual, classified_by, needs_ai, needs_verify, manual_data, manual_data_by, manual_data_at, trade_id, username, phone, email, address, awaiting_reply, unread, read_at, cust_read_at, cust_lang, country, broker, profile_pic, transcript, account_opened_at, entry_ad_id, entry_ad_name, last_user_text, last_reply_text, last_reply_by, last_reply_at, last_message_at, comment_ad_name, comment_ad_ids, comment_ad_names, comment_is_ad, comment_promoted_to_inbox, comment_permalink, blocked_at, synced_at, updated_at, notes, tags, ai_summary, ai_summary_at, not_interested_at, purge_at";
 
@@ -137,6 +143,15 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   const [adLoading, setAdLoading] = useState(false);
   const [savedReplies, setSavedReplies] = useState([]);   // ข้อความตอบกลับที่บันทึกไว้ในเพจ
   const [savedOpen, setSavedOpen] = useState(false);
+  // แพทเทิร์น: เลือกข้อความบันทึกหลายอัน แล้วกดปุ่มเดียวทยอยส่งทีละอัน ห่างกัน 2–5 วิ (สุ่ม ให้ดูเหมือนคนพิมพ์)
+  const [patternMode, setPatternMode] = useState(false);
+  const [patternPick, setPatternPick] = useState([]);       // id ตามลำดับที่กดเลือก = ลำดับที่ส่ง
+  const [patternRun, setPatternRun] = useState(null);       // { done, total } ระหว่างส่ง
+  const patternStopRef = useRef(false);
+  // แพทเทิร์นที่บันทึกไว้ (ใช้ร่วมทั้งทีม) — settings.saved_reply_patterns = [{ id, name, ids, by, at }]
+  const [savedPatterns, setSavedPatterns] = useState([]);
+  const [patternDel, setPatternDel] = useState(null);     // id แพทเทิร์นที่กด × ไว้ รอกดยืนยันลบอีกครั้ง
+  const [patternName, setPatternName] = useState(null);   // null = ไม่ได้ตั้งชื่ออยู่ · string = ช่องตั้งชื่อเปิดอยู่ (prompt() ใช้ไม่ได้ในแอป PWA/เดสก์ท็อปบางตัว)
   const [savedErr, setSavedErr] = useState("");
   const [knowledgeOpen, setKnowledgeOpen] = useState(false);
   // AI ร่างคำตอบ: { loading } ระหว่างรอ · { reply, confidence, note, sources } หลังได้ร่าง · { error }
@@ -1611,7 +1626,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     const preloaded = cachedChat(item.id);
     setSelected(preloaded || { ...item, transcript: null });
     logActivity("open_chat", { id: item.id, customer_name: item.customer_name, page_id: item.page_id });
-    setTranslations({}); setReply(""); setSendPreview(null); setSendMsg(""); setFailedText(""); setAdSources([]); setAdLoading(false); setSavedReplies([]); setSavedOpen(false); setKnowledgeOpen(false); setKnowledgeResults([]); setAiDraft(null); setReplyTo(null); setMessageMenu(null); setKnowledgeCapture(null); setKnowledgeCaptureMsg(""); setEmojiOpen(false); setInfoOpen(false); setComposeMode("reply"); setLabelMsg(null); setQuickFillState({}); setAddressDraft(null);
+    setTranslations({}); setReply(""); setSendPreview(null); setSendMsg(""); setFailedText(""); setAdSources([]); setAdLoading(false); setSavedReplies([]); setSavedOpen(false); setPatternMode(false); setPatternPick([]); setPatternName(null); setKnowledgeOpen(false); setKnowledgeResults([]); setAiDraft(null); setReplyTo(null); setMessageMenu(null); setKnowledgeCapture(null); setKnowledgeCaptureMsg(""); setEmojiOpen(false); setInfoOpen(false); setComposeMode("reply"); setLabelMsg(null); setQuickFillState({}); setAddressDraft(null);
     setForceLang(item.source === "line" ? "Thai" : lsGet(`ui.forceLang.${item.id}`, "auto"));   // LINE เป็นภาษาไทย ไม่ต้องแปล
     // LINE OA ใช้ภาษาไทย ไม่ต้องเรียกตัวแปลหรือสร้างคำแปลใต้ข้อความ
     const translationPromise = item.source === "line" ? null : supabase.functions.invoke("messenger-reply", { body: { action: "translate", id: item.id } });
@@ -1863,6 +1878,98 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
       setEmojiOpen(false);
       loadList();
     } finally { setSending(false); }
+  }
+
+  async function loadSavedPatterns() {
+    const { data } = await supabase.from("settings").select("value").eq("key", "saved_reply_patterns").maybeSingle();
+    const list = Array.isArray(data?.value) ? data.value : [];
+    setSavedPatterns(list);
+    return list;
+  }
+  useEffect(() => { if (savedOpen) loadSavedPatterns(); }, [savedOpen]);
+  // อ่านค่าล่าสุดก่อนเขียนทุกครั้ง กันทับแพทเทิร์นที่คนอื่นเพิ่งบันทึก
+  async function writeSavedPatterns(mutate) {
+    const next = mutate(await loadSavedPatterns());
+    const { error } = await supabase.from("settings").upsert({ key: "saved_reply_patterns", value: next, updated_at: new Date().toISOString() }, { onConflict: "key" });
+    if (error) { setSendMsg("บันทึกแพทเทิร์นไม่สำเร็จ: " + error.message); return; }
+    setSavedPatterns(next);
+  }
+  function startSavePattern() {
+    if (!patternPick.length) return;
+    setPatternName(patternPick.map((id) => savedReplies.find((x) => x.id === id)?.title).filter(Boolean).slice(0, 3).join(" → "));
+  }
+  async function savePattern() {
+    const name = String(patternName || "").trim();
+    if (!patternPick.length || !name) return;
+    await writeSavedPatterns((list) => [...list, { id: `p_${Date.now().toString(36)}`, name, ids: patternPick, by: myEmail, at: new Date().toISOString() }]);
+    setPatternName(null);
+  }
+  async function deletePattern(p) {
+    if (patternDel !== p.id) { setPatternDel(p.id); return; }   // กดครั้งแรก = ถามยืนยัน
+    setPatternDel(null);
+    await writeSavedPatterns((list) => list.filter((x) => x.id !== p.id));
+  }
+  function applyPattern(p) {
+    if (!savedPickAtRef.current) savedPickAtRef.current = Math.max(1, ...(selected?.transcript || []).filter((m) => m?.w === "p" && !m.pending && !m._tmp).map((m) => new Date(m.at || 0).getTime() || 0));
+    setPatternMode(true);
+    setPatternPick(p.ids.filter((id) => savedReplies.some((x) => x.id === id)));
+  }
+
+  // ส่งแพทเทิร์นข้อความบันทึก — รูปของแต่ละอันก่อน แล้วตามด้วยข้อความ · เว้น 2–5 วิระหว่างทุกชิ้น
+  // ข้อความส่งแบบเดียวกับไม่ผ่านกล่องตัวอย่าง (เซิร์ฟเวอร์แปลให้เองตามภาษาหัวแชท · LINE ส่งไทยตรง)
+  async function sendPattern() {
+    if (!selected || sending || patternRun) return;
+    if (lockedBy) { setSendMsg(`🔒 ต้องให้ ${lockedBy.who.split("@")[0]} คุยเสร็จก่อน`); return; }
+    const picks = patternPick.map((id) => savedReplies.find((x) => x.id === id)).filter(Boolean);
+    if (!picks.length) return;
+    const comment = isCommentChat(selected);
+    if (comment && picks.some((x) => x.images.length)) { setSendMsg("การตอบใต้คอมเมนต์ส่งรูปไม่ได้ — เอาข้อความที่มีรูปออกจากแพทเทิร์นก่อน"); return; }
+    if (savedPickAtRef.current) {
+      const c = await savedReplyConflict();
+      if (c) { setSendMsg(`🔒 ${c.who} ตอบห้องนี้ไปแล้วเมื่อ ${fmtMsgTime(c.at)} หลังจากคุณเปิดข้อความบันทึก — ต้องให้ ${c.who} คุยเสร็จก่อน`); return; }
+    }
+    const steps = picks.flatMap((x) => [
+      ...x.images.map((url) => ({ kind: "img", url, title: x.title })),
+      ...(x.message.trim() ? [{ kind: "text", text: x.message.trim(), title: x.title }] : []),
+    ]);
+    if (!steps.length) return;
+    const chat = selected;
+    const append = (item) => setSelected((s) => (s && s.id === chat.id ? { ...s, transcript: [...(s.transcript || []), item], awaiting_reply: false } : s));
+    patternStopRef.current = false;
+    setSavedOpen(false); setSending(true); setSendMsg(""); setPatternRun({ done: 0, total: steps.length });
+    let done = 0;
+    try {
+      for (const st of steps) {
+        if (patternStopRef.current) break;
+        if (done > 0) {
+          const wait = 2000 + Math.floor(Math.random() * 3000);
+          const until = Date.now() + wait;
+          while (Date.now() < until && !patternStopRef.current) await new Promise((r) => setTimeout(r, 200));
+          if (patternStopRef.current) break;
+        }
+        const body = st.kind === "img"
+          ? { action: "send_attachment", id: chat.id, url: st.url, type: "image", filename: "saved-image", by: myEmail }
+          : { action: "send", id: chat.id, text_th: st.text, by: myEmail,
+              force_lang: chat.source !== "line" && forceLang !== "auto" ? forceLang : undefined,
+              comment_reply_mode: comment ? "public" : undefined };
+        const { data, error } = await supabase.functions.invoke("messenger-reply", { body });
+        if (error || !data?.ok) {
+          const why = error ? await readFunctionErrorMessage(error) : (data?.error || "");
+          setSendMsg(`ส่งแพทเทิร์นหยุดที่ "${st.title || "(ไม่มีชื่อ)"}" (ส่งไปแล้ว ${done}/${steps.length}): ${why}`);
+          return;
+        }
+        const at = new Date().toISOString();
+        append(st.kind === "img"
+          ? { w: "p", t: "[รูปภาพ]", at, by: myEmail, mid: data.message_id || null, ...(data.img ? { img: data.img } : {}) }
+          : { w: "p", t: data.sent_text, at, by: myEmail, mid: data.message_id || null });
+        done++;
+        setPatternRun({ done, total: steps.length });
+      }
+      setSendMsg(patternStopRef.current ? `หยุดส่งแพทเทิร์นแล้ว (ส่งไป ${done}/${steps.length})` : `ส่งแพทเทิร์นครบ ${done} ชิ้น ✓`);
+      if (!patternStopRef.current) { setPatternPick([]); setPatternMode(false); }
+      logActivity("send_pattern", { id: chat.id, customer_name: chat.customer_name, page_id: chat.page_id, sent: done, total: steps.length });
+      loadList();
+    } finally { setSending(false); setPatternRun(null); notifyTyping(true); }
   }
 
   async function blockCustomer(id, block) {
@@ -3028,7 +3135,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                     <div className="flex items-center justify-between gap-2">
                       <span className="flex items-center gap-1.5 min-w-0">
                         {x.unread && <span className="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0" />}
-                        <span className={`text-sm truncate ${x.unread ? "font-bold text-night-ink" : "font-medium text-night-ink"}`}>{x.customer_name || "(ไม่มีชื่อ)"}</span>
+                        <span className={`text-sm truncate ${x.unread ? "font-bold text-night-ink" : "font-medium text-night-ink"}`}>{chatName(x)}</span>
                       </span>
                       <span className="text-[10px] text-night-ink-3 shrink-0">{fmt(x.last_message_at)}</span>
                     </div>
@@ -3112,7 +3219,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                   {selected.profile_pic && <img src={selected.profile_pic} alt="" className="absolute inset-0 w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display = "none"; }} />}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="font-semibold text-night-ink truncate">{selected.customer_name || "(ไม่มีชื่อ)"}</div>
+                  <div className="font-semibold text-night-ink truncate">{chatName(selected)}</div>
                   <div className="flex items-center gap-2 flex-wrap">
                     {selected.page_name && (
                       <span className="inline-flex items-center gap-1 text-xs font-semibold px-1.5 py-0.5 rounded-md bg-night-accent/25 text-night-accent-light max-w-[45vw] sm:max-w-[240px]">
@@ -3478,11 +3585,38 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                   </div>
                 )}
                 {savedOpen && (
-                  <div className="absolute bottom-full left-3 right-3 mb-1 bg-night-surface border border-night-border rounded-lg shadow-lg max-h-64 overflow-y-auto z-10 divide-y divide-night-border-subtle">
+                  <div className="absolute bottom-full left-3 right-3 mb-1 bg-night-surface border border-night-border rounded-lg shadow-lg max-h-80 overflow-y-auto z-10 divide-y divide-night-border-subtle">
+                    {savedReplies.length > 0 && (
+                      <div className="sticky top-0 z-[1] bg-night-surface px-3 py-2 flex items-center gap-2 text-[11px]">
+                        <button onClick={() => { setPatternMode((m) => !m); setPatternPick([]); setPatternName(null); }} className={`rounded-full px-2.5 py-1 font-semibold border ${patternMode ? "bg-night-accent text-white border-night-accent" : "border-night-border text-night-ink-2 hover:bg-night-surface2"}`}>
+                          {patternMode ? "✓ โหมดแพทเทิร์น" : "แพทเทิร์น (ส่งหลายอัน)"}
+                        </button>
+                        <span className="text-night-ink-3 truncate">{patternMode ? "กดเลือกตามลำดับที่จะส่ง · ทยอยส่งทุก 2–5 วิ" : "กดเพื่อใส่ในช่องพิมพ์"}</span>
+                      </div>
+                    )}
+                    {savedReplies.length > 0 && savedPatterns.some((p) => p.ids?.some((id) => savedReplies.some((x) => x.id === id))) && (
+                      <div className="px-3 py-2 flex flex-wrap items-center gap-1.5 text-[11px]">
+                        <span className="text-night-ink-3">แพทเทิร์นที่บันทึกไว้:</span>
+                        {savedPatterns.filter((p) => p.ids?.some((id) => savedReplies.some((x) => x.id === id))).map((p) => {
+                          const n = p.ids.filter((id) => savedReplies.some((x) => x.id === id)).length;
+                          return (
+                            <span key={p.id} className="inline-flex items-center rounded-full border border-night-border bg-night-surface2">
+                              <button onClick={() => applyPattern(p)} className="pl-2.5 pr-1.5 py-1 font-medium text-night-ink hover:text-night-accent" title={p.ids.map((id) => { const i = savedReplies.findIndex((x) => x.id === id); return i >= 0 ? `${i + 1}. ${savedReplies[i].title || ""}` : null; }).filter(Boolean).join(" → ")}>{p.name} <span className="text-night-ink-3">({n})</span></button>
+                              {patternDel === p.id
+                                ? <button onClick={() => deletePattern(p)} onBlur={() => setPatternDel(null)} autoFocus className="pr-2 pl-0.5 font-semibold text-rose-400">ลบ?</button>
+                                : <button onClick={() => deletePattern(p)} className="pr-2 pl-0.5 text-night-ink-3 hover:text-rose-400" title="ลบแพทเทิร์น"><X size={11} /></button>}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
                     {savedReplies.length === 0 ? (
                       <div className="px-3 py-3 text-xs text-night-ink-2">{savedErr ? `ดึงไม่ได้: ${savedErr}` : "ยังไม่มีข้อความบันทึกไว้สำหรับช่องทางนี้ — เพิ่มได้ที่ ตั้งค่า › ข้อความบันทึกไว้"}</div>
-                    ) : savedReplies.map((s) => (
-                      <button key={s.id} onClick={() => { if (lockedBy) { setSavedOpen(false); setSendMsg(`🔒 ต้องให้ ${lockedBy.who.split("@")[0]} คุยเสร็จก่อน`); return; } if (!savedPickAtRef.current) savedPickAtRef.current = Math.max(1, ...(selected?.transcript || []).filter((m) => m?.w === "p" && !m.pending && !m._tmp).map((m) => new Date(m.at || 0).getTime() || 0)); if (s.message) setReply((r) => (r ? r + "\n" + s.message : s.message)); if (s.images.length) setPendingFiles((p) => [...p, ...s.images.map((u, i) => ({ url: u, name: `saved-image-${i + 1}`, type: "image", preview: u }))]); setSavedOpen(false); }} className="w-full text-left px-3 py-2 hover:bg-night-surface2 flex gap-2">
+                    ) : savedReplies.map((s, idx) => (
+                      <button key={s.id} onClick={() => { if (patternMode) { if (!savedPickAtRef.current) savedPickAtRef.current = Math.max(1, ...(selected?.transcript || []).filter((m) => m?.w === "p" && !m.pending && !m._tmp).map((m) => new Date(m.at || 0).getTime() || 0)); setPatternPick((p) => (p.includes(s.id) ? p.filter((x) => x !== s.id) : [...p, s.id])); return; } if (lockedBy) { setSavedOpen(false); setSendMsg(`🔒 ต้องให้ ${lockedBy.who.split("@")[0]} คุยเสร็จก่อน`); return; } if (!savedPickAtRef.current) savedPickAtRef.current = Math.max(1, ...(selected?.transcript || []).filter((m) => m?.w === "p" && !m.pending && !m._tmp).map((m) => new Date(m.at || 0).getTime() || 0)); if (s.message) setReply((r) => (r ? r + "\n" + s.message : s.message)); if (s.images.length) setPendingFiles((p) => [...p, ...s.images.map((u, i) => ({ url: u, name: `saved-image-${i + 1}`, type: "image", preview: u }))]); setSavedOpen(false); }} className={`w-full text-left px-3 py-2 hover:bg-night-surface2 flex gap-2 ${patternMode && patternPick.includes(s.id) ? "bg-night-surface2" : ""}`}>
+                        {patternMode && (
+                          <span className={`shrink-0 w-5 h-5 mt-0.5 rounded-full border text-[10px] font-bold flex items-center justify-center ${patternPick.includes(s.id) ? "bg-night-accent border-night-accent text-white" : "border-night-border text-transparent"}`}>{patternPick.indexOf(s.id) + 1 || "·"}</span>
+                        )}
                         {s.images.length > 0 && (
                           <span className="relative shrink-0">
                             <img src={s.images[0]} alt="" className="w-9 h-9 rounded object-cover border border-night-border" />
@@ -3490,11 +3624,37 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                           </span>
                         )}
                         <div className="min-w-0">
-                          <div className="text-xs font-medium text-night-ink truncate">{s.title || "(ไม่มีชื่อ)"}</div>
+                          <div className="text-xs font-medium text-night-ink truncate"><span className="text-night-ink-3 mr-1">{idx + 1}.</span>{s.title || "(ไม่มีชื่อ)"}</div>
                           <div className="text-[11px] text-night-ink-2 line-clamp-2 whitespace-pre-wrap break-words">{s.message}</div>
                         </div>
                       </button>
                     ))}
+                    {patternMode && savedReplies.length > 0 && patternName !== null && (
+                      <div className="sticky bottom-0 bg-night-surface px-3 py-2 flex items-center gap-2">
+                        <input autoFocus value={patternName} onChange={(e) => setPatternName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") savePattern(); if (e.key === "Escape") setPatternName(null); }}
+                          placeholder="ตั้งชื่อแพทเทิร์น" className="flex-1 min-w-0 rounded-lg border border-night-border bg-night-surface px-3 py-1.5 text-xs" />
+                        <button onClick={() => setPatternName(null)} className="text-[11px] text-night-ink-3 px-1">ยกเลิก</button>
+                        <button onClick={savePattern} disabled={!String(patternName).trim()} className="rounded-lg bg-brand-600 text-white px-3 py-1.5 text-xs font-semibold disabled:opacity-50">บันทึก</button>
+                      </div>
+                    )}
+                    {patternMode && savedReplies.length > 0 && patternName === null && (
+                      <div className="sticky bottom-0 bg-night-surface px-3 py-2 flex items-center gap-2">
+                        <span className="text-[11px] text-night-ink-3">เลือก {patternPick.length} อัน</span>
+                        {patternPick.length > 0 && <button onClick={() => setPatternPick([])} className="text-[11px] text-night-ink-3 underline">ล้าง</button>}
+                        {patternPick.length > 0 && <span className="text-[11px] text-night-ink-3 truncate">ลำดับ: {patternPick.map((id) => savedReplies.findIndex((x) => x.id === id) + 1).filter((n) => n > 0).join(" → ")}</span>}
+                        <button onClick={startSavePattern} disabled={!patternPick.length} className="ml-auto rounded-lg border border-night-border px-3 py-1.5 text-xs font-semibold text-night-ink-2 hover:bg-night-surface2 disabled:opacity-50">บันทึกแพทเทิร์น</button>
+                        <button onClick={sendPattern} disabled={!patternPick.length || sending} className="rounded-lg bg-brand-600 text-white px-3 py-1.5 text-xs font-semibold disabled:opacity-50">
+                          <Send size={13} className="inline -mt-0.5 mr-1" />ส่งแพทเทิร์น ({patternPick.length})
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {patternRun && (
+                  <div className="mb-2 flex items-center gap-2 rounded-lg border border-night-border bg-night-surface2 px-3 py-2 text-xs text-night-ink-2">
+                    <Loader2 size={14} className="animate-spin" />
+                    <span>กำลังทยอยส่งแพทเทิร์น {patternRun.done}/{patternRun.total} (เว้น 2–5 วิ)</span>
+                    <button onClick={() => { patternStopRef.current = true; }} className="ml-auto rounded-md border border-night-border px-2 py-0.5 text-[11px] hover:bg-night-surface">หยุด</button>
                   </div>
                 )}
                 {knowledgeOpen && (
@@ -3693,7 +3853,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
               </div>
               <div className="min-w-0">
                 <div className="text-xs text-night-ink-3">ลูกค้า</div>
-                <div className="font-medium text-night-ink truncate">{selected.customer_name || "-"}</div>
+                <div className="font-medium text-night-ink truncate">{chatName(selected, "-")}</div>
                 <div className="text-[10px] text-night-ink-3 break-all">{selected.source === "line" ? "LINE" : "FB"} {selected.psid || "-"}</div>
               </div>
             </div>

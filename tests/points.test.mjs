@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   DEFAULT_RULES, normalizeOfficeHours, normalizeRules, validateRules, scoreReply, slotOf, periodOf,
-  periodRange, thaiDayRange, tvEventKind, isExcludedCustomer, capFor, overCap, ledgerFingerprint,
+  periodRange, thaiDayRange, tvEventKind, tvRegrant, isExcludedCustomer, capFor, overCap, ledgerFingerprint,
 } from "../supabase/functions/_shared/points-rules.ts";
 
 const OH = normalizeOfficeHours({ holidays: ["2026-10-13"] });   // อังคาร 13 ต.ค. 69 เป็นวันหยุดพิเศษ
@@ -84,6 +84,15 @@ test("TradingView: ให้ใหม่ / ต่ออายุจริง / �
   assert.equal(tvEventKind({ expiration: "2026-11-01T00:00:00Z" }, null), "tv_renew");   // อัปเป็นตลอดชีพ
   assert.equal(tvEventKind({ expiration: null }, null), null);                             // ตลอดชีพอยู่แล้ว
   assert.equal(tvEventKind({ expiration: null }, "2026-12-01T00:00:00Z"), null);
+});
+
+test("ถอนแล้วโดนหัก → ให้สิทธิ์ใหม่ได้แต้มคืน (ครั้งเดียวต่อการหัก)", () => {
+  const g = { kind: "tv_grant", points: "3.00" }, rv = { kind: "reversal", points: "-3.00" };
+  assert.deepEqual(tvRegrant([g, rv]), { kind: "tv_grant", round: 1 });
+  assert.equal(tvRegrant([g]), null);                                  // ถอนหลัง N วัน ไม่โดนหัก = ไม่ได้ซ้ำ
+  assert.equal(tvRegrant([g, rv, { kind: "tv_grant", points: 3 }]), null); // ได้คืนไปแล้ว
+  assert.deepEqual(tvRegrant([g, rv, { kind: "tv_grant", points: 3 }, rv]), { kind: "tv_grant", round: 2 });
+  assert.equal(tvRegrant([]), null);
 });
 
 test("บัญชีเทสถูกตัด", () => {

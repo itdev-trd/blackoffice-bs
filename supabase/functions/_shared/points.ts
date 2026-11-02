@@ -1,7 +1,7 @@
 // บันทึกแต้มลงสมุด point_events — เรียกจาก edge function ตอนงานเกิดขึ้นจริง (ตอบแชท / ให้สิทธิ์ TV)
 // ทุกฟังก์ชันที่นี่ "เงียบเมื่อพัง" — บันทึกแต้มล้มต้องไม่ทำให้การตอบแชท/ให้สิทธิ์ลูกค้าล้มตาม
 import {
-  normalizeOfficeHours, normalizeRules, scoreReply, capFor, overCap, isExcludedCustomer, thaiDayRange, tvEventKind, periodOf,
+  normalizeOfficeHours, normalizeRules, scoreReply, capFor, overCap, isExcludedCustomer, thaiDayRange, tvEventKind, tvRegrant, periodOf,
   type OfficeHours, type PointRules,
 } from "./points-rules.ts";
 
@@ -82,18 +82,27 @@ export async function awardReplyPoints(admin: any, input: {
 // แต้มให้สิทธิ์/ต่ออายุ TradingView — เรียกหลัง TradingView ยืนยันว่ามีสิทธิ์จริงแล้วเท่านั้น
 export async function awardTvPoints(admin: any, input: {
   staffEmail: string; tvAccessId: number; username: string; pineId: string;
-  existing: { expiration?: string | null } | null; newExpiration: string | null; at: string;
+  existing: { expiration?: string | null; status?: string | null } | null; newExpiration: string | null; at: string;
 }) {
   try {
     const staff = String(input.staffEmail || "").toLowerCase().trim();
     if (!staff) return;
-    const kind = tvEventKind(input.existing, input.newExpiration);
+    // ให้สิทธิ์คืนหลังถอน (แถวเดิมสถานะ revoked) — ถ้าแต้มเดิมโดนหักไปแล้ว ได้แต้มคืน
+    let regrant: { kind: "tv_grant" | "tv_renew"; round: number } | null = null;
+    if (input.existing?.status === "revoked") {
+      const { data: evs } = await admin.from("point_events").select("kind, points")
+        .eq("tv_access_id", input.tvAccessId).in("kind", ["tv_grant", "tv_renew", "reversal"]).order("occurred_at");
+      regrant = tvRegrant(evs || []);
+    }
+    const kind = regrant?.kind ?? tvEventKind(input.existing, input.newExpiration);
     if (!kind) return;
     const cfg = await loadPointConfig(admin);
     const points = kind === "tv_grant" ? cfg.rules.tv.grant : cfg.rules.tv.renew;
     if (points <= 0) return;
     const period = periodOf(new Date(input.at).getTime());
-    const idem = kind === "tv_grant"
+    const idem = regrant
+      ? `${kind}:regrant:${input.tvAccessId}:${regrant.round}`         // ได้คืนครั้งเดียวต่อการโดนหัก 1 ครั้ง
+      : kind === "tv_grant"
       ? `tv_grant:${input.username.toLowerCase()}:${input.pineId}`     // ให้สิทธิ์ใหม่ได้ครั้งเดียวตลอดกาล
       : `tv_renew:${input.tvAccessId}:${period}`;                      // ต่ออายุได้แต้มเดือนละครั้งต่อสิทธิ์
     await insertPointEvent(admin, {
@@ -102,6 +111,7 @@ export async function awardTvPoints(admin: any, input: {
       evidence: {
         username: input.username, pine_id: input.pineId,
         expiration_before: input.existing?.expiration ?? null, expiration_after: input.newExpiration,
+        ...(regrant ? { regrant_after_revoke: regrant.round } : {}),
       },
       created_by: staff,
     });
