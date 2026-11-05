@@ -1704,6 +1704,28 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
   // เลือกไฟล์ = พักไว้ก่อน (ยังไม่ส่ง) รอกดปุ่มส่ง
   function onFile(e) {
     const files = Array.from(e.target.files || []); if (e.target) e.target.value = "";
+    addFiles(files);
+  }
+  // ลากรูป/ไฟล์มาวางในหน้าต่างแชท = แนบรอส่ง เหมือนกดปุ่มแนบไฟล์ (ยังต้องกดส่งเอง)
+  const dragDepthRef = useRef(0);
+  const [dropActive, setDropActive] = useState(false);
+  const canDropFiles = () => !!selected && !selectedReadOnly && !isCommentChat(selected);
+  const isFileDrag = (e) => Array.from(e.dataTransfer?.types || []).includes("Files");
+  const dropProps = {
+    onDragEnter: (e) => { if (!isFileDrag(e) || !canDropFiles()) return; e.preventDefault(); dragDepthRef.current++; setDropActive(true); },
+    onDragOver: (e) => { if (!isFileDrag(e) || !canDropFiles()) return; e.preventDefault(); e.dataTransfer.dropEffect = "copy"; },
+    onDragLeave: (e) => { if (!isFileDrag(e)) return; dragDepthRef.current = Math.max(0, dragDepthRef.current - 1); if (!dragDepthRef.current) setDropActive(false); },
+    onDrop: (e) => {
+      if (!isFileDrag(e)) return;
+      e.preventDefault(); dragDepthRef.current = 0; setDropActive(false);
+      if (!canDropFiles()) return;
+      const files = Array.from(e.dataTransfer.files || []).filter((f) => /^(image|video)\//.test(f.type) || f.type === "application/pdf");
+      if (!files.length) { setSendMsg("ลากมาได้เฉพาะรูป วิดีโอ หรือ PDF"); return; }
+      setComposeMode("reply");
+      addFiles(files);
+    },
+  };
+  function addFiles(files) {
     if (!files.length) return;
     const ok = files.filter((f) => f.size <= 20 * 1024 * 1024);
     if (ok.length < files.length) setSendMsg("บางไฟล์ใหญ่เกิน 20MB ถูกข้าม");
@@ -3201,13 +3223,20 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
 
       {/* กลาง: หน้าต่างแชท — มือถือ: fixed เต็มจอแบบ Messenger (header ติดบน / ข้อความเลื่อนกลาง / ช่องพิมพ์ติดล่าง)
           เดสก์ท็อป: inline ในการ์ดปกติ */}
-      <div className={`chat-conversation-panel min-w-0 flex-col ${selected
-        ? "flex fixed inset-0 z-40 bg-night-surface app-screen lg:static lg:z-auto lg:h-auto lg:max-h-none lg:inset-auto lg:flex-1"
+      <div {...dropProps} className={`chat-conversation-panel min-w-0 flex-col ${selected
+        ? "flex fixed inset-0 z-40 bg-night-surface app-screen lg:relative lg:z-auto lg:h-auto lg:max-h-none lg:inset-auto lg:flex-1"
         : "hidden lg:flex lg:flex-1"}`}>
         {!selected ? (
           <div className="flex-1 flex items-center justify-center text-sm text-night-ink-3">เลือกลูกค้าเพื่อเริ่มตอบ</div>
         ) : (
             <>
+              {dropActive && (
+                <div className="pointer-events-none absolute inset-2 z-50 flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-night-accent bg-night-surface/85 text-night-ink">
+                  <Paperclip size={28} className="text-night-accent" />
+                  <div className="text-sm font-semibold">วางรูปที่นี่เพื่อแนบส่งให้ลูกค้า</div>
+                  <div className="text-xs text-night-ink-3">รูป วิดีโอ หรือ PDF · ไม่เกิน 20MB ต่อไฟล์ · แนบแล้วกดส่งอีกครั้ง</div>
+                </div>
+              )}
               {/* หัวแชท: back(มือถือ) + รูปลูกค้า + ชื่อ + มาจากแอด(กดขยาย) + แฮมเบอร์เกอร์
                   ไม่ต้องเว้น safe-area บนเองแล้ว — แผงนี้ไม่ได้ทับแถบสถานะอีกต่อไป (อยู่ใต้แถบเมนูบนของแอป
                   ซึ่งเว้น safe-area ไว้ให้แล้ว ส่วนตอนคีย์บอร์ดเปิดที่กลับไปเป็น fixed ก็บวก safe-area ใน
