@@ -30,6 +30,7 @@ import { isChatPage, BESIGHT_PAGE_ID, loadChatPageAccess } from "@/lib/constants
 const IG_OPTION = "besight:instagram";   // ค่าในตัวเลือกเพจของรีพอร์ต — ไม่ใช่ page_id จริง
 import { lsGet, lsSet } from "@/lib/utils/storage";
 import { readFunctionErrorMessage } from "@/lib/utils/errors";
+import { CAMPAIGNS_KEY, campaignRunning, keepsLongerAccess } from "@/lib/tv/campaigns";
 import { getCustomerDateRange } from "@/lib/customer-date-filter";
 import Spinner from "@/components/shared/Spinner";
 import { EmptyState, SearchInput, FilterPill, Dialog, Button } from "@/components/ui";
@@ -294,6 +295,11 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
   // ฟีเจอร์ TV ในหน้าแชท — เห็นเฉพาะแอดมินจนกว่าจะกดปล่อย (settings.tv_features.released)
   const [tvOn, setTvOn] = useState(false);
   const [scripts, setScripts] = useState([]);
+  // กิจกรรมแจก Indicator (ตั้งที่ ตั้งค่า › กิจกรรมแจก Indicator) — ไม่ต้องมีไอดีเทรด ใส่แค่ user TV
+  const [campaigns, setCampaigns] = useState([]);
+  const [campOpen, setCampOpen] = useState(false);
+  const [campId, setCampId] = useState("");
+  const [campScripts, setCampScripts] = useState([]);   // tv_scripts ทุกตัว (กิจกรรมอาจแจกสคริปต์ของแบรนด์อื่นที่ไม่ได้ผูกเพจนี้)
   const [pineIds, setPineIds] = useState([]);   // เลือก Indicator ได้หลายอัน
   // วันหมดอายุแยกต่อสคริปต์ — { [pine_id]: { mode, days, expDate } }
   const [dur, setDur] = useState({});
@@ -353,11 +359,83 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
       const allowed = new Set((br || []).filter((b) => Array.isArray(b.pages) && b.pages.map(String).includes(pageId)).map((b) => b.id));
       const list = (sc || []).filter((s) => allowed.has(s.brand_id));
       setScripts(list);
+      setCampScripts(sc || []);
       setPineIds((cur) => cur.filter((p) => list.some((s) => s.pine_id === p)));
     })();
     return () => { stop = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tvOn, row?.page_id]);
+
+  useEffect(() => {
+    if (!tvOn) { setCampaigns([]); return; }
+    supabase.from("settings").select("value").eq("key", CAMPAIGNS_KEY).maybeSingle().then(({ data }) => {
+      const running = (Array.isArray(data?.value) ? data.value : []).filter((c) => campaignRunning(c));
+      setCampaigns(running);
+      setCampId((cur) => (running.some((c) => c.id === cur) ? cur : running[0]?.id || ""));
+    });
+  }, [tvOn]);
+  useEffect(() => { setCampOpen(false); }, [row?.id]);
+
+  // ให้สิทธิ์ตามกิจกรรม — ไม่เช็ค/ไม่บังคับไอดีเทรด · user TV ต้องมีจริง · คนเดิมได้ครั้งเดียวต่อกิจกรรม
+  // สคริปต์ที่ลูกค้ามีสิทธิ์ยาวกว่าอยู่แล้วจะข้าม (ไม่ไปตัดวันให้สั้นลง)
+  async function joinCampaign() {
+    if (busy) return;
+    const c = campaigns.find((x) => x.id === campId);
+    const userTv = f.username.trim();
+    if (!c) { setMsg({ ok: false, text: "เลือกกิจกรรมก่อน" }); return; }
+    if (!userTv) { setMsg({ ok: false, text: "ใส่ User TradingView ของลูกค้าในช่องด้านบนก่อน" }); return; }
+    setBusy(true); setMsg({ ok: true, text: "กำลังเช็คว่าเคยได้สิทธิ์กิจกรรมนี้ไหม..." });
+    try {
+      const { data: me } = await supabase.auth.getUser();
+      const myEmail = String(me?.user?.email || "").toLowerCase();
+      const { data: dup, error: de } = await supabase.from("tv_campaign_grants").select("granted_at, granted_by")
+        .eq("campaign_id", c.id).ilike("username", userTv).limit(1);
+      if (de) { setMsg({ ok: false, text: "เช็คประวัติกิจกรรมไม่สำเร็จ: " + de.message }); return; }
+      if (dup?.length) {
+        const when = new Date(dup[0].granted_at).toLocaleDateString("th-TH", { timeZone: "Asia/Bangkok", day: "numeric", month: "short", year: "numeric" });
+        setMsg({ ok: false, text: `"${userTv}" ได้สิทธิ์กิจกรรม "${c.name}" ไปแล้วเมื่อ ${when} (โดย ${String(dup[0].granted_by || "").split("@")[0]}) — ได้ครั้งเดียวต่อกิจกรรม` });
+        return;
+      }
+      const nameOf = (pid) => campScripts.find((s) => s.pine_id === pid)?.name || pid;
+      setMsg({ ok: true, text: "กำลังเช็ค user TV..." });
+      const brandId = campScripts.find((s) => s.pine_id === c.pine_ids[0])?.brand_id || null;
+      const { data: vu, error: vue } = await supabase.functions.invoke("tradingview", { body: { action: "validate_user", username: userTv, brand_id: brandId } });
+      if (vue || !vu?.ok) { setMsg({ ok: false, text: "เช็ค user TV ไม่สำเร็จ: " + (vu?.error || "ลองใหม่") }); return; }
+      if (!vu.exists) { setMsg({ ok: false, text: `ไม่พบ user TV "${userTv}" บน TradingView — เช็คตัวสะกดกับลูกค้าอีกครั้ง` }); return; }
+
+      const { data: existing } = await supabase.from("tv_access").select("pine_id, expiration, status").ilike("username", userTv).in("pine_id", c.pine_ids);
+      const summ = []; const fails = []; const skipped = []; const granted = []; let lastExp = null;
+      for (const pid of c.pine_ids) {
+        const ex = (existing || []).find((r) => r.pine_id === pid);
+        if (keepsLongerAccess(ex, c.days)) { skipped.push(`${nameOf(pid)} (มีสิทธิ์${ex.expiration ? "ถึง " + new Date(ex.expiration).toLocaleDateString("th-TH", { timeZone: "Asia/Bangkok", day: "numeric", month: "short" }) : "ตลอดชีพ"} อยู่แล้ว)`); continue; }
+        setMsg({ ok: true, text: `กำลังให้สิทธิ์ "${nameOf(pid)}"...` });
+        const { data: g, error: ge } = await supabase.functions.invoke("tradingview", { body: {
+          action: "grant", username: userTv, display_name: row?.customer_name || null, email: f.email.trim() || null,
+          pine_ids: [pid], lifetime: false, days: Number(c.days) || 7, no_points: !c.points,
+          contact_channel: contactChannelOfChat(row) || null, phone: f.phone.trim() || null, country: f.country || null,
+        } });
+        if (ge || !g?.ok) { fails.push(`${nameOf(pid)}: ${g?.error || g?.results?.[0]?.error || "ลองใหม่"}`); continue; }
+        lastExp = g?.results?.find((r) => r.ok)?.expiration || lastExp;
+        granted.push(pid);
+        summ.push(`${nameOf(pid)} (${grantExpLabel(g, { mode: "days" }, `${c.days} วัน`)})`);
+      }
+      if (granted.length) {
+        const { error: ie } = await supabase.from("tv_campaign_grants").insert({
+          campaign_id: c.id, campaign_name: c.name, username: userTv, pine_ids: granted, expiration: lastExp,
+          chat_id: row?.id || null, customer_name: row?.customer_name || null, granted_by: myEmail,
+        });
+        if (ie) fails.push("จดประวัติกิจกรรมไม่สำเร็จ: " + ie.message);
+        logActivity("tv_campaign_grant", { id: row?.id, username: userTv, campaign: c.name });
+        // เก็บ user TV ลงข้อมูลลูกค้าด้วย (ไม่แตะไอดีเทรด)
+        if (userTv !== String(row?.username || "").trim()) await saveLeadFields();
+      }
+      const extra = [skipped.length ? `ข้าม: ${skipped.join(", ")}` : "", fails.length ? `ไม่สำเร็จ: ${fails.join(" · ")}` : ""].filter(Boolean).join(" · ");
+      setMsg(granted.length
+        ? { ok: true, text: `✓ กิจกรรม "${c.name}" ให้สิทธิ์: ${summ.join(", ")}${extra ? " · " + extra : ""}` }
+        : { ok: false, text: `ยังไม่ได้ให้สิทธิ์กิจกรรม "${c.name}"${extra ? " · " + extra : ""}` });
+      if (granted.length) { setGrantSuccess({ username: userTv, items: summ, fails: [...skipped, ...fails], campaign: c.name }); setCampOpen(false); }
+    } finally { setBusy(false); }
+  }
 
   // ตรวจว่าลูกค้ารายนี้มีสิทธิ์ TradingView อยู่แล้วไหม (จับคู่ด้วย trade_id/username เดิมของแชท)
   // ใช้ค่าจาก "row" ตรงๆ ไม่ใช่ f ที่แอดมินกำลังพิมพ์แก้ — กันไม่ให้ค้นหาเพี้ยนตามที่พิมพ์อยู่
@@ -893,7 +971,32 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
             <RefreshCw size={14} /> ต่ออายุ
           </button>
         )}
+        {tvOn && campaigns.length > 0 && (
+          <button onClick={() => setCampOpen((o) => !o)} disabled={busy} title="ให้สิทธิ์ตามกิจกรรม — ไม่ต้องใช้ไอดีเทรด ใส่แค่ User TradingView"
+            className={`shrink-0 rounded-lg border border-amber-600 px-3 py-2 text-sm font-semibold disabled:opacity-50 ${campOpen ? "bg-amber-600 text-white" : "text-amber-700 hover:bg-amber-50"}`}>
+            🎁 กิจกรรม
+          </button>
+        )}
       </div>
+      {campOpen && tvOn && campaigns.length > 0 && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50/60 p-3 space-y-2 text-[var(--ink)]">
+          <div className="text-xs font-semibold text-amber-800">ให้สิทธิ์ตามกิจกรรม — ไม่ต้องใส่ไอดีเทรด</div>
+          {campaigns.map((c) => (
+            <label key={c.id} className="flex items-start gap-2 text-xs cursor-pointer">
+              <input type="radio" className="mt-0.5" checked={campId === c.id} onChange={() => setCampId(c.id)} />
+              <span className="min-w-0">
+                <span className="font-semibold">{c.name}</span> · {c.days} วัน
+                <span className="block text-[var(--ink-3)]">{c.pine_ids.map((pid) => campScripts.find((s) => s.pine_id === pid)?.name || pid).join(", ")}</span>
+                {c.note && <span className="block text-[var(--ink-3)] whitespace-pre-line">{c.note}</span>}
+              </span>
+            </label>
+          ))}
+          <div className="text-[11px] text-[var(--ink-3)]">ใช้ User TradingView จากช่องด้านบน: <b className="text-[var(--ink)]">{f.username.trim() || "— ยังไม่ได้ใส่ —"}</b> · 1 user ได้ครั้งเดียวต่อกิจกรรม</div>
+          <button onClick={joinCampaign} disabled={busy || !f.username.trim()} className="w-full rounded-lg bg-amber-600 text-white px-3 py-2 text-sm font-semibold hover:bg-amber-700 disabled:opacity-50 flex items-center justify-center gap-1.5">
+            {busy ? <Loader2 className="animate-spin" size={14} /> : "🎁"} ให้สิทธิ์ตามกิจกรรม
+          </button>
+        </div>
+      )}
       {msg && <div className={`text-[11px] whitespace-pre-line ${msg.ok ? "text-emerald-600" : "text-rose-600"}`}>{msg.text}</div>}
 
       {/* ที่อยู่ลูกค้า — อยู่ใต้ปุ่ม "บันทึกข้อมูล" และมีปุ่มของตัวเอง ไม่เกี่ยวกับเพิ่มสิทธิ์อินดิเคเตอร์ */}
@@ -904,13 +1007,13 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
         footer={<Button variant="primary" onClick={() => setGrantSuccess(null)}>ตกลง</Button>}>
         {grantSuccess && (
           <div className="space-y-2">
-            <div className="font-semibold text-emerald-700">🎉 {grantSuccess.renewed ? "ต่ออายุให้" : "ให้สิทธิ์"} {grantSuccess.username} แล้ว</div>
+            <div className="font-semibold text-emerald-700">🎉 {grantSuccess.renewed ? "ต่ออายุให้" : "ให้สิทธิ์"} {grantSuccess.username} แล้ว{grantSuccess.campaign ? ` (กิจกรรม ${grantSuccess.campaign})` : ""}</div>
             <ul className="text-sm text-[var(--ink-2)] list-disc pl-5 space-y-0.5">
               {grantSuccess.items.map((it) => <li key={it}>{it}</li>)}
             </ul>
             {grantSuccess.fails?.length > 0 && (
               <div className="text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
-                บางสคริปต์ไม่สำเร็จ: {grantSuccess.fails.join(" · ")}
+                {grantSuccess.campaign ? "หมายเหตุ" : "บางสคริปต์ไม่สำเร็จ"}: {grantSuccess.fails.join(" · ")}
               </div>
             )}
           </div>

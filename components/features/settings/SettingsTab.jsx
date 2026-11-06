@@ -39,6 +39,7 @@ import { SETTINGS_SECTIONS } from "@/lib/constants/settings";
 import AdTargetingCard from "@/components/features/settings/AdTargetingCard";
 import ImportOldDbPanel from "@/components/features/settings/ImportOldDbPanel";
 import ChatMenuPanel from "@/components/features/settings/ChatMenuPanel";
+import TvCampaignsPanel from "@/components/features/settings/TvCampaignsPanel";
 import MetaSyncHealthPanel from "@/components/features/settings/MetaSyncHealthPanel";
 import { EmptyState } from "@/components/ui";
 import {
@@ -1407,7 +1408,7 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
     { label: "แคมเปญและการวิเคราะห์", keys: ["campaign", "decision", "prefetch", "replystats"] },
     { label: "งานอัตโนมัติและแจ้งเตือน", keys: ["health", "jobs", "notifications"] },
     { label: "ทีมและความปลอดภัย", keys: ["permissions", "activity", "import_old"] },
-    { label: "TradingView และแต้มทีม", keys: ["tv_settings", "leaderboard"] },
+    { label: "TradingView และแต้มทีม", keys: ["tv_settings", "tv_campaigns", "leaderboard"] },
   ];
   const groupedSections = settingsGroups.map((group) => ({
     ...group,
@@ -1531,6 +1532,7 @@ function SettingsTab({ settings, onSaved, allowedSettings = null, allowedPages =
       {section === "permissions" && <div className="mt-6"><ChatPageAccessPanel /></div>}
       {section === "health" && <SystemHealthPanel />}
       {section === "tv_settings" && <TvAdminSettingsPanel />}
+      {section === "tv_campaigns" && <TvCampaignsPanel />}
       {section === "replystats" && <ReplyStatsPanel onOpenChat={onOpenChat} />}
       {section === "leaderboard" && <LeaderboardSettingsPanel />}
       {section === "activity" && <ActivityPanel />}
