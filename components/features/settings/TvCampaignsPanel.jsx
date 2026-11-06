@@ -8,7 +8,7 @@ import { CAMPAIGNS_KEY, campaignRunning } from "@/lib/tv/campaigns";
 
 // กิจกรรมแจกสิทธิ์ Indicator ให้คนทั่วไป (ไม่ต้องมีไอดีเทรด) — แอดมินกดปุ่ม "กิจกรรม" ในข้อมูลลูกค้าของแชท
 // ตัวกิจกรรมเก็บใน settings.tv_campaigns · ใครได้ไปแล้วจดใน tv_campaign_grants (คนเดิมได้ครั้งเดียวต่อกิจกรรม)
-const blank = () => ({ id: `c_${Date.now().toString(36)}`, name: "", pine_ids: [], days: 7, active: true, start_date: "", end_date: "", points: false, note: "" });
+const blank = () => ({ id: `c_${Date.now().toString(36)}`, name: "", pine_ids: [], days: 7, active: true, start_date: "", end_date: "", points: true, note: "" });
 
 export default function TvCampaignsPanel() {
   const [list, setList] = useState(null);
@@ -121,7 +121,7 @@ export default function TvCampaignsPanel() {
           </div>
           <div className="flex flex-wrap gap-4 text-sm text-[var(--ink-2)]">
             <label className="flex items-center gap-2"><input type="checkbox" checked={edit.active} onChange={(e) => setEdit({ ...edit, active: e.target.checked })} /> เปิดกิจกรรม</label>
-            <label className="flex items-center gap-2"><input type="checkbox" checked={edit.points} onChange={(e) => setEdit({ ...edit, points: e.target.checked })} /> แอดมินได้แต้มให้สิทธิ์ (ปกติปิด)</label>
+            <label className="flex items-center gap-2"><input type="checkbox" checked={edit.points} onChange={(e) => setEdit({ ...edit, points: e.target.checked })} /> แอดมินได้แต้มให้สิทธิ์ (ได้แต้มเหมือนให้สิทธิ์ปกติ)</label>
           </div>
           <div className="flex gap-2">
             <button onClick={saveEdit} disabled={saving} className="rounded-lg bg-brand-600 text-white px-4 py-2 text-sm font-medium disabled:opacity-50">{saving ? "กำลังบันทึก..." : "บันทึกกิจกรรม"}</button>
