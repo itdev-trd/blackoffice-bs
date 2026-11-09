@@ -26,7 +26,7 @@ import { beToCe, bangkokDate } from "@/lib/utils/date";
 import { hasFullData } from "@/lib/constants/roles";
 import { COUNTRIES, normalizeCountry } from "@/lib/constants/countries";
 import { logActivity } from "@/lib/utils/activity";
-import { isChatPage, BESIGHT_PAGE_ID, loadChatPageAccess } from "@/lib/constants/chat-pages";
+import { isChatPage, isReadOnlyChatPage, BESIGHT_PAGE_ID, loadChatPageAccess } from "@/lib/constants/chat-pages";
 const IG_OPTION = "besight:instagram";   // ค่าในตัวเลือกเพจของรีพอร์ต — ไม่ใช่ page_id จริง
 import { lsGet, lsSet } from "@/lib/utils/storage";
 import { readFunctionErrorMessage } from "@/lib/utils/errors";
@@ -293,7 +293,9 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
   const [aiBusy, setAiBusy] = useState(false);
   const [ai, setAi] = useState(null);     // { suggestion, evidence, confidence, note } | { error }
   // ฟีเจอร์ TV ในหน้าแชท — เห็นเฉพาะแอดมินจนกว่าจะกดปล่อย (settings.tv_features.released)
-  const [tvOn, setTvOn] = useState(false);
+  const [tvAllowed, setTvOn] = useState(false);
+  // เพจดูอย่างเดียว (เช่น Jr 1Shot) = เก็บข้อมูลลูกค้าอย่างเดียว ไม่มีเพิ่ม/ต่อสิทธิ์ Indicator หรือกิจกรรม
+  const tvOn = tvAllowed && !isReadOnlyChatPage(row?.page_id);
   const [scripts, setScripts] = useState([]);
   // กิจกรรมแจก Indicator (ตั้งที่ ตั้งค่า › กิจกรรมแจก Indicator) — ไม่ต้องมีไอดีเทรด ใส่แค่ user TV
   const [campaigns, setCampaigns] = useState([]);
