@@ -70,6 +70,21 @@ Deno.serve(async (req) => {
       if (c.dataset_id) dsByPage[c.page_id] = String(c.dataset_id);
       if (c.page_name) pageNameById[c.page_id] = c.page_name;
     }
+    // POST /{page}/dataset คืน dataset เดิมถ้ามีอยู่แล้ว (ไม่สร้างซ้ำ) — ลองครั้งเดียวต่อเพจต่อคำขอ
+    const datasetTried = new Set<string>();
+    const ensureDataset = async (pageId: string) => {
+      if (datasetTried.has(pageId)) return;
+      datasetTried.add(pageId);
+      try {
+        const r = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${pageId}/dataset?access_token=${encodeURIComponent(token)}`, { method: "POST" });
+        const j = await r.json().catch(() => ({}));
+        if (!j?.id) { console.warn("ensureDataset", pageId, j?.error?.message); return; }
+        dsByPage[pageId] = String(j.id);
+        await admin.from("page_lead_config").update({ dataset_id: String(j.id), updated_at: new Date().toISOString() }).eq("page_id", pageId);
+      } catch (e) {
+        console.warn("ensureDataset", pageId, e);
+      }
+    };
     if (Object.keys(dsByPage).length === 0 && !fallbackDataset) {
       return new Response(JSON.stringify({
         ok: false, reason: "no_dataset",
@@ -221,6 +236,8 @@ Dataset ที่ลอง: ${first[0]}
         }).eq("id", r.id);
         continue;
       }
+      // เพจที่ยังไม่มี dataset (เช่นเพจที่เพิ่งเปิดดึงแชท) — ขอจาก Meta ให้เองครั้งแรกที่ต้องใช้ ไม่ต้องให้แอดมินไปกดในตั้งค่า
+      if (!dsByPage[r.page_id] && r.page_id && !String(r.page_id).startsWith("line:")) await ensureDataset(String(r.page_id));
       // เลือก dataset ของ "เพจนั้น" (1 เพจ = 1 dataset) ไม่มีก็ใช้ค่ากลางเป็นตัวสำรอง
       const ds = dsByPage[r.page_id] || fallbackDataset;
       if (!ds || badDataset[ds]) {
