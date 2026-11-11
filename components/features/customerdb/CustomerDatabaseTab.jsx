@@ -1219,6 +1219,75 @@ async function downloadSheetXlsx({ pageName, dateLabel, headers, sheetRows, coun
   a.click(); URL.revokeObjectURL(url);
 }
 
+// ชีตสรุปลูกค้าของเพจ 1Shot — โครงเดียวกับชีตที่ทีม 1Shot กรอกอยู่จริง
+// ลำดับ / ช่องทางติดต่อ (ชื่อ) / สถานะ / Broker / เลขบัญชีเทรด / ชำระแล้ว / ช่องทาง Ads / วันที่
+// สถานะ/Broker/ชำระแล้ว เป็น dropdown ให้ทีมแก้ต่อในชีตได้ · หัวชีต = "เดือน ปี พ.ศ."
+const ONESHOT_PAGE_IDS = ["1272538665947061", "290037067533904"];
+const isOneShotPage = (pageId, pageName) => ONESHOT_PAGE_IDS.includes(String(pageId || "")) || /1\s*shot/i.test(String(pageName || ""));
+async function downloadOneShotXlsx({ pageName, title, rows }) {
+  const { default: ExcelJS } = await import("exceljs");
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "Besight";
+  wb.created = new Date();
+  const ws = wb.addWorksheet(title.slice(0, 31), { views: [{ state: "frozen", ySplit: 2, showGridLines: false }] });
+  const headers = ["ลำดับ", "ช่องทางติดต่อ", "สถานะ", "Broker", "เลขบัญชีเทรด", "ชำระแล้ว", "ช่องทาง Ads", "วันที่"];
+  const widths = [9, 30, 18, 12, 18, 14, 30, 13];
+  ws.columns = widths.map((width) => ({ width }));
+  const font = (extra = {}) => ({ name: "Sarabun", size: 11, ...extra });
+  const fill = (argb) => ({ type: "pattern", pattern: "solid", fgColor: { argb } });
+  const center = { horizontal: "center", vertical: "middle" };
+
+  ws.mergeCells(1, 1, 1, headers.length);
+  const t = ws.getCell(1, 1);
+  t.value = title; t.font = font({ size: 12, bold: true, color: { argb: XLSX_WHITE } }); t.fill = fill("0B1530"); t.alignment = center;
+  ws.getRow(1).height = 26;
+  const hr = ws.getRow(2);
+  hr.values = headers; hr.height = 22;
+  hr.eachCell((c) => { c.font = font({ bold: true, color: { argb: XLSX_WHITE } }); c.fill = fill("1F3A6E"); c.alignment = center; c.border = XLSX_THIN; });
+  ws.autoFilter = { from: { row: 2, column: 1 }, to: { row: 2, column: headers.length } };
+
+  const STATUS_STYLE = {
+    "เปิดบัญชีแล้ว": { bg: "2E6B3F", fg: XLSX_WHITE },
+    "สนใจ": { bg: "D9EAD3", fg: "2E6B3F" },
+    "ไม่สนใจ": { bg: XLSX_PALE_RED, fg: XLSX_DARK_RED },
+  };
+  const BROKER_STYLE = { XM: { bg: "F4CCCC", fg: "CC0000" }, Exness: { bg: "FFE599", fg: "7F6000" } };
+  rows.forEach((v, i) => {
+    const row = ws.getRow(3 + i);
+    row.values = v;
+    row.height = 20;
+    for (let col = 1; col <= headers.length; col++) {
+      const c = row.getCell(col);
+      c.font = font({ color: { argb: "1F2937" } });
+      c.alignment = { vertical: "middle", horizontal: col === 2 ? "left" : "center" };
+      c.border = XLSX_THIN;
+    }
+    const st = STATUS_STYLE[v[2]];
+    if (st) { const c = row.getCell(3); c.fill = fill(st.bg); c.font = font({ bold: true, color: { argb: st.fg } }); }
+    const br = BROKER_STYLE[v[3]];
+    if (br) { const c = row.getCell(4); c.fill = fill(br.bg); c.font = font({ color: { argb: br.fg } }); }
+    if (v[5] === "ชำระแล้ว") { const c = row.getCell(6); c.fill = fill("2E6B3F"); c.font = font({ bold: true, color: { argb: XLSX_WHITE } }); }
+  });
+  // dropdown ให้ทีมกรอกต่อ (เผื่อแถวว่างอีก 100 แถวต่อท้าย)
+  const lastRow = 2 + rows.length + 100;
+  for (let r = 3; r <= lastRow; r++) {
+    if (r > 2 + rows.length) {
+      ws.getCell(r, 1).value = r - 2;
+      for (let col = 1; col <= headers.length; col++) { const c = ws.getCell(r, col); c.border = XLSX_THIN; c.font = font(); c.alignment = { vertical: "middle", horizontal: col === 2 ? "left" : "center" }; }
+    }
+    ws.getCell(r, 3).dataValidation = { type: "list", allowBlank: true, formulae: ['"สนใจ,เปิดบัญชีแล้ว,ไม่สนใจ"'] };
+    ws.getCell(r, 4).dataValidation = { type: "list", allowBlank: true, formulae: ['"XM,Exness"'] };
+    ws.getCell(r, 6).dataValidation = { type: "list", allowBlank: true, formulae: ['"ชำระแล้ว,ยังไม่ชำระ"'] };
+  }
+
+  const buffer = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `รายชื่อลูกค้า_${pageName}_${bangkokDate()}.xlsx`;
+  a.click(); URL.revokeObjectURL(url);
+}
+
 export default function CustomerDatabaseTab({ onOpenChat }) {
   const initialViewRef = useRef(getCustomerDatabaseViewCache());
   const initialView = initialViewRef.current;
@@ -1264,7 +1333,7 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
 
   // map ปุ่มเรียง → คอลัมน์จริงใน DB
   const SORT_COL = { customer_name: "customer_name", page_name: "page_name", trade_id: "trade_id", phone: "phone", email: "email", username: "username", psid: "psid", source: "source", messages: "user_message_count", stage: "stage", first_customer_message_at: "first_customer_message_at", last_message_at: "first_customer_message_at", synced_at: "first_customer_message_at" };
-  const EXPORT_DB_COLS = ["customer_name", "page_name", "trade_id", "phone", "email", "username", "address", "psid", "source", "entry_ad_id", "first_customer_message_at", "stage", "stage_manual", "comment_ad_name", "comment_ad_names", "comment_ad_ids", "comment_is_ad", "entry_ad_name", "notes"];
+  const EXPORT_DB_COLS = ["customer_name", "page_name", "trade_id", "phone", "email", "username", "address", "psid", "source", "entry_ad_id", "first_customer_message_at", "stage", "stage_manual", "comment_ad_name", "comment_ad_names", "comment_ad_ids", "comment_is_ad", "entry_ad_name", "notes", "broker", "tags", "manual_data"];
   // สถานะในชีตใช้คำของทีม ไม่ใช่ค่า stage ดิบ — แมปให้ตรงกับที่กรอกมือกันอยู่
   const SHEET_STATUS = {
     account_opened: "เปิดบัญชีแล้ว",
@@ -1620,6 +1689,20 @@ export default function CustomerDatabaseTab({ onOpenChat }) {
         const [ly, lm] = latestKey.split("-").map(Number);
         const dateLabel = `${THAI_MONTHS[lm - 1]} ${ly}`;
 
+        if (isOneShotPage(pageFilter, pageName)) {
+          // ชีตแบบทีม 1Shot — หัวชีตเป็นปี พ.ศ. ตามชีตที่ทีมใช้
+          const hasTag = (r, name) => (r.tags || []).some((x) => String(x).replace(/[^\p{L}\p{M}\p{N}]/gu, "").includes(name));
+          const oneShotRows = all.map((r, i) => {
+            const opened = sheetStatusOf(r) === "เปิดบัญชีแล้ว" || hasTag(r, "เปิดบัญชีแล้ว");
+            const status = opened ? "เปิดบัญชีแล้ว" : sheetStatusOf(r);
+            const broker = r.manual_data ? (r.broker || "XM") : "";   // broker มีค่าเริ่มต้น XM — นับเฉพาะห้องที่แอดมินกรอกข้อมูลแล้ว
+            return [i + 1, r.customer_name || "", status, broker, r.trade_id || "", hasTag(r, "ชำระเงินแล้ว") ? "ชำระแล้ว" : "",
+              adsChannelOf(r), sheetDate(r.first_customer_message_at)];
+          });
+          await downloadOneShotXlsx({ pageName, title: `${THAI_MONTHS[lm - 1]} ${ly + 543}`, rows: oneShotRows });
+          setExportDialogOpen(false);
+          return;
+        }
         await downloadSheetXlsx({ pageName, dateLabel, headers, sheetRows, countries, statusIdx, addIndyIdx, summary, daily, adsBreakdown });
         setExportDialogOpen(false);
         return;
