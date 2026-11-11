@@ -2369,6 +2369,8 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
     );
   };
 
+  // เรียกเป็นฟังก์ชัน {ConversationInsights()} ห้ามใช้เป็น <ConversationInsights /> — ประกาศใหม่ทุก render
+  // React จะมองเป็นคอมโพเนนต์ใหม่แล้ว mount ใหม่ทุกครั้งที่พิมพ์ ช่องโน้ตส่วนตัวเลยหลุดโฟกัสทุกตัวอักษร
   const ConversationInsights = () => !selected ? null : (() => {
   const isLine = selected.source === "line";
   const isComment = selected.source === "comment" || String(selected.id).startsWith("fbc_");
@@ -3583,7 +3585,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
                       {selected.unread
                         ? <button onClick={() => setUnread(false)} className="w-full text-xs border border-emerald-500/40 text-emerald-400 rounded-lg px-2 py-1.5">ทำเป็นอ่านแล้ว</button>
                         : <button onClick={() => setUnread(true)} className="w-full text-xs border border-night-border text-night-ink-2 rounded-lg px-2 py-1.5">ทำเป็นยังไม่อ่าน</button>}
-                      <ConversationInsights />
+                      {ConversationInsights()}
                       {retentionBox}
                       <button onClick={() => blockCustomer(selected.id, !selected.blocked_at)} disabled={blocking}
                         className={`w-full text-xs rounded-lg px-2 py-1.5 font-medium flex items-center justify-center gap-1 disabled:opacity-50 ${selected.blocked_at ? "border border-emerald-500/40 text-emerald-400" : "border border-rose-500/40 text-rose-400"}`}>
@@ -3902,7 +3904,7 @@ export default function ChatInboxTab({ allowedPages = null, alertAllowed = true,
             ) : <div {...formActivityProps} className="chat-panel-work">
             <CustomerDataForm darkMode addressDraft={addressDraft} row={selected} onSaved={(v) => { setSelected((s) => (s ? { ...s, ...v } : s)); setList((l) => (l || []).map((x) => (x.id === selected.id ? { ...x, ...v } : x))); }} />
             {isBeSightPage(selected) && <TradeIdChecker darkMode />}
-            <ConversationInsights />
+            {ConversationInsights()}
             {retentionBox}
             <button onClick={() => blockCustomer(selected.id, !selected.blocked_at)} disabled={blocking}
               className={`w-full rounded-lg px-3 py-2 text-sm font-medium flex items-center justify-center gap-1.5 disabled:opacity-50 ${selected.blocked_at ? "border border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/15" : "border border-rose-500/40 text-rose-400 hover:bg-rose-500/15"}`}>
