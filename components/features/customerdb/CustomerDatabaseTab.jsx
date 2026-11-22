@@ -65,45 +65,64 @@ const LAST_REPORT_KEY = "ui.customerdb.lastReport";
 // (เส้นนั้นมีไว้ตอนถูกวางต่อท้ายพาเนลข้อมูลลูกค้าในหน้าตอบแชท ถ้าติดมาด้วยจะกลายเป็นเส้นลอยไร้ที่มา)
 export function TradeIdChecker({ darkMode = false, standalone = false }) {
   const [tid, setTid] = useState("");
+  const [broker, setBroker] = useState("xm");   // xm | exness
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState(null);
-  async function check() {
+  const isEx = broker === "exness";
+  async function check(force = false) {
     const id = tid.trim();
     if (!id || busy) return;
     setBusy(true); setRes(null);
-    const { data, error } = await supabase.functions.invoke("verify-trade-id", { body: { trade_id: id } });
+    const { data, error } = await supabase.functions.invoke("verify-trade-id", { body: { trade_id: id, ...(isEx ? { broker: "exness" } : {}), ...(force ? { force: true } : {}) } });
     setBusy(false);
     if (error || !data?.ok) { setRes({ error: data?.error || error?.message || "เช็คไม่สำเร็จ — อาจยังไม่ได้ deploy ฟังก์ชัน verify-trade-id" }); return; }
     setRes(data);
-    logActivity("check_trade_id", { trade_id: id, pass: !!data.pass, via: data.via });
+    logActivity("check_trade_id", { trade_id: id, broker, pass: !!data.pass, via: data.via });
   }
+  const exInfo = (r) => [r.account_type, r.country, r.reg_date && `สมัคร ${r.reg_date}`].filter(Boolean).join(" · ");
   return (
     <div className={`${darkMode ? "chat-trade-checker" : ""} ${standalone ? "" : "border-t border-[var(--line)] pt-3 mt-1"} space-y-1.5`}>
-      <label className="text-xs text-[var(--ink-3)] flex items-center gap-1"><CheckCircle2 size={13} /> เช็คไอดีเทรด (XM)</label>
+      <div className="flex items-center justify-between gap-2">
+        <label className="text-xs text-[var(--ink-3)] flex items-center gap-1"><CheckCircle2 size={13} /> เช็คไอดีเทรด ({isEx ? "Exness" : "XM"})</label>
+        <div className="flex rounded-lg border border-[var(--line-strong)] overflow-hidden text-[11px]">
+          {[["xm", "XM"], ["exness", "Exness"]].map(([k, label]) => (
+            <button key={k} type="button" onClick={() => { setBroker(k); setRes(null); }}
+              className={`px-2 py-0.5 font-medium ${broker === k ? "bg-brand-600 text-white" : "text-[var(--ink-3)]"}`}>{label}</button>
+          ))}
+        </div>
+      </div>
       <div className="flex gap-1.5">
         <input
           value={tid}
           onChange={(e) => { setTid(e.target.value); if (res) setRes(null); }}
           onKeyDown={(e) => { if (e.key === "Enter") check(); }}
-          inputMode="numeric" placeholder="วางเลขไอดีเทรด"
+          inputMode="numeric" placeholder={isEx ? "วางเลขบัญชี Exness" : "วางเลขไอดีเทรด"}
           className="flex-1 min-w-0 rounded-lg border border-[var(--line-strong)] px-2 py-1.5 text-sm" />
-        <button onClick={check} disabled={busy || !tid.trim()}
+        <button onClick={() => check()} disabled={busy || !tid.trim()}
           className="shrink-0 bg-brand-600 text-white rounded-lg px-3 py-1.5 text-sm font-medium disabled:opacity-50 flex items-center gap-1.5">
           {busy ? <Loader2 className="animate-spin" size={14} /> : null} เช็ค
         </button>
       </div>
+      {busy && isEx && <div className="text-[11px] text-[var(--ink-3)]">ระบบ Exness ตอบช้า/ล้มบ่อย กำลังลองซ้ำให้อัตโนมัติ...</div>}
       {res && (res.error
         ? <div className="text-xs text-rose-600 bg-rose-50 rounded-lg px-3 py-2">{res.error}</div>
         : res.pass
           ? <div className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
-              <div className="font-semibold flex items-center gap-1"><CheckCircle2 size={14} /> ไอดีผ่าน (เช็คจาก{res.via === "email" ? "อีเมล" : " API"})</div>
-              {res.via === "email" && (res.platform || res.insertdate) && (
+              <div className="font-semibold flex items-center gap-1"><CheckCircle2 size={14} /> {res.broker === "exness" ? "บัญชี Exness อยู่ใต้ BeSight" : `ไอดีผ่าน (เช็คจาก${res.via === "email" ? "อีเมล" : " API"})`}</div>
+              {res.broker === "exness" && (exInfo(res) || res.platform) && <div className="text-[11px] text-emerald-600 mt-0.5">{exInfo(res) || [res.platform, res.insertdate && `สมัคร ${res.insertdate}`].filter(Boolean).join(" · ")}</div>}
+              {res.broker !== "exness" && res.via === "email" && (res.platform || res.insertdate) && (
                 <div className="text-[11px] text-emerald-600 mt-0.5">{[res.platform, res.insertdate].filter(Boolean).join(" · ")}</div>
               )}
             </div>
-          : <div className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 font-medium flex items-center gap-1">
-              <AlertTriangle size={14} /> เช็คทั้งสองช่องทางแล้วไม่ผ่าน
-            </div>
+          : res.upstream_error
+            ? <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                <div className="font-medium flex items-center gap-1"><AlertTriangle size={14} /> ระบบเช็ค{res.broker === "exness" ? " Exness" : ""}ไม่ตอบ — ยังสรุปไม่ได้ว่าผ่านหรือไม่</div>
+                <button type="button" onClick={() => check(true)} className="mt-1 underline text-[11px]">ลองใหม่</button>
+              </div>
+            : <div className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2 font-medium">
+                <div className="flex items-center gap-1"><AlertTriangle size={14} /> {res.broker === "exness" ? "บัญชีนี้ไม่ได้อยู่ใต้ BeSight" : "เช็คทั้งสองช่องทางแล้วไม่ผ่าน"}</div>
+                {res.can_force && <button type="button" onClick={() => check(true)} className="mt-1 underline text-[11px] font-normal">เช็คสดอีกครั้ง (ผลนี้มาจากแคช)</button>}
+              </div>
       )}
     </div>
   );

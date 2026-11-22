@@ -8,6 +8,10 @@ import { authorizeRequest } from "../_shared/permissions.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const API_URL = "https://api.trdapi.com/webhook/verify-trade-id";
+// Exness — n8n ของ BeSight (GET ไม่มี key) · ตอบ 500 "Error in workflow" บ่อยทั้งที่คำขอถูก ต้อง retry
+const EXNESS_URL = "https://ai.besight.net/webhook/verify-exness";
+const EXNESS_TIMEOUT_MS = 30000;
+const EXNESS_TRIES = 5;
 const EMAIL_URL = "https://ai.traderider.com/webhook/verify-xm";
 const BROKER = "xm";
 const TIMEOUT_MS = 12000;
@@ -21,9 +25,9 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const fetchTimeout = (url: string, init: RequestInit = {}) => {
+const fetchTimeout = (url: string, init: RequestInit = {}, ms = TIMEOUT_MS) => {
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+  const t = setTimeout(() => ctrl.abort(), ms);
   return fetch(url, { ...init, signal: ctrl.signal }).finally(() => clearTimeout(t));
 };
 
@@ -44,6 +48,42 @@ Deno.serve(async (req) => {
     // จำเป็นเพราะลูกค้าที่เพิ่งสมัคร/เพิ่งย้ายมาอยู่ใต้ IB เรา จะติดผลเก่าไปอีก 10 นาที
     // แล้วแอดมินจะกดเท่าไหร่ก็เห็นข้อความเดิม เข้าใจผิดว่าระบบพัง
     const force = body?.force === true;
+
+    // ---- Exness: เช็คว่าบัญชีอยู่ใต้ BeSight ไหม (verify = pass/failed) ----
+    // แคชใช้ตารางเดียวกับ XM แต่คีย์ขึ้นต้น "exness:" กันเลขบัญชีชนกันข้ามโบรกเกอร์
+    if (String(body?.broker || "").toLowerCase() === "exness") {
+      if (!/^\d{4,15}$/.test(tradeId)) return json({ ok: false, error: "เลขบัญชี Exness ต้องเป็นตัวเลข" }, 400);
+      const key = `exness:${tradeId}`;
+      try {
+        const { data: c } = await admin().from("trade_id_cache").select("pass, platform, insertdate, checked_at").eq("trade_id", key).maybeSingle();
+        if (c?.pass) return json({ ok: true, pass: true, via: "exness", broker: "exness", trade_id: tradeId, platform: c.platform || null, insertdate: c.insertdate || null, cached: true });
+        if (!force && c && c.pass === false && c.checked_at && Date.now() - new Date(c.checked_at).getTime() < FAIL_TTL_MS) {
+          return json({ ok: true, pass: false, broker: "exness", trade_id: tradeId, cached: true, checked_at: c.checked_at, can_force: true });
+        }
+      } catch { /* cache พลาด = เช็คสด */ }
+      let last = "";
+      for (let attempt = 1; attempt <= EXNESS_TRIES; attempt++) {
+        try {
+          const r = await fetchTimeout(`${EXNESS_URL}?tradeid=${encodeURIComponent(tradeId)}`, {}, EXNESS_TIMEOUT_MS);
+          const j = r.ok ? await r.json().catch(() => null) : null;
+          const verdict = String(j?.verify ?? "").toLowerCase();
+          if (j && (verdict === "pass" || verdict === "failed") && String(j.client_account ?? "") === tradeId) {
+            const pass = verdict === "pass";
+            const info = { country: j.country || null, reg_date: j.reg_date || null, account_type: j.client_account_type || null };
+            await admin().from("trade_id_cache").upsert({
+              trade_id: key, checked_at: new Date().toISOString(), pass, via: pass ? "exness" : null,
+              platform: pass ? [info.account_type, info.country].filter(Boolean).join(" · ") || null : null, insertdate: pass ? info.reg_date : null,
+            }).then(() => {}, () => {});
+            return json({ ok: true, pass, via: "exness", broker: "exness", trade_id: tradeId, ...info });
+          }
+          last = j ? `คำตอบไม่ครบ (${JSON.stringify(j).slice(0, 120)})` : `HTTP ${r.status}`;
+        } catch (e) {
+          last = String(e instanceof Error ? e.message : e);
+        }
+        if (attempt < EXNESS_TRIES) await new Promise((res) => setTimeout(res, 400 * attempt));
+      }
+      return json({ ok: true, pass: false, broker: "exness", trade_id: tradeId, upstream_error: true, note: `Exness: ${last}` });
+    }
 
     // 0) cache — ผล "ผ่าน" เก็บถาวร, ผล "ไม่ผ่าน" ใช้ได้ชั่วคราว (FAIL_TTL_MS)
     try {
