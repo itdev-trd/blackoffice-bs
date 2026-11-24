@@ -96,6 +96,10 @@ export default function LoginScreen() {
           <br />
           Meta App Review testers:{" "}
           <a href="/review-guide" className="underline hover:text-slate-600">English testing guide</a>
+          <br />
+          <a href="/privacy-policy" className="underline hover:text-slate-600">Privacy Policy</a>{" · "}
+          <a href="/terms" className="underline hover:text-slate-600">Terms</a>{" · "}
+          <a href="/data-deletion" className="underline hover:text-slate-600">Data Deletion</a>
         </p>
       </form>
     </div>

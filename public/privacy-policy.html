@@ -47,7 +47,7 @@
   </head>
   <body>
     <h1>นโยบายความเป็นส่วนตัว</h1>
-    <div class="updated">Besight (BeSight) — ปรับปรุงล่าสุด: 5 กันยายน 2569</div>
+    <div class="updated">Besight (BeSight) — ปรับปรุงล่าสุด: 24 พฤศจิกายน 2569</div>
 
     <p>
       Besight เป็นเครื่องมือภายในองค์กร (internal business tool) ที่ทีมแอดมินของบริษัทใช้ตอบข้อความลูกค้า
@@ -95,6 +95,14 @@
       และไม่นำไปใช้เพื่อการตลาดข้ามบริษัทหรือสร้างโปรไฟล์โฆษณาใด ๆ
     </p>
 
+    <h2>ข้อมูลที่ส่งกลับไปยัง Meta</h2>
+    <ul>
+      <li>เมื่อแอดมินเปลี่ยน “ระยะข้อมูลลูกค้า” ของบทสนทนาที่มาจากโฆษณา ระบบจะส่งเหตุการณ์ (เช่น มีคุณสมบัติ / สร้างคอนเวอร์ชั่นแล้ว)
+        ไปยัง Conversions API ของ Meta ผ่าน dataset ของเพจบริษัท เพื่อวัดผลโฆษณาของบริษัทเอง โดยระบุตัวบุคคลด้วย Page-Scoped ID เท่านั้น
+        ไม่ส่งชื่อ อีเมล เบอร์โทร หรือเนื้อหาข้อความ</li>
+      <li>ป้ายกำกับที่แอดมินติดในระบบจะถูกติดเป็นป้ายกำกับ (custom label) ในกล่องข้อความของเพจบน Meta Business Suite ด้วย</li>
+    </ul>
+
     <h2>การจัดเก็บและความปลอดภัย</h2>
     <ul>
       <li>ข้อมูลถูกเก็บในฐานข้อมูล Supabase (PostgreSQL) ที่เปิด Row Level Security และจำกัดสิทธิ์ตามผู้ใช้</li>
@@ -133,7 +141,7 @@
     <hr />
 
     <h1>Privacy Policy (English)</h1>
-    <div class="updated">Besight — last updated: 5 September 2026</div>
+    <div class="updated">Besight — last updated: 24 November 2026</div>
     <div class="en">
       <p>
         Besight is an internal business tool used by our own staff to reply to people who message our
@@ -165,6 +173,14 @@
         <li>To understand which of our campaigns generated the conversation.</li>
       </ul>
       <p><strong>We never sell, rent or share this data with third parties</strong> and we do not use it for cross-company marketing or ad profiling.</p>
+
+      <h2>Data we send back to Meta</h2>
+      <ul>
+        <li>When staff change the lead stage of a conversation that came from one of our ads, an event (e.g. qualified /
+          converted) is sent to Meta’s Conversions API through our own Page’s dataset, to measure our own ads. The person
+          is identified only by the Page-Scoped ID — no name, email, phone number or message content is sent.</li>
+        <li>Labels staff attach in the console are also attached as custom labels in our Page inbox in Meta Business Suite.</li>
+      </ul>
 
       <h2>Storage and security</h2>
       <p>

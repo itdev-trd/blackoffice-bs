@@ -22,3 +22,6 @@ supabase/.temp/
 
 # build ตรวจโค้ด (แยกจาก .next ของ dev server)
 .next-check
+
+# วิดีโอ App Review (Remotion/HyperFrames) — ไม่เข้า repo
+review-video/

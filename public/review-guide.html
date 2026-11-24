@@ -109,6 +109,39 @@
     </ol>
   </div>
 
+  <h2>Permission: pages_manage_metadata (custom labels)</h2>
+  <div class="card">
+    <p><b>Why we need it</b> — staff tag each Messenger conversation with our own labels (for example
+      “account opened”, “new customer”) so the same tags show in the Page inbox in Meta Business Suite.
+      Labels are created and attached through the Page’s <code>custom_labels</code> endpoints. We only
+      label people who messaged our own Page.</p>
+    <p><b>Steps to reproduce</b></p>
+    <ol>
+      <li>Open any Messenger conversation in <span class="th">ตอบแชท</span> (Inbox).</li>
+      <li>In the right-hand panel, find <span class="th">ป้ายกำกับ (ซิงก์กับ Meta)</span>
+        (Labels — synced with Meta).</li>
+      <li>Click a label button, e.g. <span class="th">✅ เปิดบัญชีแล้ว</span> (Account opened). The label is
+        attached to that person in the Page inbox. Click it again to remove it.</li>
+    </ol>
+  </div>
+
+  <h2>Permission: page_events (Conversions API for Business Messaging)</h2>
+  <div class="card">
+    <p><b>Why we need it</b> — when a conversation that came from one of our Click-to-Messenger ads turns into a
+      qualified lead, staff mark its stage. We send that stage to the Page’s dataset as a Conversions API event
+      (<code>action_source: business_messaging</code>, identified only by the Page-scoped ID) so Meta can
+      measure which of our ads produce real leads. No email, phone or other personal data is sent.</p>
+    <p><b>Steps to reproduce</b></p>
+    <ol>
+      <li>Open a Messenger conversation in <span class="th">ตอบแชท</span> (Inbox).</li>
+      <li>In the right-hand panel, under <span class="th">ระยะข้อมูลลูกค้า</span> (Lead stage), click
+        <span class="th">มีคุณสมบัติ</span> (Qualified) or <span class="th">สร้างคอนเวอร์ชั่นแล้ว</span>
+        (Converted).</li>
+      <li>The stage is saved and the event is sent to the Page’s dataset. If sending fails, the reason is shown
+        in red under the buttons.</li>
+    </ol>
+  </div>
+
   <h2>Other things you will see</h2>
   <div class="card">
     <table>
@@ -126,7 +159,7 @@
   <div class="card note">
     <h2 style="margin-top:0">You can complete the whole loop yourself</h2>
     <p>No special setup is needed. From your own Facebook account, send a message to our Page
-      <b>BeSight</b>. Your message arrives in this console within a few seconds. Open it, type a reply,
+      <b>BeSight</b>. Your message usually arrives in this console within a minute (at most about two minutes). Open it, type a reply,
       press <span class="th">ส่ง</span> (Send) — the reply arrives in Messenger on your own device.</p>
     <p>That single loop exercises <code>pages_messaging</code> end to end: the <code>messages</code> webhook
       that delivers your message, the console our staff read it in, and the Send API call that answers it.
