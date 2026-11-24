@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Besight Backend — App Review testing guide</title>
+  <title>App Besight — App Review testing guide</title>
   <!--
     หน้านี้มีไว้ให้ reviewer ของ Meta อ่านตอนตรวจ App Review — จึงเป็นภาษาอังกฤษทั้งหน้า
     และเปิดได้โดยไม่ต้องล็อกอิน (ยกเว้นใน middleware เหมือนหน้านโยบาย)
@@ -36,7 +36,7 @@
 </head>
 <body>
 <div class="wrap">
-  <h1>Besight Backend — testing guide for App Review</h1>
+  <h1>App Besight — testing guide for App Review</h1>
   <p class="sub">Internal customer-messaging tool of Traderider Media Group. This page explains how to test each
     requested permission. The app interface is in Thai, so every button is shown here with its English meaning.</p>
 
@@ -56,8 +56,9 @@
       <tr><th scope="row">Password</th><td><code>BeSight-Review-2026</code></td></tr>
     </table>
     <p>This account is deliberately limited: it can open only <span class="th">ตอบแชท</span> (Inbox) and
-      <span class="th">ฟีด (คอมเมนต์)</span> (Feed), for one Page, and cannot reach settings or any other part
-      of the product. That is the smallest surface that still lets you test every permission we request.</p>
+      <span class="th">ฟีด (คอมเมนต์)</span> (Feed — open it directly at
+      <a href="https://blackoffice-bs.vercel.app/feed">blackoffice-bs.vercel.app/feed</a>), for one Page, and cannot reach
+      settings or any other part of the product. That is the smallest surface that still lets you test every permission we request.</p>
     <p>There is no public sign-up — accounts are created by us for our own employees — so this reviewer
       account is the only way in.</p>
   </div>
@@ -140,6 +141,54 @@
       <li>The stage is saved and the event is sent to the Page’s dataset. If sending fails, the reason is shown
         in red under the buttons.</li>
     </ol>
+  </div>
+
+  <h2>Permissions: pages_read_user_content, pages_manage_engagement</h2>
+  <div class="card">
+    <p><b>Why we need them</b> — customers ask questions in the comments under our own Page posts and ads.
+      <code>pages_read_user_content</code> lets the console list those comments; <code>pages_manage_engagement</code>
+      lets staff publish a reply under the comment as the Page. We only read and reply to comments on our own Page.</p>
+    <p><b>Steps to reproduce</b></p>
+    <ol>
+      <li>Open <a href="https://blackoffice-bs.vercel.app/feed">blackoffice-bs.vercel.app/feed</a>
+        (<span class="th">ฟีด (คอมเมนต์)</span>, Feed / comments).</li>
+      <li>Each card is one comment on our Page. Type in the box inside the card and press
+        <span class="th">ส่ง</span> (Send). The reply is published under that comment on Facebook.</li>
+    </ol>
+  </div>
+
+  <h2>Feature: Human Agent</h2>
+  <div class="card">
+    <p><b>Why we need it</b> — our staff are real people who answer questions that often need checking
+      (for example account opening status). When a customer's last message is older than 24 hours, the console
+      sends the staff member's hand-written reply with the <code>HUMAN_AGENT</code> tag, within 7 days of the
+      customer's last message. Every such message is typed by a person; nothing is automated or promotional.</p>
+    <p><b>Steps to reproduce</b> — open a Messenger conversation whose last customer message is between 24 hours
+      and 7 days old, type a reply and press <span class="th">ส่ง</span> (Send).</p>
+  </div>
+
+  <h2>Permissions: pages_show_list, pages_read_engagement, instagram_basic</h2>
+  <div class="card">
+    <p>Used to list the Page and the linked Instagram professional account our staff manage, and to show the
+      Page and Instagram account name and picture at the top of the Inbox
+      (<span class="th">BeSight</span> selector above the conversation list).</p>
+  </div>
+
+  <h2>Permissions: ads_read, ads_management, business_management</h2>
+  <div class="card">
+    <p><b>Why we need them</b> — the same console is where our marketing staff run our own ad accounts
+      (owned by our business, Traderider Media Group).</p>
+    <ul>
+      <li><code>ads_read</code> — the <span class="th">แคมเปญ</span> (Campaigns) and <span class="th">วิเคราะห์</span>
+        (Analyze) pages show spend, results and cost per message for our campaigns, ad sets and ads, and
+        <span class="th">แอดไหนได้ลูกค้า</span> (Which ad brought customers) joins conversations to the ad they came from.</li>
+      <li><code>ads_management</code> — on the Campaigns page an admin can pause or resume a campaign, ad set or ad
+        with the switch in its row (a confirmation dialog appears first). Nothing changes automatically without
+        an admin confirming it.</li>
+      <li><code>business_management</code> — to list the ad accounts and Pages that belong to our business portfolio.</li>
+    </ul>
+    <p>These screens control real ad spend, so the reviewer account cannot open them. The attached screencasts
+      show each step on our live ad accounts.</p>
   </div>
 
   <h2>Other things you will see</h2>
