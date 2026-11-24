@@ -192,10 +192,12 @@ export function DashboardProvider({ children }) {
   const visibilityReady = officeCfg !== null && lbCfg !== null;
   useEffect(() => {
     if (!visibilityReady) return;
-    if (perm && perm.role !== "denied" && visibleTabs.length && tab && !visibleTabs.some((t) => t.key === tab)) {
+    // หน้า /feed ซ่อนจากเมนูแต่ยังเปิดตรงได้ สำหรับคนที่มีสิทธิ์ "feed" (เช่นบัญชีผู้ตรวจ Meta App Review)
+    const feedDirect = tab === "feed" && (roleTabKeys === null || roleTabKeys.includes("feed"));
+    if (perm && perm.role !== "denied" && visibleTabs.length && tab && !feedDirect && !visibleTabs.some((t) => t.key === tab)) {
       router.replace(ROUTE_PATH[visibleTabs[0].key]);
     }
-  }, [perm, tab, visibleTabs, router, visibilityReady]);
+  }, [perm, tab, visibleTabs, router, visibilityReady, roleTabKeys]);
 
   useEffect(() => {
     if (tab) {
