@@ -332,8 +332,17 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
   };
   const durLabel = (d) => d.mode === "lifetime" ? "ตลอดชีพ" : d.mode === "date" ? `ถึง ${d.expDate ? new Date(`${d.expDate}T00:00:00+07:00`).toLocaleDateString("th-TH", { day: "2-digit", month: "short", year: "2-digit" }) : "—"}` : `${Number(d.days) || 30} วัน`;
   const todayTH = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
-  // เช็คเลขบัญชีได้แค่ XM — Exness ยังไม่มี API เช็คบัญชี จึงข้ามการเช็คแล้วให้สิทธิ์ได้เลย (แอดมินรับผิดชอบความถูกต้องเอง)
-  const checksTradeId = f.broker !== "Exness";
+  // เช็คเลขบัญชีทั้ง XM และ Exness (Exness = เช็คว่าบัญชีอยู่ใต้ BeSight ผ่าน verify-trade-id broker:"exness")
+  const isExness = f.broker === "Exness";
+  // คืน null = ผ่าน · ข้อความ = ไม่ผ่าน/เช็คไม่ได้ (บอกแอดมินตรงๆ ว่าเป็นแบบไหน)
+  // Exness ส่ง force เสมอ — บัญชีเพิ่งเปิดมักยังไม่ขึ้นใต้ BeSight ถ้าใช้ผลไม่ผ่านที่แคชไว้ จะติดอยู่อย่างนั้น
+  async function verifyTradeId(id, verb) {
+    const { data: vt, error: ve } = await supabase.functions.invoke("verify-trade-id", { body: { trade_id: id, ...(isExness ? { broker: "exness", force: true } : {}) } });
+    if (ve || !vt?.ok) return "เช็คไอดีเทรดไม่สำเร็จ: " + (vt?.error || "ลองใหม่");
+    if (vt.pass) return null;
+    if (vt.upstream_error) return `ระบบเช็ค${isExness ? " Exness" : ""}ไม่ตอบ — ยังสรุปไม่ได้ว่าผ่านหรือไม่ ลองกดใหม่อีกครั้ง`;
+    return isExness ? `บัญชี Exness "${id}" ไม่ได้อยู่ใต้ BeSight — ${verb}` : `ไอดีเทรด "${id}" ไม่ผ่าน — ${verb}`;
+  }
   const daysFromDate = (d) => { if (!d) return 0; const t = new Date(`${d}T23:59:59+07:00`).getTime(); return Math.max(1, Math.ceil((t - Date.now()) / 86400000)); };
 
   useEffect(() => {
@@ -378,7 +387,7 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
       if (stop) return;
       const pageId = String(row?.page_id || "");
       const allowed = new Set((br || []).filter((b) => Array.isArray(b.pages) && b.pages.map(String).includes(pageId)).map((b) => b.id));
-      const list = (sc || []).filter((s) => allowed.has(s.brand_id));
+      const list = (sc || []).filter((s) => allowed.has(s.brand_id) && !s.retired);   // retired = เลิกให้สิทธิ์ใหม่
       setScripts(list);
       setCampScripts(sc || []);
       setPineIds((cur) => cur.filter((p) => list.some((s) => s.pine_id === p)));
@@ -513,11 +522,10 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
 
     setTvUpdateBusy(true); setTvUpdateMsg(null);
     // เปลี่ยนไอดีเทรดต้องเช็คผ่านก่อน กันพิมพ์ผิดแล้วไปติดอยู่กับบัญชีที่ไม่มีจริง
-    if (tradeIdChanged && newTradeId && checksTradeId) {
+    if (tradeIdChanged && newTradeId) {
       setTvUpdateMsg({ ok: true, text: "กำลังเช็คไอดีเทรดใหม่..." });
-      const { data: vt, error: ve } = await supabase.functions.invoke("verify-trade-id", { body: { trade_id: newTradeId } });
-      if (ve || !vt?.ok) { setTvUpdateBusy(false); setTvUpdateMsg({ ok: false, text: "เช็คไอดีเทรดไม่สำเร็จ: " + (vt?.error || "ลองใหม่") }); return; }
-      if (!vt.pass) { setTvUpdateBusy(false); setTvUpdateMsg({ ok: false, text: `ไอดีเทรด "${newTradeId}" ไม่ผ่าน — ยังไม่แก้` }); return; }
+      const bad = await verifyTradeId(newTradeId, "ยังไม่แก้");
+      if (bad) { setTvUpdateBusy(false); setTvUpdateMsg({ ok: false, text: bad }); return; }
     }
 
     setTvUpdateMsg({ ok: true, text: usernameChanged ? "กำลังถอนสิทธิ์ user เดิม + ให้สิทธิ์ user ใหม่..." : "กำลังแก้ไอดีเทรด..." });
@@ -577,11 +585,10 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
     const hasExisting = !!(prevTradeId || prevUserTv || String(row?.email || "").trim());
     if (tvOn && hasExisting && !pineIds.length) {
       // ไอดีเทรดเปลี่ยนต้องเช็คผ่านก่อน กันพิมพ์ผิดแล้วไปผูกกับบัญชีที่ไม่มีจริง
-      if (tradeId && tradeId !== prevTradeId && checksTradeId) {
+      if (tradeId && tradeId !== prevTradeId) {
         setMsg({ ok: true, text: "กำลังเช็คไอดีเทรดใหม่..." });
-        const { data: vt, error: ve } = await supabase.functions.invoke("verify-trade-id", { body: { trade_id: tradeId } });
-        if (ve || !vt?.ok) { setBusy(false); setMsg({ ok: false, text: "เช็คไอดีเทรดไม่สำเร็จ: " + (vt?.error || "ลองใหม่") }); return; }
-        if (!vt.pass) { setBusy(false); setMsg({ ok: false, text: `ไอดีเทรด "${tradeId}" ไม่ผ่าน — ยังไม่บันทึก` }); return; }
+        const bad = await verifyTradeId(tradeId, "ยังไม่บันทึก");
+        if (bad) { setBusy(false); setMsg({ ok: false, text: bad }); return; }
       }
       const r = await saveLeadFields();
       setBusy(false);
@@ -600,12 +607,11 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
       if (userTv && !pineIds.length) { setBusy(false); setMsg({ ok: false, text: "เลือก Indicator (สคริปต์) อย่างน้อย 1 อัน" }); return; }
       if (userTv) { for (const pid of pineIds) { const d = getDur(pid); if (d.mode === "date" && (!d.expDate || d.expDate < todayTH)) { setBusy(false); setMsg({ ok: false, text: `เลือกวันหมดอายุของ "${scripts.find((s) => s.pine_id === pid)?.name || pid}" ให้ถูกต้องก่อน` }); return; } } }
 
-      // 1) เช็คไอดีเทรด (XM เท่านั้น) — ไม่ผ่าน = ไม่บันทึกอะไรเลย · Exness ข้ามไปขั้นถัดไปเลย
-      if (checksTradeId) {
-        setMsg({ ok: true, text: "กำลังเช็คไอดีเทรด..." });
-        const { data: vt, error: ve } = await supabase.functions.invoke("verify-trade-id", { body: { trade_id: tradeId } });
-        if (ve || !vt?.ok) { setBusy(false); setMsg({ ok: false, text: "เช็คไอดีเทรดไม่สำเร็จ: " + (vt?.error || "ลองใหม่") }); return; }
-        if (!vt.pass) { setBusy(false); setMsg({ ok: false, text: `ไอดีเทรด "${tradeId}" ไม่ผ่าน — ยังไม่บันทึก` }); return; }
+      // 1) เช็คไอดีเทรด (XM หรือ Exness ตามที่เลือก) — ไม่ผ่าน = ไม่บันทึกอะไรเลย
+      {
+        setMsg({ ok: true, text: isExness ? "กำลังเช็คบัญชี Exness (อาจใช้เวลาสักครู่)..." : "กำลังเช็คไอดีเทรด..." });
+        const bad = await verifyTradeId(tradeId, "ยังไม่บันทึก");
+        if (bad) { setBusy(false); setMsg({ ok: false, text: bad }); return; }
       }
 
       // 2) ไอดีเทรดผ่านแล้ว → บันทึกข้อมูลลูกค้าทันที ก่อนแตะ TradingView
@@ -614,14 +620,14 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
       // ผลคือข้อมูลที่แอดมินอุตส่าห์กรอก/ให้ AI สแกนมา หายทั้งชุด ทั้งที่ไอดีเทรดผ่านแล้ว
       // (เจอจริง: ลูกค้า Patcharachot ไอดี 450137298 กรอกครบแต่ฐานข้อมูลยังว่าง เพราะ n8n ยังไม่ได้ตั้ง)
       // ข้อมูลลูกค้ากับสิทธิ์อินดิเคเตอร์เป็นคนละเรื่องกัน อันหลังล้มไม่ควรลากอันแรกไปด้วย
-      setMsg({ ok: true, text: checksTradeId ? "ไอดีเทรดผ่าน — กำลังบันทึกข้อมูลลูกค้า..." : "Exness (ไม่เช็คเลขบัญชี) — กำลังบันทึกข้อมูลลูกค้า..." });
+      setMsg({ ok: true, text: isExness ? "บัญชี Exness อยู่ใต้ BeSight — กำลังบันทึกข้อมูลลูกค้า..." : "ไอดีเทรดผ่าน — กำลังบันทึกข้อมูลลูกค้า..." });
       const saved = await saveLeadFields();
       if (!saved.ok) { setBusy(false); setMsg({ ok: false, text: "บันทึกข้อมูลลูกค้าไม่สำเร็จ: " + saved.error }); return; }
 
       // ไม่ได้ใส่ user TV = จบแค่บันทึก ไม่ต้องยุ่งกับสิทธิ์อินดิเคเตอร์
       if (!userTv) {
         setBusy(false);
-        setMsg({ ok: true, text: (checksTradeId ? "✓ ไอดีเทรดผ่าน" : "✓ Exness (ไม่เช็คเลขบัญชี)") + " + บันทึกลงฐานข้อมูลแล้ว (ไม่ได้เพิ่ม TV — ไม่ได้ใส่ user TV)" });
+        setMsg({ ok: true, text: (isExness ? "✓ บัญชี Exness ผ่าน" : "✓ ไอดีเทรดผ่าน") + " + บันทึกลงฐานข้อมูลแล้ว (ไม่ได้เพิ่ม TV — ไม่ได้ใส่ user TV)" });
         return;
       }
 
@@ -862,8 +868,7 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
           </select>
         </div>
         <div className="min-w-0">
-          {/* ป้ายกำกับ broker ที่แอดมินเลือกเอง (XM หลัก / Exness รอง) — ไม่ได้เช็คจริงกับฝั่ง broker
-              ระบบเช็คไอดีเทรดตอนนี้ผูกกับ XM เท่านั้น ป้ายนี้ไว้ช่วยคัดกรอง/บันทึกไว้ก่อน */}
+          {/* broker ที่แอดมินเลือก (XM หลัก / Exness รอง) — กำหนดว่าจะเช็คไอดีเทรดกับฝั่งไหน */}
           <label className="text-[11px] text-[var(--ink-3)]">Broker</label>
           <div className="mt-0.5 grid grid-cols-2 gap-1.5">
             {["XM", "Exness"].map((b) => (
@@ -874,7 +879,7 @@ export function CustomerDataForm({ row, onSaved, darkMode = false, compact = fal
             ))}
           </div>
           <div className="mt-1 text-[10.5px] text-[var(--ink-3)]">
-            {f.broker === "Exness" ? "Exness: ยังไม่มีระบบเช็คเลขบัญชี — กดบันทึกแล้วให้สิทธิ์ Indicator ได้เลย ตรวจเลขบัญชีให้ถูกก่อนนะ" : "XM: เช็คเลขบัญชีกับ XM ก่อนบันทึก/ให้สิทธิ์"}
+            {f.broker === "Exness" ? "Exness: เช็คว่าบัญชีอยู่ใต้ BeSight ก่อนบันทึก/ให้สิทธิ์" : "XM: เช็คเลขบัญชีกับ XM ก่อนบันทึก/ให้สิทธิ์"}
           </div>
         </div>
       </div>

@@ -23,7 +23,7 @@ export default function TvCampaignsPanel() {
   async function load() {
     const [{ data: s }, { data: sc }, { data: g }] = await Promise.all([
       supabase.from("settings").select("value").eq("key", CAMPAIGNS_KEY).maybeSingle(),
-      supabase.from("tv_scripts").select("pine_id, name, brand_id").order("created_at"),
+      supabase.from("tv_scripts").select("pine_id, name, brand_id, retired").order("created_at"),
       supabase.from("tv_campaign_grants").select("campaign_id").limit(5000),
     ]);
     setList(Array.isArray(s?.value) ? s.value : []);
@@ -104,7 +104,7 @@ export default function TvCampaignsPanel() {
           <div>
             <label className="text-xs text-[var(--ink-2)]">Indicator ที่แจก</label>
             <div className="mt-1 flex flex-wrap gap-1.5">
-              {scripts.map((s) => {
+              {scripts.filter((s) => !s.retired || edit.pine_ids.includes(s.pine_id)).map((s) => {
                 const on = edit.pine_ids.includes(s.pine_id);
                 return (
                   <button key={s.pine_id} onClick={() => setEdit({ ...edit, pine_ids: on ? edit.pine_ids.filter((p) => p !== s.pine_id) : [...edit.pine_ids, s.pine_id] })}

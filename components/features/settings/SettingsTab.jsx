@@ -1006,7 +1006,8 @@ function TvBackfillPanel({ scripts }) {
   // ค่าเริ่มต้น: สคริปต์ใหม่สุด = เป้าหมาย · ตัวอื่นในแบรนด์เดียวกัน = ต้นทาง
   useEffect(() => {
     if (target || !scripts.length) return;
-    const newest = [...scripts].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
+    const newest = scripts.filter((s) => !s.retired).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
+    if (!newest) return;
     setTarget(newest.pine_id);
     setSources(scripts.filter((s) => s.pine_id !== newest.pine_id && s.brand_id === newest.brand_id).map((s) => s.pine_id));
   }, [scripts]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1103,7 +1104,7 @@ function TvBackfillPanel({ scripts }) {
               <label className="text-[11px] font-medium uppercase tracking-wide text-[var(--ink-3)]">สคริปต์ใหม่ที่จะให้</label>
               <select value={target} onChange={(e) => { setTarget(e.target.value); setSources((s) => s.filter((x) => x !== e.target.value)); }}
                 className="mt-1 w-full rounded-lg border border-[var(--line-strong)] bg-[var(--surface)] px-3 py-2 text-sm font-medium text-[var(--ink)] focus:border-brand-500 focus:outline-none">
-                {scripts.map((s) => <option key={s.pine_id} value={s.pine_id}>{s.name}</option>)}
+                {scripts.filter((s) => !s.retired).map((s) => <option key={s.pine_id} value={s.pine_id}>{s.name}</option>)}
               </select>
             </div>
             <div className="hidden lg:flex items-center justify-center pb-2.5 text-[var(--ink-3)]"><ChevronLeft size={18} /></div>

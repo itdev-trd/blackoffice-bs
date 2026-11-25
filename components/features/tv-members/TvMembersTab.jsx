@@ -792,8 +792,8 @@ export default function TvMembersTab({ active = true, embedded = false, onOpenCh
           <div>
             <label className="text-xs text-slate-500">สคริปต์ (เลือกได้หลายอัน — กำหนดวันหมดอายุแยกแต่ละตัว)</label>
             <div className="mt-1 rounded-lg border border-slate-300 divide-y divide-slate-100 max-h-72 overflow-y-auto">
-              {scripts.filter((s) => s.brand_id === brandSel).length === 0 && <div className="px-3 py-2 text-sm text-slate-400">แบรนด์นี้ยังไม่มีสคริปต์</div>}
-              {scripts.filter((s) => s.brand_id === brandSel).map((s) => {
+              {scripts.filter((s) => s.brand_id === brandSel && !s.retired).length === 0 && <div className="px-3 py-2 text-sm text-slate-400">แบรนด์นี้ยังไม่มีสคริปต์</div>}
+              {scripts.filter((s) => s.brand_id === brandSel && !s.retired).map((s) => {
                 const on = pineIds.includes(s.pine_id);
                 const d = getDur(s.pine_id);
                 return (

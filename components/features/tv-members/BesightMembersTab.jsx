@@ -224,7 +224,7 @@ export default function BesightMembersTab({ active = true }) {
     if (!brandId) { setRows([]); setScripts([]); return; }
     // tv_access ต้องแบ่งหน้าเอง — ทะลุ 1000 แถวแล้วสมาชิกท้าย ๆ จะหายเงียบ ๆ (ตอนนี้ 884 แถว)
     const [{ data: sc }, ac] = await Promise.all([
-      supabase.from("tv_scripts").select("pine_id, name, created_at").eq("brand_id", brandId).order("name"),
+      supabase.from("tv_scripts").select("pine_id, name, created_at, retired").eq("brand_id", brandId).order("name"),
       (async () => {
         const all = [];
         for (let from = 0; ; from += 1000) {
@@ -313,7 +313,7 @@ export default function BesightMembersTab({ active = true }) {
   function openIndi(m) {
     const have = new Set(m.indicators.map((x) => x.pine_id));
     // ค่าเริ่มต้น: สคริปต์ใหม่สุดที่คนนี้ยังไม่มี (ถ้ามีครบทุกตัวแล้ว ใช้ตัวใหม่สุดไว้ตรวจซ้ำ)
-    const byNewest = [...scripts].sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
+    const byNewest = scripts.filter((x) => !x.retired).sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
     const target = (byNewest.find((x) => !have.has(x.pine_id)) || byNewest[0])?.pine_id;
     if (!target) return;
     indiCheck({ member: m, target, choice: "month" });
@@ -511,7 +511,7 @@ export default function BesightMembersTab({ active = true }) {
     // eslint-disable-next-line
   }, [active, brandId, isAdmin, lotCacheReady, lotStale, lotMode, lotCustom.start, lotCustom.end]);
 
-  function openAdd() { setForm({ ...emptyForm, pine_id: scripts[0]?.pine_id || "" }); setFormErr(""); setAddOpen(true); }
+  function openAdd() { setForm({ ...emptyForm, pine_id: scripts.find((s) => !s.retired)?.pine_id || "" }); setFormErr(""); setAddOpen(true); }
 
   async function submitAdd() {
     if (!form.username.trim()) { setFormErr("ต้องมี USER TradingView"); return; }
@@ -809,7 +809,7 @@ export default function BesightMembersTab({ active = true }) {
           <Field label="USER TradingView *"><Input value={form.username} onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))} /></Field>
           <Field label="Indicator *">
             <Select value={form.pine_id} onChange={(e) => setForm((f) => ({ ...f, pine_id: e.target.value }))}>
-              {scripts.map((s) => <option key={s.pine_id} value={s.pine_id}>{s.name}</option>)}
+              {scripts.filter((s) => !s.retired).map((s) => <option key={s.pine_id} value={s.pine_id}>{s.name}</option>)}
             </Select>
           </Field>
           <div className="grid grid-cols-2 gap-3">
@@ -873,7 +873,7 @@ export default function BesightMembersTab({ active = true }) {
             <div className="space-y-4 text-sm">
               <Field label="สคริปต์ที่จะให้">
                 <Select value={indi.target} disabled={indi.busy || !!indi.result} onChange={(e) => indiCheck({ member: indi.member, target: e.target.value, choice: indi.choice })}>
-                  {scripts.map((x) => <option key={x.pine_id} value={x.pine_id}>{x.name}{indi.member.indicators.some((i) => i.pine_id === x.pine_id) ? " (มีในระบบแล้ว)" : ""}</option>)}
+                  {scripts.filter((x) => !x.retired).map((x) => <option key={x.pine_id} value={x.pine_id}>{x.name}{indi.member.indicators.some((i) => i.pine_id === x.pine_id) ? " (มีในระบบแล้ว)" : ""}</option>)}
                 </Select>
               </Field>
               {indi.busy && !p && <div className="flex items-center gap-2 text-slate-500"><Loader2 size={15} className="animate-spin" /> กำลังตรวจกับ TradingView...</div>}
